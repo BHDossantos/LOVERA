@@ -25,9 +25,10 @@ function PlannerInner() {
   const [startAt, setStartAt] = useState<string>("");
   const [consent, setConsent] = useState(false);
 
+  const meId = me?.id;
   // Get-or-create the plan for this conversation (idempotent on the API side), or load an existing plan.
   useEffect(() => {
-    if (!me) return;
+    if (!meId) return;
     let alive = true;
     setError(null);
     const load = planParam ? get<DatePlan>(`/date-plans/${planParam}`) : conversationId ? post<DatePlan>("/date-plans", { conversation_id: conversationId }) : Promise.reject(new ApiError(400, { code: "VALIDATION_ERROR", message: "Open this planner from a conversation." }));
@@ -41,7 +42,7 @@ function PlannerInner() {
     return () => {
       alive = false;
     };
-  }, [me, conversationId, planParam, qc]);
+  }, [meId, conversationId, planParam, qc]);
 
   const overlaps = useQuery({ queryKey: ["date-plan", plan?.id, "overlaps"], queryFn: () => get<OverlapsOut>(`/date-plans/${plan?.id}/overlaps`), enabled: !!plan });
   const concierge = me?.capabilities.entitlements.date_concierge ?? false;

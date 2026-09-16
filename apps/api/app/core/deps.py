@@ -41,7 +41,7 @@ def _bearer(authorization: str | None) -> str | None:
 
 def current_principal(
     request: Request,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
     authorization: str | None = Header(default=None),
 ) -> Principal:
     token = _bearer(authorization)

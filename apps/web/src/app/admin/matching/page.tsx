@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, get, post } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { Button, Card, EmptyState, ErrorState, EvidenceLabel, Modal, Select, Skeleton, StatusBanner, TextInput, cx } from "@/components/ui";
-import { AdminShell, Table, Td } from "@/components/admin/AdminShell";
+import { AdminShell } from "@/components/admin/AdminShell";
 import { formatDateTime } from "@/lib/format";
 import type { Strength } from "@/lib/types";
 
@@ -188,9 +188,6 @@ export default function AdminMatchingPage() {
           </Button>
         </div>
       </Modal>
-      <Table headers={[]} caption="">
-        <></>
-      </Table>
     </AdminShell>
   );
 }

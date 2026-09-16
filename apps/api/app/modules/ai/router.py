@@ -45,7 +45,7 @@ def _require_paid(db: Session, member: Member, capability: str) -> None:
 
 
 @router.post("/{conv_id}/ai-drafts")
-def create_draft(conv_id: str, data: DraftIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def create_draft(conv_id: str, data: DraftIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     conv = get_conversation(db, conv_id, principal.id)
     if conv.status != "active":
         raise ApiError("CONFLICT", "This conversation has ended.")
@@ -88,7 +88,7 @@ def create_draft(conv_id: str, data: DraftIn, principal: Principal = Depends(cur
 
 
 @router.post("/{conv_id}/translations")
-def create_translation(conv_id: str, data: TranslateIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def create_translation(conv_id: str, data: TranslateIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     conv = get_conversation(db, conv_id, principal.id)
     _require_paid(db, principal.member, "translation")
     source_text = data.text

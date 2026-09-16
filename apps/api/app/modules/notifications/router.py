@@ -16,11 +16,11 @@ class ReadIn(BaseModel):
 
 
 @router.get("")
-def list_notifications(principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def list_notifications(principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     items = service.list_for(db, principal.id)
     return {"items": items, "unread": len([i for i in items if not i["read_at"]])}
 
 
 @router.post("/read")
-def read(data: ReadIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def read(data: ReadIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     return {"marked": service.mark_read(db, principal.id, data.ids)}

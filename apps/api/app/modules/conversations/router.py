@@ -39,24 +39,24 @@ class VoiceIn(BaseModel):
 
 
 @router.get("/conversations")
-def list_conversations(principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def list_conversations(principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     return {"items": service.list_for(db, principal.member), "pilot_cap": 3}
 
 
 @router.get("/conversations/{conv_id}")
-def get_conversation(conv_id: str, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def get_conversation(conv_id: str, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     conv = service.get_conversation(db, conv_id, principal.id)
     return service.summary(db, conv, principal.member)
 
 
 @router.get("/conversations/{conv_id}/messages")
-def get_messages(conv_id: str, principal: Principal = Depends(current_principal), db: Session = Depends(get_db), cursor: int | None = Query(default=None), limit: int = Query(default=50, le=100)) -> dict:
+def get_messages(conv_id: str, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function"), cursor: int | None = Query(default=None), limit: int = Query(default=50, le=100)) -> dict:
     conv = service.get_conversation(db, conv_id, principal.id)
     return service.history(db, conv, principal.id, cursor, limit)
 
 
 @router.post("/conversations/{conv_id}/messages", status_code=201)
-def send(conv_id: str, data: MessageIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def send(conv_id: str, data: MessageIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     meta: dict[str, Any] = {}
     if data.draft_id:
         meta["draft_id"] = data.draft_id
@@ -80,24 +80,24 @@ def send(conv_id: str, data: MessageIn, principal: Principal = Depends(current_p
 
 
 @router.post("/conversations/{conv_id}/read", status_code=204)
-def read(conv_id: str, data: ReadIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> None:
+def read(conv_id: str, data: ReadIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> None:
     conv = service.get_conversation(db, conv_id, principal.id)
     service.mark_read(db, conv, principal.id, data.sequence)
 
 
 @router.post("/conversations/{conv_id}/close")
-def close(conv_id: str, data: CloseIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def close(conv_id: str, data: CloseIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     return service.close(db, conv_id, principal.member, data.reason, data.private_note, data.block)
 
 
 @router.post("/conversations/{conv_id}/voice-sessions")
-def voice_session(conv_id: str, data: VoiceIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def voice_session(conv_id: str, data: VoiceIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     service.get_conversation(db, conv_id, principal.id)
     return {"upload": {"method": "POST", "url": f"/v1/conversations/{conv_id}/messages", "note": "Pilot: voice notes are transcribed client-side and sent as type=voice text; audio upload arrives with the media service."}, "max_seconds": 60}
 
 
 @router.post("/conversations/{conv_id}/video-tokens")
-def video_token(conv_id: str, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def video_token(conv_id: str, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     service.get_conversation(db, conv_id, principal.id)
     return {"status": "not_available_in_pilot", "message": "Short video calls arrive after the pilot. Voice notes and a public first date are available now.", "guidance": ["No beauty filters by default.", "Declining a call is never treated as suspicious.", "Recording without consent violates the community agreement."]}
 

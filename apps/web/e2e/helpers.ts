@@ -1,6 +1,14 @@
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
 
+import { execSync } from "node:child_process";
+
 export const API = process.env.E2E_API_URL ?? "http://127.0.0.1:8000/v1";
+/** psql connection arguments for the few test-only data shortcuts (no such endpoints exist in the API). */
+const PSQL = process.env.E2E_PSQL_ARGS ?? "-h /tmp -p 5433 -U postgres -d matchmaker";
+
+export function sql(statement: string) {
+  execSync(`psql ${PSQL} -v ON_ERROR_STOP=1 -c "${statement.replace(/"/g, '\\"')}"`, { stdio: "ignore" });
+}
 
 export type Actor = { email: string; token: string; id: string };
 

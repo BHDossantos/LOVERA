@@ -22,7 +22,7 @@ router = APIRouter(prefix="/today", tags=["today"])
 
 
 @router.get("")
-def today(principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def today(principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     m = principal.member
     expire_due(db)
     tasks: list[dict[str, Any]] = []

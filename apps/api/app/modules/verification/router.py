@@ -28,24 +28,24 @@ class SandboxCompleteIn(BaseModel):
 
 
 @router.post("/verification/sessions")
-def create_session(principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def create_session(principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     if principal.member.birth_date is None:
         raise ApiError("ONBOARDING_INCOMPLETE", "Confirm adult eligibility first.", extra={"onboarding_step": "account"})
     return service.start_session(db, principal.member)
 
 
 @router.get("/verification/status")
-def status(principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def status(principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     return service.status_payload(db, principal.id)
 
 
 @router.post("/verification/review-request")
-def review_request(data: ReviewIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def review_request(data: ReviewIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     return service.request_manual_review(db, principal.member, data.note)
 
 
 @router.post("/verification/sandbox/complete")
-def sandbox_complete(data: SandboxCompleteIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def sandbox_complete(data: SandboxCompleteIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     """Sandbox vendor: simulates the hosted capture flow finishing, then delivers a signed webhook to ourselves."""
     settings = get_settings()
     if settings.is_production or settings.identity_provider != "sandbox":
@@ -59,7 +59,7 @@ def sandbox_complete(data: SandboxCompleteIn, principal: Principal = Depends(cur
 
 
 @router.post("/webhooks/verification")
-async def verification_webhook(request: Request, db: Session = Depends(get_db), x_vendor_timestamp: str = Header(default=""), x_vendor_signature: str = Header(default="")) -> dict:
+async def verification_webhook(request: Request, db: Session = Depends(get_db, scope="function"), x_vendor_timestamp: str = Header(default=""), x_vendor_signature: str = Header(default="")) -> dict:
     body = await request.body()
     return service.handle_webhook(db, body, x_vendor_timestamp, x_vendor_signature)
 

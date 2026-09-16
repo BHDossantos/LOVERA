@@ -75,4 +75,5 @@ jobs:
           MM_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/matchmaker
       - run: cd apps/web && npx playwright test
         env:
-          MM_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/matchmaker
+          E2E_PSQL_ARGS: -h localhost -p 5432 -U postgres -d matchmaker
+          PGPASSWORD: postgres

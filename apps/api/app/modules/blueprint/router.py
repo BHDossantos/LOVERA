@@ -56,7 +56,7 @@ def _session(db: Session, principal: Principal, session_id: str) -> BlueprintSes
 
 
 @router.post("/blueprint/sessions")
-def start_session(data: SessionStartIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def start_session(data: SessionStartIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     if data.mode == "refresh":
         from app.modules.billing.service import entitlements_for
 
@@ -67,40 +67,40 @@ def start_session(data: SessionStartIn, principal: Principal = Depends(current_p
 
 
 @router.get("/blueprint/sessions/{session_id}")
-def get_session(session_id: str, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def get_session(session_id: str, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     return service.session_payload(db, _session(db, principal, session_id), principal.member)
 
 
 @router.post("/blueprint/sessions/{session_id}/answers")
-def answer(session_id: str, data: AnswerIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def answer(session_id: str, data: AnswerIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     session = _session(db, principal, session_id)
     return service.answer(db, principal.member, session, data.question_key, data.choice, data.text, data.tier, data.partner_values, data.range, data.skip, data.input_mode)
 
 
 @router.post("/blueprint/sessions/{session_id}/finish")
-def finish(session_id: str, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def finish(session_id: str, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     return service.finish_interview(db, principal.member, _session(db, principal, session_id))
 
 
 @router.get("/blueprint/sessions/{session_id}/review")
-def review(session_id: str, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def review(session_id: str, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     return service.review_payload(db, principal.member, _session(db, principal, session_id))
 
 
 @router.post("/blueprint/confirm")
-def confirm(data: ConfirmIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def confirm(data: ConfirmIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     session = _session(db, principal, data.session_id)
     version = service.confirm(db, principal.member, session, data.signal_edits, data.preference_edits, data.removed_signal_keys)
     return {"version_id": version.id, "version_no": version.version_no, "blueprint": service.current_payload(db, principal.member), "onboarding_step": principal.member.onboarding_step}
 
 
 @router.get("/blueprint/current")
-def current(principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def current(principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     return service.current_payload(db, principal.member)
 
 
 @router.post("/blueprint/signals/{key}")
-def correct_signal(key: str, data: PreferenceIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def correct_signal(key: str, data: PreferenceIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     """Member correction of a confirmed signal. Creates a new confirmed version (matching recalculates after save)."""
     from sqlalchemy import select
 
@@ -133,12 +133,12 @@ def correct_signal(key: str, data: PreferenceIn, principal: Principal = Depends(
 
 
 @router.get("/preferences")
-def list_preferences(principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def list_preferences(principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     return service.preferences_payload(db, principal.member)
 
 
 @router.patch("/preferences/{key}")
-def patch_preference(key: str, data: PreferenceIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def patch_preference(key: str, data: PreferenceIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     from app.core.audit import audit
 
     service.upsert_preference(db, principal.member, key, data.tier, data.value)
@@ -147,7 +147,7 @@ def patch_preference(key: str, data: PreferenceIn, principal: Principal = Depend
 
 
 @router.delete("/preferences/{key}", status_code=204)
-def delete_preference(key: str, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> None:
+def delete_preference(key: str, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> None:
     from sqlalchemy import select
 
     if key in ("age_range", "distance_km", "children", "relationship_structure"):
@@ -158,7 +158,7 @@ def delete_preference(key: str, principal: Principal = Depends(current_principal
 
 
 @router.post("/preferences/impact-preview")
-def impact(data: ImpactIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def impact(data: ImpactIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     if data.key not in service.PREFERENCES:
         raise ApiError("VALIDATION_ERROR", "Unknown preference.")
     return service.impact_preview(db, principal.member, data.key, data.tier, data.value)

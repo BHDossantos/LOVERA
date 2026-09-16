@@ -73,19 +73,19 @@ def _name(db: Session, member_id: str | None) -> str:
 
 # ---- Concierge matching -------------------------------------------------
 @router.get("/matching/runs")
-def list_runs(principal: Principal = Depends(require_roles("concierge", "admin")), db: Session = Depends(get_db)) -> dict:
+def list_runs(principal: Principal = Depends(require_roles("concierge", "admin")), db: Session = Depends(get_db, scope="function")) -> dict:
     rows = db.execute(select(MatchRun).order_by(MatchRun.started_at.desc()).limit(20)).scalars().all()
     return {"items": [matching.run_payload(r) for r in rows]}
 
 
 @router.post("/matching/runs", status_code=201)
-def create_run(data: RunIn, principal: Principal = Depends(require_roles("concierge", "admin")), db: Session = Depends(get_db)) -> dict:
+def create_run(data: RunIn, principal: Principal = Depends(require_roles("concierge", "admin")), db: Session = Depends(get_db, scope="function")) -> dict:
     run = matching.run_batch(db, data.market_id, triggered_by=principal.id, auto_publish=data.auto_publish)
     return matching.run_payload(run)
 
 
 @router.get("/matching/runs/{run_id}/pairs")
-def run_pairs(run_id: str, principal: Principal = Depends(require_roles("concierge", "admin")), db: Session = Depends(get_db)) -> dict:
+def run_pairs(run_id: str, principal: Principal = Depends(require_roles("concierge", "admin")), db: Session = Depends(get_db, scope="function")) -> dict:
     run = db.get(MatchRun, run_id)
     if run is None:
         raise ApiError("NOT_FOUND")
@@ -100,7 +100,7 @@ def run_pairs(run_id: str, principal: Principal = Depends(require_roles("concier
 
 
 @router.post("/matching/pairs/{pair_id}/review")
-def review_pair(pair_id: str, data: PairReviewIn, principal: Principal = Depends(require_roles("concierge", "admin")), db: Session = Depends(get_db)) -> dict:
+def review_pair(pair_id: str, data: PairReviewIn, principal: Principal = Depends(require_roles("concierge", "admin")), db: Session = Depends(get_db, scope="function")) -> dict:
     pair = db.get(CandidatePair, pair_id)
     if pair is None:
         raise ApiError("NOT_FOUND")
@@ -112,7 +112,7 @@ def review_pair(pair_id: str, data: PairReviewIn, principal: Principal = Depends
 
 
 @router.post("/matching/runs/{run_id}/publish")
-def publish_run(run_id: str, principal: Principal = Depends(require_roles("concierge", "admin")), db: Session = Depends(get_db)) -> dict:
+def publish_run(run_id: str, principal: Principal = Depends(require_roles("concierge", "admin")), db: Session = Depends(get_db, scope="function")) -> dict:
     run = db.get(MatchRun, run_id)
     if run is None:
         raise ApiError("NOT_FOUND")
@@ -123,7 +123,7 @@ def publish_run(run_id: str, principal: Principal = Depends(require_roles("conci
 
 
 @router.get("/marketplace")
-def marketplace(principal: Principal = Depends(require_roles("concierge", "admin", "support")), db: Session = Depends(get_db)) -> dict:
+def marketplace(principal: Principal = Depends(require_roles("concierge", "admin", "support")), db: Session = Depends(get_db, scope="function")) -> dict:
     members = db.execute(select(Member).where(Member.status.in_(("active", "paused", "onboarding", "pending_verification", "restricted")))).scalars().all()
     by_status: dict[str, int] = {}
     by_gender: dict[str, int] = {}
@@ -158,13 +158,13 @@ def _balance_warning(by_gender: dict[str, int]) -> str | None:
 
 # ---- Verification review --------------------------------------------------
 @router.get("/verification/queue")
-def verification_queue(principal: Principal = Depends(require_roles("safety_reviewer", "admin")), db: Session = Depends(get_db)) -> dict:
+def verification_queue(principal: Principal = Depends(require_roles("safety_reviewer", "admin")), db: Session = Depends(get_db, scope="function")) -> dict:
     rows = db.execute(select(Verification).where(Verification.status.in_(("review_required", "failed"))).order_by(Verification.created_at)).scalars().all()
     return {"items": [{"id": v.id, "member_name": _name(db, v.member_id), "status": v.status, "failure_reason_code": v.failure_reason_code, "review_note": v.review_note, "created_at": iso(v.created_at)} for v in rows]}
 
 
 @router.post("/verification/{verification_id}/review")
-def verification_review(verification_id: str, data: VerificationReviewIn, principal: Principal = Depends(require_roles("safety_reviewer", "admin")), db: Session = Depends(get_db)) -> dict:
+def verification_review(verification_id: str, data: VerificationReviewIn, principal: Principal = Depends(require_roles("safety_reviewer", "admin")), db: Session = Depends(get_db, scope="function")) -> dict:
     from app.modules.verification.service import apply_result
 
     v = db.get(Verification, verification_id)
@@ -182,7 +182,7 @@ def verification_review(verification_id: str, data: VerificationReviewIn, princi
 
 # ---- Safety cases ---------------------------------------------------------
 @router.get("/safety/cases")
-def safety_cases(principal: Principal = Depends(require_roles("safety_reviewer", "admin")), db: Session = Depends(get_db), status: str | None = Query(default=None)) -> dict:
+def safety_cases(principal: Principal = Depends(require_roles("safety_reviewer", "admin")), db: Session = Depends(get_db, scope="function"), status: str | None = Query(default=None)) -> dict:
     q = select(SafetyReport).order_by(SafetyReport.severity, SafetyReport.submitted_at)
     if status:
         q = q.where(SafetyReport.status == status)
@@ -193,7 +193,7 @@ def safety_cases(principal: Principal = Depends(require_roles("safety_reviewer",
 
 
 @router.get("/safety/cases/{report_id}")
-def safety_case(report_id: str, principal: Principal = Depends(require_roles("safety_reviewer", "admin")), db: Session = Depends(get_db), purpose: str = Query(min_length=3)) -> dict:
+def safety_case(report_id: str, principal: Principal = Depends(require_roles("safety_reviewer", "admin")), db: Session = Depends(get_db, scope="function"), purpose: str = Query(min_length=3)) -> dict:
     r = db.get(SafetyReport, report_id)
     if r is None:
         raise ApiError("NOT_FOUND")
@@ -212,7 +212,7 @@ def safety_case(report_id: str, principal: Principal = Depends(require_roles("sa
 
 
 @router.post("/safety/cases/{report_id}")
-def update_case(report_id: str, data: CaseUpdateIn, principal: Principal = Depends(require_roles("safety_reviewer", "admin")), db: Session = Depends(get_db)) -> dict:
+def update_case(report_id: str, data: CaseUpdateIn, principal: Principal = Depends(require_roles("safety_reviewer", "admin")), db: Session = Depends(get_db, scope="function")) -> dict:
     r = db.get(SafetyReport, report_id)
     if r is None:
         raise ApiError("NOT_FOUND")
@@ -235,7 +235,7 @@ def update_case(report_id: str, data: CaseUpdateIn, principal: Principal = Depen
 
 
 @router.post("/safety/cases/{report_id}/actions", status_code=201)
-def create_action(report_id: str, data: ActionIn, principal: Principal = Depends(require_roles("safety_reviewer", "admin")), db: Session = Depends(get_db)) -> dict:
+def create_action(report_id: str, data: ActionIn, principal: Principal = Depends(require_roles("safety_reviewer", "admin")), db: Session = Depends(get_db, scope="function")) -> dict:
     from datetime import timedelta
 
     r = db.get(SafetyReport, report_id)
@@ -269,7 +269,7 @@ def create_action(report_id: str, data: ActionIn, principal: Principal = Depends
 
 
 @router.get("/safety/appeals")
-def appeals(principal: Principal = Depends(require_roles("safety_reviewer", "admin")), db: Session = Depends(get_db)) -> dict:
+def appeals(principal: Principal = Depends(require_roles("safety_reviewer", "admin")), db: Session = Depends(get_db, scope="function")) -> dict:
     rows = db.execute(select(Appeal).where(Appeal.status != "decided").order_by(Appeal.created_at)).scalars().all()
     out = []
     for a in rows:
@@ -279,7 +279,7 @@ def appeals(principal: Principal = Depends(require_roles("safety_reviewer", "adm
 
 
 @router.get("/safety/appeals/{appeal_id}")
-def appeal_detail(appeal_id: str, principal: Principal = Depends(require_roles("safety_reviewer", "admin")), db: Session = Depends(get_db), purpose: str = Query(min_length=3)) -> dict:
+def appeal_detail(appeal_id: str, principal: Principal = Depends(require_roles("safety_reviewer", "admin")), db: Session = Depends(get_db, scope="function"), purpose: str = Query(min_length=3)) -> dict:
     a = db.get(Appeal, appeal_id)
     if a is None:
         raise ApiError("NOT_FOUND")
@@ -289,7 +289,7 @@ def appeal_detail(appeal_id: str, principal: Principal = Depends(require_roles("
 
 
 @router.post("/safety/appeals/{appeal_id}/decide")
-def decide_appeal(appeal_id: str, data: AppealDecisionIn, principal: Principal = Depends(require_roles("safety_reviewer", "admin")), db: Session = Depends(get_db)) -> dict:
+def decide_appeal(appeal_id: str, data: AppealDecisionIn, principal: Principal = Depends(require_roles("safety_reviewer", "admin")), db: Session = Depends(get_db, scope="function")) -> dict:
     a = db.get(Appeal, appeal_id)
     if a is None:
         raise ApiError("NOT_FOUND")
@@ -312,7 +312,7 @@ def decide_appeal(appeal_id: str, data: AppealDecisionIn, principal: Principal =
 
 # ---- Support and audit ----------------------------------------------------
 @router.get("/members")
-def members(principal: Principal = Depends(require_roles("support", "concierge", "safety_reviewer", "admin")), db: Session = Depends(get_db), q: str | None = None) -> dict:
+def members(principal: Principal = Depends(require_roles("support", "concierge", "safety_reviewer", "admin")), db: Session = Depends(get_db, scope="function"), q: str | None = None) -> dict:
     query = select(Member).order_by(Member.created_at.desc()).limit(50)
     if q:
         query = query.where(Member.email.ilike(f"%{q}%"))
@@ -321,7 +321,7 @@ def members(principal: Principal = Depends(require_roles("support", "concierge",
 
 
 @router.get("/audit")
-def audit_log(principal: Principal = Depends(require_roles("admin")), db: Session = Depends(get_db), resource_type: str | None = None) -> dict:
+def audit_log(principal: Principal = Depends(require_roles("admin")), db: Session = Depends(get_db, scope="function"), resource_type: str | None = None) -> dict:
     q = select(AuditEvent).order_by(AuditEvent.occurred_at.desc()).limit(100)
     if resource_type:
         q = q.where(AuditEvent.resource_type == resource_type)
@@ -330,6 +330,6 @@ def audit_log(principal: Principal = Depends(require_roles("admin")), db: Sessio
 
 
 @router.get("/analytics/events")
-def analytics_events(principal: Principal = Depends(require_roles("admin", "concierge")), db: Session = Depends(get_db)) -> dict:
+def analytics_events(principal: Principal = Depends(require_roles("admin", "concierge")), db: Session = Depends(get_db, scope="function")) -> dict:
     rows = db.execute(select(AnalyticsEvent.event, func.count(AnalyticsEvent.id)).group_by(AnalyticsEvent.event)).all()
     return {"counts": {k: v for k, v in rows}}

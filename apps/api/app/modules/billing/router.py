@@ -36,22 +36,22 @@ def plans() -> dict:
 
 
 @router.post("/subscriptions/checkout")
-def checkout(data: CheckoutIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db), idempotency_key: str | None = Header(default=None)) -> dict:
+def checkout(data: CheckoutIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function"), idempotency_key: str | None = Header(default=None)) -> dict:
     return service.create_checkout(db, principal.member, data.plan, idempotency_key)
 
 
 @router.get("/subscriptions/current")
-def current(principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def current(principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     return {"entitlements": service.entitlements_for(db, principal.member), "ledger": service.ledger(db, principal.id)}
 
 
 @router.post("/subscriptions/cancel")
-def cancel(data: CancelIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def cancel(data: CancelIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     return {"entitlements": service.cancel(db, principal.member, data.reason)}
 
 
 @router.post("/subscriptions/sandbox/pay")
-def sandbox_pay(data: SandboxPayIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def sandbox_pay(data: SandboxPayIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     settings = get_settings()
     if settings.is_production or settings.payments_provider != "sandbox":
         raise ApiError("NOT_FOUND")
@@ -63,6 +63,6 @@ def sandbox_pay(data: SandboxPayIn, principal: Principal = Depends(current_princ
 
 
 @router.post("/webhooks/payments")
-async def payments_webhook(request: Request, db: Session = Depends(get_db), x_vendor_timestamp: str = Header(default=""), x_vendor_signature: str = Header(default="")) -> dict:
+async def payments_webhook(request: Request, db: Session = Depends(get_db, scope="function"), x_vendor_timestamp: str = Header(default=""), x_vendor_signature: str = Header(default="")) -> dict:
     body = await request.body()
     return service.handle_payment_webhook(db, body, x_vendor_timestamp, x_vendor_signature)

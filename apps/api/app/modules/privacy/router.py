@@ -57,7 +57,7 @@ def build_export(db: Session, member_id: str) -> dict[str, Any]:
 
 
 @router.get("/privacy")
-def privacy_overview(principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def privacy_overview(principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     from app.modules.account.service import current_consents
 
     requests = db.execute(select(PrivacyRequest).where(PrivacyRequest.member_id == principal.id).order_by(PrivacyRequest.requested_at.desc()).limit(10)).scalars().all()
@@ -73,7 +73,7 @@ def privacy_overview(principal: Principal = Depends(current_principal), db: Sess
 
 
 @router.post("/export", status_code=202)
-def export(principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def export(principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     req = PrivacyRequest(member_id=principal.id, type="export", status="ready", expires_at=utcnow() + timedelta(days=7), completed_at=utcnow())
     db.add(req)
     db.flush()
@@ -83,7 +83,7 @@ def export(principal: Principal = Depends(current_principal), db: Session = Depe
 
 
 @router.get("/export/{request_id}")
-def download_export(request_id: str, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def download_export(request_id: str, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     req = db.get(PrivacyRequest, request_id)
     if req is None or req.member_id != principal.id or req.type != "export":
         raise ApiError("NOT_FOUND")

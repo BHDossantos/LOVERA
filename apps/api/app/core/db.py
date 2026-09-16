@@ -27,6 +27,9 @@ def session_factory() -> sessionmaker[Session]:
 
 
 def get_db() -> Iterator[Session]:
+    """Request-scoped session. Routers depend on it with scope="function" so the commit
+    happens before the response is sent; a client's immediate follow-up request then
+    always reads committed state."""
     db = session_factory()()
     try:
         yield db

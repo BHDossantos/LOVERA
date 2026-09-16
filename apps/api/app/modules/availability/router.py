@@ -43,12 +43,12 @@ def payload(v: AvailabilityVersion | None, date_ready: bool) -> dict:
 
 
 @router.get("/availability")
-def get_availability(principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def get_availability(principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     return payload(current(db, principal.id), principal.member.date_ready)
 
 
 @router.put("/availability")
-def put_availability(data: AvailabilityIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def put_availability(data: AvailabilityIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     if not data.recurring_windows:
         raise ApiError("VALIDATION_ERROR", "Add at least one window when you could meet.", field_errors={"recurring_windows": "required"})
     for w in data.recurring_windows:

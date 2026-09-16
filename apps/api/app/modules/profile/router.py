@@ -42,12 +42,12 @@ class MediaComplete(BaseModel):
 
 
 @router.get("/profile")
-def get_profile(principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def get_profile(principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     return service.own_profile_payload(db, principal.member)
 
 
 @router.patch("/profile")
-def patch_profile(data: ProfilePatch, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def patch_profile(data: ProfilePatch, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     service.update_profile(db, principal.member, data.model_dump(exclude_unset=True))
     from app.modules.account.service import advance_onboarding
 
@@ -56,13 +56,13 @@ def patch_profile(data: ProfilePatch, principal: Principal = Depends(current_pri
 
 
 @router.post("/profile/media", status_code=201)
-def create_media(data: MediaCreate, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def create_media(data: MediaCreate, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     media = service.create_media(db, principal.member, data.type, data.content_type, data.size_bytes, data.checksum, data.alt_text)
     return {"media": service.media_payload(media), "upload": {"method": "POST", "url": f"/v1/profile/media/{media.id}/complete", "note": "Sandbox upload: post the data URL to the complete endpoint."}}
 
 
 @router.post("/profile/media/{media_id}/complete")
-def complete_media(media_id: str, data: MediaComplete, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def complete_media(media_id: str, data: MediaComplete, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     media = service.complete_media(db, principal.member, media_id, data.checksum, data.data_url)
     from app.modules.account.service import advance_onboarding
 
@@ -71,12 +71,12 @@ def complete_media(media_id: str, data: MediaComplete, principal: Principal = De
 
 
 @router.delete("/profile/media/{media_id}", status_code=204)
-def delete_media(media_id: str, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> None:
+def delete_media(media_id: str, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> None:
     service.delete_media(db, principal.member, media_id)
 
 
 @router.get("/media/{media_id}")
-def get_media(media_id: str, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> Response:
+def get_media(media_id: str, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> Response:
     """Media is served only to the owner or to a member with an active introduction or conversation with the owner."""
     media = db.get(ProfileMedia, media_id)
     if media is None or media.deleted_at is not None or media.upload_state != "complete":

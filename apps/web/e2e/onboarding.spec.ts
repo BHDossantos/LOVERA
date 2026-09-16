@@ -34,20 +34,24 @@ export async function completeOnboarding(page: Page, opts: { name: string; gende
       await review.click();
       break;
     }
+    const heading = page.getByRole("heading", { level: 1 });
+    const before = await heading.textContent();
     const skip = page.getByRole("button", { name: "Skip this question" });
     if (await skip.isVisible().catch(() => false)) {
       await skip.click();
-      await page.waitForLoadState("networkidle");
-      continue;
+    } else {
+      const radios = page.getByRole("radio");
+      if ((await radios.count()) > 0) await radios.first().click();
+      const partnerChips = page.locator("button[aria-pressed]");
+      if ((await partnerChips.count()) > 0) await partnerChips.first().click();
+      const submit = page.getByRole("button", { name: /Save and continue|That's me/ });
+      await expect(submit).toBeEnabled();
+      await submit.click();
     }
-    const radios = page.getByRole("radio");
-    if ((await radios.count()) > 0) await radios.first().click();
-    const partnerChips = page.locator("button[aria-pressed]");
-    if ((await partnerChips.count()) > 0) await partnerChips.first().click();
-    const submit = page.getByRole("button", { name: /Save and continue|That's me/ });
-    await expect(submit).toBeEnabled();
-    await submit.click();
-    await page.waitForLoadState("networkidle");
+    // Wait for the next question to be committed (or the review page) before interacting again.
+    await expect
+      .poll(async () => (page.url().includes("/blueprint/review") ? "review" : await heading.textContent()), { timeout: 15_000 })
+      .not.toBe(before);
   }
   await expect(page).toHaveURL(/blueprint\/review/, { timeout: 20_000 });
   await expect(page.getByRole("heading", { name: /Here's what we understood/ })).toBeVisible();

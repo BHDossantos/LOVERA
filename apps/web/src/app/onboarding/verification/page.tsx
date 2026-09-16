@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError, get, post } from "@/lib/api";
@@ -14,7 +14,7 @@ type Session = { session: { provider_ref: string; hosted_url: string } | null; s
 /** O03 Identity verification: why, what is collected, retention, alternate review path. */
 export default function Verification() {
   useRequireMember({ allowOnboarding: true });
-  const { refresh, me } = useAuth();
+  const { refresh } = useAuth();
   const router = useRouter();
   const status = useQuery({ queryKey: ["verification"], queryFn: () => get<Status>("/verification/status"), staleTime: 0, refetchOnMount: "always", refetchInterval: (q) => (q.state.data?.status === "in_progress" ? 3000 : false) });
   const [session, setSession] = useState<Session | null>(null);
@@ -22,11 +22,14 @@ export default function Verification() {
   const [error, setError] = useState<ApiError | null>(null);
   const [note, setNote] = useState("");
 
+  const redirected = useRef(false);
+  const verified = status.data?.status === "verified";
   useEffect(() => {
-    if (status.data?.status === "verified" && me) {
+    if (verified && !redirected.current) {
+      redirected.current = true;
       refresh().then((m) => m && router.replace(nextOnboardingPath(m)));
     }
-  }, [status.data?.status, me, refresh, router]);
+  }, [verified, refresh, router]);
 
   const start = async () => {
     setBusy(true);

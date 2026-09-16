@@ -45,40 +45,40 @@ class CaseNoteIn(BaseModel):
 
 
 @router.get("/safety")
-def center(principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def center(principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     return service.safety_center(db, principal.member)
 
 
 @router.get("/blocks")
-def blocks(principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def blocks(principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     return {"items": service.list_blocks(db, principal.id)}
 
 
 @router.post("/blocks", status_code=201)
-def block(data: BlockIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def block(data: BlockIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     b = service.create_block(db, principal.member, data.member_id)
     return {"blocked_member_id": b.blocked_id, "applied": True, "note": "Blocking is silent. The other member is not told who blocked them."}
 
 
 @router.delete("/blocks/{member_id}", status_code=204)
-def unblock(member_id: str, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> None:
+def unblock(member_id: str, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> None:
     service.remove_block(db, principal.member, member_id)
 
 
 @router.post("/safety/reports", status_code=201)
-def report(data: ReportIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db), idempotency_key: str | None = Header(default=None)) -> dict:
+def report(data: ReportIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function"), idempotency_key: str | None = Header(default=None)) -> dict:
     r = service.create_report(db, principal.member, data.subject_id, data.category, data.urgency, data.narrative, data.conversation_id, data.date_plan_id, data.block_now, idempotency_key, data.entry_surface)
     return service.case_payload(db, r, principal.id)
 
 
 @router.post("/safety/reports/{report_id}/evidence", status_code=201)
-def evidence(report_id: str, data: EvidenceIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def evidence(report_id: str, data: EvidenceIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     ev = service.add_evidence(db, principal.member, report_id, data.content_type, data.size_bytes, data.checksum, data.description, data.data_url)
     return {"evidence_id": ev.id, "retention": "Kept under the case retention policy with restricted access; every access is audited."}
 
 
 @router.post("/safety/cases/{report_id}/notes", status_code=201)
-def reporter_note(report_id: str, data: CaseNoteIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def reporter_note(report_id: str, data: CaseNoteIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     from app.models.safety import CaseNote
 
     r = db.get(SafetyReport, report_id)
@@ -89,12 +89,12 @@ def reporter_note(report_id: str, data: CaseNoteIn, principal: Principal = Depen
 
 
 @router.get("/safety/cases")
-def cases(principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def cases(principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     return {"items": service.list_cases(db, principal.id)}
 
 
 @router.get("/safety/cases/{report_id}")
-def case(report_id: str, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def case(report_id: str, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     r = db.get(SafetyReport, report_id)
     if r is None or r.reporter_id != principal.id:
         raise ApiError("NOT_FOUND")
@@ -102,18 +102,18 @@ def case(report_id: str, principal: Principal = Depends(current_principal), db: 
 
 
 @router.get("/account/review")
-def account_review(principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def account_review(principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     return {"status": principal.member.status, "actions": service.my_actions(db, principal.id), "rights": ["Human review of any final adverse decision", "Export your data", "Delete your account", "Reporter identities are never disclosed"]}
 
 
 @router.post("/account/review/{action_id}/appeal", status_code=201)
-def appeal(action_id: str, data: AppealIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def appeal(action_id: str, data: AppealIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     a = service.create_appeal(db, principal.member, action_id, data.statement)
     return {"appeal_id": a.id, "status": a.status, "acknowledgment_target": "under 24 hours"}
 
 
 @router.post("/safety/cases/{report_id}/appeal", status_code=201)
-def appeal_by_case(report_id: str, data: AppealIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db)) -> dict:
+def appeal_by_case(report_id: str, data: AppealIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     """Spec path: subject member appeals the action attached to a case."""
     from sqlalchemy import select
 
