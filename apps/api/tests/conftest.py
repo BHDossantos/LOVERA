@@ -158,7 +158,14 @@ def subscribe(actor: Actor, plan: str = "pro"):
     assert r.json()["entitlements"]["plan"] == plan
 
 
+_staff_cache: dict[str, Actor] = {}
+
+
 def staff(client: TestClient, email: str) -> Actor:
-    a = Actor(client, email)
-    a.sign_in()
-    return a
+    """Staff accounts sign in once per test session (the auth endpoint is rate limited)."""
+    key = f"{id(client)}:{email}"
+    if key not in _staff_cache:
+        a = Actor(client, email)
+        a.sign_in()
+        _staff_cache[key] = a
+    return _staff_cache[key]

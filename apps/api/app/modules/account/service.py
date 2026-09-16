@@ -28,7 +28,15 @@ def normalize_email(email: str) -> str:
     return email.strip().lower()
 
 
+MAX_CHALLENGES_PER_WINDOW = 5
+
+
 def start_challenge(db: Session, email: str) -> tuple[AuthChallenge, str]:
+    from sqlalchemy import func
+
+    recent = db.execute(select(func.count(AuthChallenge.id)).where(AuthChallenge.email == normalize_email(email), AuthChallenge.created_at >= utcnow() - timedelta(minutes=10))).scalar() or 0
+    if recent >= MAX_CHALLENGES_PER_WINDOW:
+        raise ApiError("RATE_LIMITED", "Too many codes requested. Try again in a few minutes.", retry_after=600)
     code = new_otp()
     challenge = AuthChallenge(email=normalize_email(email), code_hash=hash_secret(code), expires_at=utcnow() + timedelta(minutes=10))
     db.add(challenge)

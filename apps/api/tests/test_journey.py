@@ -382,3 +382,11 @@ def test_webhook_forgery_rejected(client):
     assert r.status_code == 403
     r = client.post("/v1/webhooks/payments", content=b"{}", headers={"X-Vendor-Timestamp": "1", "X-Vendor-Signature": "bad"})
     assert r.status_code == 403
+
+
+def test_auth_start_is_rate_limited(client):
+    email = unique_email("burst")
+    for _ in range(5):
+        assert client.post("/v1/auth/start", json={"email": email}).status_code == 200
+    r = client.post("/v1/auth/start", json={"email": email})
+    assert r.status_code == 429 and r.headers.get("Retry-After") == "600"
