@@ -1,26 +1,113 @@
 @import "tailwindcss";
 
+/* Design tokens (specification Section 3). Warm ivory canvas, deep navy ink, teal action, coral caution, muted gold context. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --canvas: #faf7f1;
+  --surface: #ffffff;
+  --surface-muted: #f3efe6;
+  --ink: #16243a;
+  --ink-secondary: #4b586d;
+  --ink-tertiary: #7a8598;
+  --action: #0f766e;
+  --action-strong: #0b5f59;
+  --action-soft: #e0f2f0;
+  --caution: #d9553f;
+  --caution-soft: #fbe9e5;
+  --context: #b98a2e;
+  --context-soft: #f8efd9;
+  --success: #2f7d4f;
+  --success-soft: #e3f2e8;
+  --border: #e3ddd1;
+  --focus: #1d4ed8;
+  --disabled: #b9bfc9;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --shadow-raised: 0 1px 2px rgba(22, 36, 58, 0.06), 0 4px 12px rgba(22, 36, 58, 0.06);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-ink: var(--ink);
+  --color-ink-secondary: var(--ink-secondary);
+  --color-ink-tertiary: var(--ink-tertiary);
+  --color-action: var(--action);
+  --color-action-strong: var(--action-strong);
+  --color-action-soft: var(--action-soft);
+  --color-caution: var(--caution);
+  --color-caution-soft: var(--caution-soft);
+  --color-context: var(--context);
+  --color-context-soft: var(--context-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-border: var(--border);
+  --color-focus: var(--focus);
+  --color-disabled: var(--disabled);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --font-sans: "Source Sans 3", "Segoe UI", "Helvetica Neue", Arial, system-ui, sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  font-size: 16px;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+*:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  min-height: 44px;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  min-height: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--surface-muted) 25%, #ebe6dc 50%, var(--surface-muted) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: var(--radius-md);
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.prose-tight p + p {
+  margin-top: 0.5rem;
 }

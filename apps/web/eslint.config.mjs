@@ -12,13 +12,13 @@ const compat = new FlatCompat({
 const eslintConfig = [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   {
-    ignores: [
-      "node_modules/**",
-      ".next/**",
-      "out/**",
-      "build/**",
-      "next-env.d.ts",
-    ],
+    ignores: ["node_modules/**", ".next/**", "out/**", "build/**", "next-env.d.ts", "playwright-report/**", "test-results/**"],
+  },
+  {
+    rules: {
+      // Prose-heavy UI copy: apostrophes in JSX text are intentional.
+      "react/no-unescaped-entities": "off",
+    },
   },
 ];
 
