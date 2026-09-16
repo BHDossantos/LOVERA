@@ -59,6 +59,7 @@ export type Explanation = {
   unknown: { text: string; strength: Strength; missing_signal_keys?: string[] };
   data_categories: string[];
   generator_version: string;
+  reviewed?: boolean;
 };
 
 export type ProfileSnapshot = {

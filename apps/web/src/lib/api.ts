@@ -10,6 +10,7 @@ export type ApiErrorBody = {
   message: string;
   field_errors?: Record<string, string>;
   retryable?: boolean;
+  retry_after?: number;
   request_id?: string;
   onboarding_step?: string;
   capability?: string;
