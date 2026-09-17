@@ -1,0 +1,113 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: matchmaker_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e ".[dev]"
+      - run: python -m pytest -q -p no:warnings
+        env:
+          MM_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/matchmaker_test
+          MM_ENV: test
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run lint
+      - run: npm run build
+  e2e:
+    runs-on: ubuntu-latest
+    needs: [api, web]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: matchmaker
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: pip install -e "apps/api[dev]"
+      - run: cd apps/web && npm ci && npx playwright install --with-deps chromium
+      - run: cd apps/api && (uvicorn app.main:app --port 8000 &) && sleep 3 && python -m app.seed
+        env:
+          MM_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/matchmaker
+      - run: cd apps/web && npx playwright test
+        env:
+          E2E_PSQL_ARGS: -h localhost -p 5432 -U postgres -d matchmaker
+          PGPASSWORD: postgres
+  images:
+    runs-on: ubuntu-latest
+    needs: [api, web]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: matchmaker
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t matchmaker-api apps/api
+      - run: docker build --build-arg API_ORIGIN=http://127.0.0.1:8000 -t matchmaker-web apps/web
+      - name: Smoke test the API image
+        run: |
+          docker run -d --name api --network host \
+            -e MM_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/matchmaker \
+            -e MM_SECRET_KEY=ci-only-secret-0123456789abcdef matchmaker-api
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8000/healthz && break; sleep 2; done
+          curl -sf http://127.0.0.1:8000/healthz
+          curl -sf -X POST http://127.0.0.1:8000/v1/auth/start -H 'Content-Type: application/json' -d '{"email":"smoke@example.test"}' | grep -q challenge_id
+      - name: Smoke test the web image
+        run: |
+          docker run -d --name web --network host matchmaker-web
+          for i in $(seq 1 30); do curl -sf -o /dev/null http://127.0.0.1:3000/welcome && break; sleep 2; done
+          curl -sf -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3000/welcome | grep -q 200
+          # The rewrite must proxy to the API container through the baked-in origin
+          curl -sf http://127.0.0.1:3000/api/plans | grep -q '"plans"'
+      - if: failure()
+        run: docker logs api; docker logs web
