@@ -402,6 +402,8 @@ def test_worker_runs_weekly_batch_once_per_cohort_date(client, monkeypatch):
 
     settings = get_settings()
     now_local = datetime.now(ZoneInfo(settings.market_timezone))
+    # Isolate from batches other tests already ran for the default market today.
+    monkeypatch.setattr(settings, "market_id", f"scheduler-{uuid.uuid4().hex[:8]}")
     monkeypatch.setattr(settings, "match_batch_weekday", now_local.weekday())
     monkeypatch.setattr(settings, "match_batch_hour", now_local.hour)
     db = session_factory()()
