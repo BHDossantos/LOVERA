@@ -18,11 +18,14 @@ docs       ARCHITECTURE.md
 ## Quick start
 
 ```bash
-docker compose -f infra/docker-compose.yml up --build
-# then seed a cohort
-docker compose -f infra/docker-compose.yml exec api python -m app.seed --run-batch
+make up      # builds and starts db, redis, api, worker, web
+make seed    # verified cohort + a published batch
 open http://localhost:3000
 ```
+
+Services are deployed independently (api, worker, web) from two images; see `docs/ARCHITECTURE.md`
+for the service map, the module extraction seam, and the automation (CI, image publishing to GHCR,
+Dependabot, scheduled weekly batch).
 
 Or run locally: see `docs/ARCHITECTURE.md`. The identity vendor, payments and email delivery are
 sandboxed by default (the one-time code is shown in the sign-in form outside production). Set

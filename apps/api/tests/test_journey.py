@@ -390,3 +390,27 @@ def test_auth_start_is_rate_limited(client):
         assert client.post("/v1/auth/start", json={"email": email}).status_code == 200
     r = client.post("/v1/auth/start", json={"email": email})
     assert r.status_code == 429 and r.headers.get("Retry-After") == "600"
+
+
+def test_worker_runs_weekly_batch_once_per_cohort_date(client, monkeypatch):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app.core.config import get_settings
+    from app.core.db import session_factory
+    from app.jobs import maybe_run_weekly_batch
+
+    settings = get_settings()
+    now_local = datetime.now(ZoneInfo(settings.market_timezone))
+    monkeypatch.setattr(settings, "match_batch_weekday", now_local.weekday())
+    monkeypatch.setattr(settings, "match_batch_hour", now_local.hour)
+    db = session_factory()()
+    try:
+        first = maybe_run_weekly_batch(db)
+        db.commit()
+        second = maybe_run_weekly_batch(db)
+        db.commit()
+    finally:
+        db.close()
+    assert first is not None and first["status"] in ("review", "published")
+    assert second is None  # idempotent for the cohort date

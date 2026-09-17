@@ -16,6 +16,11 @@ services:
     ports: ["6379:6379"]
   api:
     build: ../apps/api
+    image: matchmaker-api
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/healthz')\""]
+      interval: 10s
+      retries: 10
     environment:
       MM_ENV: development
       MM_DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/matchmaker
@@ -27,12 +32,28 @@ services:
     depends_on:
       db:
         condition: service_healthy
-  web:
-    build: ../apps/web
+  worker:
+    image: matchmaker-api
+    command: python -m app.jobs loop
     environment:
-      API_ORIGIN: http://api:8000
-      NEXT_PUBLIC_WS_URL: ws://localhost:8000/v1/realtime/ws
+      MM_ENV: development
+      MM_DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/matchmaker
+      MM_REDIS_URL: redis://redis:6379/0
+      MM_SECRET_KEY: ${MM_SECRET_KEY:-dev-only-secret-please-change-0123456789}
+      MM_MATCH_AUTO_PUBLISH: ${MM_MATCH_AUTO_PUBLISH:-false}
+    depends_on:
+      api:
+        condition: service_healthy
+  web:
+    build:
+      context: ../apps/web
+      args:
+        API_ORIGIN: http://api:8000
+        NEXT_PUBLIC_WS_URL: ws://localhost:8000/v1/realtime/ws
+    image: matchmaker-web
     ports: ["3000:3000"]
-    depends_on: [api]
+    depends_on:
+      api:
+        condition: service_healthy
 volumes:
   pgdata:

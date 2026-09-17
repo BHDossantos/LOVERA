@@ -1,4 +1,4 @@
-"""python -m app.jobs [tick|match <market>]"""
+"""python -m app.jobs [tick|loop|match <market> [--publish]]"""
 from __future__ import annotations
 
 import json
@@ -13,6 +13,11 @@ def main() -> None:
     create_schema()
     register_handlers()
     cmd = sys.argv[1] if len(sys.argv) > 1 else "tick"
+    if cmd == "loop":
+        from app.jobs import loop
+
+        loop()
+        return
     db = session_factory()()
     try:
         if cmd == "match":

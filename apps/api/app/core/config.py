@@ -32,6 +32,12 @@ class Settings(BaseSettings):
     checkin_location_retention_hours: int = 24
     trial_introductions: int = 1
 
+    # Worker schedule (market timezone). The weekly batch runs once per cohort date.
+    job_tick_seconds: int = 60
+    match_batch_weekday: int = 3  # 0 = Monday … 6 = Sunday
+    match_batch_hour: int = 16
+    match_auto_publish: bool = False  # concierge review before publishing; local/dev may set true
+
     # Vendors (sandbox by default; real adapters read their own keys)
     identity_provider: str = "sandbox"  # sandbox | webhook-only vendor
     identity_webhook_secret: str = "sandbox-identity-secret"

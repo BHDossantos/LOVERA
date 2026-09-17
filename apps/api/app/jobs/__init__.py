@@ -118,3 +118,50 @@ def erase_member(db: Session, member) -> None:
 
 def run_all(db: Session) -> dict:
     return {"expired": expire_introductions(db), "reminders": send_date_reminders(db), "missed_checkins": missed_checkins(db), "retention": retention_sweep(db), "outbox": events.drain(db)}
+
+
+def maybe_run_weekly_batch(db: Session) -> dict | None:
+    """Run the market's weekly batch once per cohort date when the scheduled hour has passed."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app.core.config import get_settings
+    from app.models.matching import MatchRun
+    from app.modules.matching.service import run_batch, run_payload
+
+    settings = get_settings()
+    now_local = datetime.now(ZoneInfo(settings.market_timezone))
+    if now_local.weekday() != settings.match_batch_weekday or now_local.hour < settings.match_batch_hour:
+        return None
+    cohort_date = now_local.date().isoformat()
+    exists = db.execute(select(MatchRun.id).where(MatchRun.market_id == settings.market_id, MatchRun.cohort_date == cohort_date)).first()
+    if exists:
+        return None
+    run = run_batch(db, settings.market_id, auto_publish=settings.match_auto_publish)
+    log.info("weekly batch %s status=%s allocated=%s", run.id, run.status, run.allocation_count)
+    return run_payload(run)
+
+
+def loop() -> None:
+    """Long-running worker: ticks jobs, drains the outbox and runs the weekly batch on schedule."""
+    import time
+
+    from app.core.config import get_settings
+    from app.core.db import session_factory
+
+    settings = get_settings()
+    log.info("worker started tick=%ss batch=weekday %s at %s:00 %s", settings.job_tick_seconds, settings.match_batch_weekday, settings.match_batch_hour, settings.market_timezone)
+    while True:
+        db = session_factory()()
+        try:
+            stats = run_all(db)
+            batch = maybe_run_weekly_batch(db)
+            db.commit()
+            if any(v for k, v in stats.items() if k != "retention") or batch:
+                log.info("tick %s batch=%s", stats, batch and batch["id"])
+        except Exception:  # noqa: BLE001
+            db.rollback()
+            log.exception("worker tick failed")
+        finally:
+            db.close()
+        time.sleep(settings.job_tick_seconds)

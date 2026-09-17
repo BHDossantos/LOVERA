@@ -1,9 +1,40 @@
 # Architecture
 
-The pilot is a modular monolith (`apps/api`, FastAPI + PostgreSQL) with a responsive Next.js member
-web app (`apps/web`). It follows the AI Matchmaker Implementation Specification v1.0: the backend
-enforces every trust boundary; the client presents decisions but cannot create a conversation,
-reveal mutual interest, change safety state, grant a credit, or activate a subscription.
+The pilot runs as independently deployable services with a shared PostgreSQL cluster, following the
+AI Matchmaker Implementation Specification v1.0: the backend enforces every trust boundary; the client
+presents decisions but cannot create a conversation, reveal mutual interest, change safety state,
+grant a credit, or activate a subscription.
+
+## Services
+
+| Service | Image | Role | Scales |
+|---|---|---|---|
+| `api` | `apps/api` | HTTP + WebSocket API (`/v1`), health at `/healthz` | horizontally behind a load balancer |
+| `worker` | `apps/api` (same image, `python -m app.jobs loop`) | outbox drain, introduction expiry, reminders, missed check-ins, retention sweep, deletions, and the scheduled weekly match batch (once per cohort date) | one instance per market |
+| `web` | `apps/web` | Next.js member app and staff console; proxies `/api/*` to the api service | horizontally |
+| `db` | postgres:16 | transactional source of truth | managed Postgres in production |
+| `redis` | redis:7 | presence / pub-sub fan-out for multi-instance realtime | managed Redis |
+
+The API code is organised as domain modules (`app/modules/*`) that own their tables, routes and
+events and communicate through application services or the transactional outbox. That boundary is
+the extraction seam: a module (for example `safety` or `matching`) can become its own service with
+its own image and database schema by moving its package, keeping its router prefix and publishing
+its outbox events over Redis, without changing the web app. Extract only when a module needs an
+independent release cadence, scaling profile or data residency; until then one image with two roles
+(api, worker) keeps operational debt low.
+
+## Automation
+
+- `make up` builds and starts every service; `make seed` loads a verified cohort and publishes a batch.
+- CI (`.github/workflows/ci.yml`): API tests on Postgres, web typecheck/lint/build, Playwright journey,
+  and Docker image builds with smoke tests for both images.
+- `.github/workflows/publish.yml` publishes `ghcr.io/<repo>/api` and `ghcr.io/<repo>/web` on every
+  push to `main` and on `v*` tags. Set repository variables `API_ORIGIN` and `NEXT_PUBLIC_WS_URL`
+  for the deployed origins.
+- Dependabot keeps pip, npm, Docker base images and Actions current with weekly grouped PRs.
+- The worker runs the weekly batch automatically (`MM_MATCH_BATCH_WEEKDAY`, `MM_MATCH_BATCH_HOUR`,
+  market timezone). `MM_MATCH_AUTO_PUBLISH=false` keeps the concierge review step; `true` publishes
+  immediately.
 
 ## Backend modules (`apps/api/app/modules`)
 
