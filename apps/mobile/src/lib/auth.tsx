@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
+import { registerForPush, unregisterPush } from "@/lib/push";
 import {
   ApiError,
   clearSession,
@@ -27,7 +28,7 @@ type AuthState = {
 const Ctx = createContext<AuthState | null>(null);
 const DEVICE_KEY = "mm.device";
 
-async function deviceId() {
+export async function deviceId() {
   try {
     let id = await SecureStore.getItemAsync(DEVICE_KEY);
     if (!id) {
@@ -93,6 +94,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const signOut = useCallback(async () => {
+    // Retire this handset's push tokens first: whoever holds the phone next must not
+    // be shown who wants to meet the person who just signed out.
+    await unregisterPush(await deviceId());
     try {
       await post("/auth/logout");
     } catch {
@@ -101,6 +105,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await clearSession();
     setMe(null);
   }, []);
+
+  // Registration happens once we have a member and is safe to repeat: the endpoint is
+  // idempotent on the token, and the platform can reissue a token at any launch.
+  const memberId = me?.id;
+  useEffect(() => {
+    if (!memberId) return;
+    void deviceId().then((id) => registerForPush(id));
+  }, [memberId]);
 
   const value = useMemo(
     () => ({ me, loading, error, refresh, signOut, signIn }),

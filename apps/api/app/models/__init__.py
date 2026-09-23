@@ -12,5 +12,5 @@ from app.models.ai import AIDraft, Translation  # noqa: F401
 from app.models.dates import DateCheckIn, DatePlan, PostDateFeedback, Venue  # noqa: F401
 from app.models.safety import Appeal, Block, CaseNote, SafetyAction, SafetyEvidence, SafetyReport  # noqa: F401
 from app.models.billing import CheckoutSession, CreditLedger, Subscription, WebhookReceipt  # noqa: F401
-from app.models.notifications import Notification  # noqa: F401
+from app.models.notifications import Notification, PushDevice  # noqa: F401
 from app.models.privacy import AnalyticsEvent, AuditEvent, IdempotencyRecord, OutboxEvent, PrivacyRequest  # noqa: F401
