@@ -60,6 +60,12 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$ELIGIBLE" = "true" ]; then
+            # gh pr edit --add-label fails on a label the repo does not have
+            # yet, which would otherwise make the very first eligible PR a
+            # silent no-op. Creating it is idempotent.
+            gh label create "$LABEL" --repo "$GITHUB_REPOSITORY" \
+              --color 0e8a16 --description "Patch/minor Dependabot PR; merged once CI is green" \
+              2>/dev/null || true
             gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --add-label "$LABEL"
           else
             # Re-run on a force-push that turns an eligible PR into a major one.
