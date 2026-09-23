@@ -5,17 +5,40 @@ updates:
     schedule: { interval: weekly }
     groups:
       python: { patterns: ["*"] }
+
   - package-ecosystem: npm
     directory: /apps/web
     schedule: { interval: weekly }
     groups:
       javascript: { patterns: ["*"] }
+    ignore:
+      # The lint toolchain is held until the ecosystem catches up. Verified
+      # 2026-09-23 against the grouped bump in #10; each of these fails at
+      # eslint startup, so CI cannot pass with them:
+      #   typescript >=7        typescript-eslint refuses to load against the TS 7
+      #                         API (typescript-eslint#10940).
+      #   eslint >=10           eslint-plugin-react (vendored by eslint-config-next)
+      #                         calls context.getFilename(), removed in eslint 10.
+      #   eslint-config-next 16 ships a native flat config, which is the right
+      #                         pairing for the Next 16 we run, but it requires
+      #                         eslint 10 — blocked by the row above.
+      # Lift all three together once eslint-plugin-react supports eslint 10; that
+      # upgrade also drops the FlatCompat bridge in apps/web/eslint.config.mjs.
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
+      - dependency-name: eslint
+        update-types: [version-update:semver-major]
+      - dependency-name: eslint-config-next
+        update-types: [version-update:semver-major]
+
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
+
   - package-ecosystem: docker
     directory: /apps/api
     schedule: { interval: weekly }
+
   - package-ecosystem: docker
     directory: /apps/web
     schedule: { interval: weekly }
