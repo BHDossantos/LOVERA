@@ -31,6 +31,14 @@ independent release cadence, scaling profile or data residency; until then one i
 - `.github/workflows/publish.yml` publishes `ghcr.io/<repo>/api` and `ghcr.io/<repo>/web` on every
   push to `main` and on `v*` tags. Set repository variables `API_ORIGIN` and `NEXT_PUBLIC_WS_URL`
   for the deployed origins.
+- `apps/mobile` is an Expo (SDK 57) React Native app sharing the same API. It carries its own
+  copy of the design tokens and a transport that mirrors `apps/web/src/lib/api.ts`, differing
+  only where the platform demands it: the refresh token lives in the device keychain via
+  SecureStore, and the base URL is absolute. Store submission is documented in
+  `docs/STORE-SUBMISSION.md`.
+- Push notifications: `push_devices` is keyed on the push token, not the device, because the
+  platform reissues tokens freely and the same token can later belong to a different member.
+  Registration is idempotent; signing out revokes that handset's tokens.
 - Dependabot keeps pip, npm, Docker base images and Actions current with weekly grouped PRs.
   `.github/workflows/dependabot-auto-merge.yml` labels a Dependabot PR when every dependency in
   it is a patch or minor bump, then squash-merges it once the `CI` workflow reports success on

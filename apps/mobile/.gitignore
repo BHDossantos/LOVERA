@@ -18,6 +18,13 @@ expo-env.d.ts
 *.key
 *.mobileprovision
 
+# Store credentials. The Play service-account key is a release-manager credential:
+# anyone holding it can ship a build to your listing.
+play-service-account.json
+*-service-account.json
+google-services.json
+GoogleService-Info.plist
+
 # Metro
 .metro-health-check*
 
