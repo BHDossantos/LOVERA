@@ -1,0 +1,115 @@
+name: Dependabot auto-merge
+
+# Two stages, because the token that can read Dependabot's metadata is not the
+# token that should be allowed to merge before CI has spoken.
+#
+#   1. label  - runs on the PR itself, reads the update metadata, and labels the
+#               PR when every dependency in it is a patch or minor bump.
+#   2. merge  - runs only after the CI workflow reports success, and merges the
+#               labelled PR. Because it is triggered by workflow_run on a
+#               successful CI conclusion, it cannot merge a red or pending PR
+#               even if branch protection is not configured.
+#
+# Majors are never auto-merged: they are the ones that broke #10.
+
+on:
+  pull_request_target:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions: {}
+
+env:
+  LABEL: dependabot-auto-merge
+
+jobs:
+  label:
+    if: github.event_name == 'pull_request_target' && github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - id: meta
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Decide whether every update is patch or minor
+        id: decide
+        env:
+          UPDATES: ${{ steps.meta.outputs.updated-dependencies-json }}
+        run: |
+          set -euo pipefail
+          # A grouped PR carries one entry per dependency. It is only eligible
+          # when *all* of them are patch or minor; one major taints the group.
+          eligible=$(jq -r '
+            if length == 0 then "false"
+            elif all(.[]; .updateType == "version-update:semver-patch"
+                       or .updateType == "version-update:semver-minor")
+            then "true" else "false" end' <<<"$UPDATES")
+          echo "eligible=$eligible" >>"$GITHUB_OUTPUT"
+          jq -r '.[] | "  \(.dependencyName): \(.updateType)"' <<<"$UPDATES" >>"$GITHUB_STEP_SUMMARY" || true
+          echo "eligible=$eligible" >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          ELIGIBLE: ${{ steps.decide.outputs.eligible }}
+        run: |
+          set -euo pipefail
+          if [ "$ELIGIBLE" = "true" ]; then
+            gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --add-label "$LABEL"
+          else
+            # Re-run on a force-push that turns an eligible PR into a major one.
+            gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --remove-label "$LABEL" || true
+          fi
+
+  merge:
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Merge the labelled PR for this green run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          # workflow_run does not carry the PR number, so resolve it from the
+          # commit CI actually ran on. That also guarantees we merge the exact
+          # sha that went green, never a newer push.
+          pr=$(gh api "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/pulls" \
+                 --jq '.[] | select(.state == "open") | .number' | head -n1)
+          if [ -z "$pr" ]; then
+            echo "No open PR for $HEAD_SHA; nothing to merge."
+            exit 0
+          fi
+
+          read -r author labelled current <<<"$(gh api "repos/$GITHUB_REPOSITORY/pulls/$pr" \
+            --jq '[.user.login,
+                   ([.labels[].name] | index(env.LABEL) != null),
+                   .head.sha] | @tsv')"
+
+          if [ "$author" != "dependabot[bot]" ]; then
+            echo "PR #$pr is not a Dependabot PR ($author); skipping."
+            exit 0
+          fi
+          if [ "$labelled" != "true" ]; then
+            echo "PR #$pr is not labelled $LABEL (major or ungated); leaving for review."
+            exit 0
+          fi
+          if [ "$current" != "$HEAD_SHA" ]; then
+            echo "PR #$pr moved past $HEAD_SHA; a later CI run will pick it up."
+            exit 0
+          fi
+
+          gh pr merge "$pr" --repo "$GITHUB_REPOSITORY" --squash --delete-branch \
+            --match-head-commit "$HEAD_SHA"
