@@ -11,6 +11,7 @@ documents (Product Blueprint, Screen Design Specification, Implementation Specif
 ```
 apps/api   FastAPI modular monolith (PostgreSQL) – matching, introductions, messaging, dates, safety, billing
 apps/web   Next.js member web app – 44 screens from the design spec plus the staff console
+apps/mobile Expo (React Native) app for the App Store and Google Play
 infra      docker-compose for db, redis, api, web
 docs       ARCHITECTURE.md
 ```
