@@ -32,6 +32,11 @@ independent release cadence, scaling profile or data residency; until then one i
   push to `main` and on `v*` tags. Set repository variables `API_ORIGIN` and `NEXT_PUBLIC_WS_URL`
   for the deployed origins.
 - Dependabot keeps pip, npm, Docker base images and Actions current with weekly grouped PRs.
+  `.github/workflows/dependabot-auto-merge.yml` labels a Dependabot PR when every dependency in
+  it is a patch or minor bump, then squash-merges it once the `CI` workflow reports success on
+  that exact commit. Majors are always left for review, and the npm group holds the eslint and
+  TypeScript majors behind `ignore` rules in `.github/dependabot.yml` until the lint toolchain
+  supports them.
 - The worker runs the weekly batch automatically (`MM_MATCH_BATCH_WEEKDAY`, `MM_MATCH_BATCH_HOUR`,
   market timezone). `MM_MATCH_AUTO_PUBLISH=false` keeps the concierge review step; `true` publishes
   immediately.
