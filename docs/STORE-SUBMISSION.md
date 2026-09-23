@@ -156,6 +156,46 @@ opt-in and can be withdrawn without deleting the account — that is what the
 
 ---
 
+## 6a. Known dependency advisories
+
+`npm audit` in `apps/mobile` reports 10 moderate advisories. None is fixable today
+without breaking something worse, and none affects the shipped app. Recorded here
+so the next person does not rediscover it, and does not "fix" it badly.
+
+**Do not run `npm audit fix --force` in `apps/mobile`.** npm's resolver proposes
+`expo@46` and `expo-router@5` as the "fix" — those are downgrades of eleven and
+fifty-two major versions from the SDK 57 we run. It would destroy the app to
+silence a warning. This is also why Dependabot's security-update run fails on
+this directory rather than opening a PR: there is no forward fix.
+
+**uuid 7.0.3 — [GHSA-w5hq-g745-h8pq](https://github.com/advisories/GHSA-w5hq-g745-h8pq), affects <11.1.1.**
+Reached only as `expo → @expo/config-plugins → xcode → uuid`. `xcode` edits Xcode
+project files during prebuild, so this is build tooling and is never bundled into
+the app a member installs. Nine of the ten remaining advisories are this one path.
+No action.
+
+**decode-uri-component 0.2.2 — [GHSA-vcc3-ghjq-m6fr](https://github.com/advisories/GHSA-vcc3-ghjq-m6fr), affects ≤0.4.2.**
+Reached as `expo-router → query-string → decode-uri-component`, which *is* runtime:
+expo-router parses URLs when a deep link opens the app. Denial of service via
+exponential decoding of malformed percent-encoded input.
+
+I tried to fix this and backed it out. The only published version above the
+vulnerable range is 0.5.0, which is ESM-only (`"type": "module"`, no `main`),
+while `query-string@7.1.3` consumes it through a CommonJS `require()`. An
+`overrides` pin to 0.5.0 installs, typechecks and bundles green — but I could not
+confirm from the emitted bundle that Metro's interop hands `require()` a callable
+function rather than a module namespace. If it does not, deep-link parsing throws
+a TypeError, which breaks the path a member takes when they tap a push
+notification. Trading a conditional client-side hang for a possible hard break in
+the push-to-app path is a bad trade, so the override is not in the tree.
+
+Real-world exposure: a member must be induced to open a crafted link, and the
+worst outcome is their own app spinning. No data is exposed.
+
+**Re-check when** `query-string` moves to a `decode-uri-component` above 0.4.2, or
+`expo-router` drops `query-string` — then take the fix. Verify with a real
+deep-link open on a device, not just a green bundle.
+
 ## 7. Two decisions worth making before you submit — **You**
 
 **The name.** "AI Matchmaker" is descriptive rather than distinctive, which
