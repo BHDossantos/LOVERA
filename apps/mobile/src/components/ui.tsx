@@ -2,6 +2,7 @@ import { ReactNode } from "react";
 import {
   ActivityIndicator,
   Pressable,
+  Switch,
   ScrollView,
   StyleSheet,
   Text,
@@ -215,6 +216,145 @@ export function Empty({ title, body }: { title: string; body?: string }) {
   );
 }
 
+/** Consent and preference switch. The description carries the commitment being made. */
+export function Toggle({
+  label,
+  description,
+  value,
+  onValueChange,
+}: {
+  label: string;
+  description?: string;
+  value: boolean;
+  onValueChange: (v: boolean) => void;
+}) {
+  return (
+    <View style={s.toggleRow}>
+      <View style={{ flex: 1, paddingRight: space.md }}>
+        <Text style={s.toggleLabel}>{label}</Text>
+        {!!description && <Text style={s.choiceBody}>{description}</Text>}
+      </View>
+      <Switch
+        value={value}
+        onValueChange={onValueChange}
+        accessibilityLabel={label}
+        trackColor={{ false: color.disabled, true: color.action }}
+        thumbColor="#ffffff"
+      />
+    </View>
+  );
+}
+
+/** Single-select rendered as a stack of cards: no hidden native picker to fight with. */
+export function Options<T extends string | number>({
+  value,
+  onChange,
+  options,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  options: { value: T; label: string; body?: string }[];
+}) {
+  return (
+    <View accessibilityRole="radiogroup">
+      {options.map((o) => (
+        <ChoiceCard
+          key={String(o.value)}
+          title={o.label}
+          body={o.body}
+          selected={value === o.value}
+          onSelect={() => onChange(o.value)}
+        />
+      ))}
+    </View>
+  );
+}
+
+/** Multi-select pill row. */
+export function ChipGroup<T extends string>({
+  values,
+  onChange,
+  options,
+}: {
+  values: T[];
+  onChange: (v: T[]) => void;
+  options: { value: T; label: string }[];
+}) {
+  return (
+    <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+      {options.map((o) => (
+        <Chip
+          key={o.value}
+          label={o.label}
+          on={values.includes(o.value)}
+          onToggle={() =>
+            onChange(values.includes(o.value) ? values.filter((v) => v !== o.value) : [...values, o.value])
+          }
+        />
+      ))}
+    </View>
+  );
+}
+
+/** Onboarding progress. Announced as text so it is not a purely visual cue. */
+export function Steps({ step, total = 8 }: { step: number; total?: number }) {
+  return (
+    <View style={s.steps} accessibilityRole="progressbar" accessibilityLabel={`Step ${step} of ${total}`}>
+      {Array.from({ length: total }, (_, i) => (
+        <View key={i} style={[s.stepDot, i < step && { backgroundColor: color.action }]} />
+      ))}
+    </View>
+  );
+}
+
+export function Stepper({
+  value,
+  onChange,
+  min,
+  max,
+  step = 1,
+  suffix = "",
+  label,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  min: number;
+  max: number;
+  step?: number;
+  suffix?: string;
+  label: string;
+}) {
+  const clamp = (n: number) => Math.min(max, Math.max(min, n));
+  return (
+    <View style={s.stepper}>
+      <Pressable
+        onPress={() => onChange(clamp(value - step))}
+        accessibilityRole="button"
+        accessibilityLabel={`Decrease ${label}`}
+        style={s.stepperBtn}
+      >
+        <Text style={s.stepperGlyph}>−</Text>
+      </Pressable>
+      <Text style={s.stepperValue} accessibilityLabel={`${label}: ${value}${suffix}`}>
+        {value}
+        {suffix}
+      </Text>
+      <Pressable
+        onPress={() => onChange(clamp(value + step))}
+        accessibilityRole="button"
+        accessibilityLabel={`Increase ${label}`}
+        style={s.stepperBtn}
+      >
+        <Text style={s.stepperGlyph}>+</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+export function Divider() {
+  return <View style={s.divider} />;
+}
+
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: color.canvas },
   scroll: { flexGrow: 1 },
@@ -302,4 +442,29 @@ const s = StyleSheet.create({
   badge: { borderRadius: 999, paddingVertical: 4, paddingHorizontal: 10, alignSelf: "flex-start" },
   badgeLabel: { ...typo.caption },
   loading: { paddingVertical: space.xxl, alignItems: "center" },
+  toggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: space.md,
+    borderBottomWidth: 1,
+    borderBottomColor: color.border,
+  },
+  toggleLabel: { ...typo.body, fontWeight: "600", color: color.ink },
+  steps: { flexDirection: "row", gap: 6, marginBottom: space.lg },
+  stepDot: { flex: 1, height: 4, borderRadius: 2, backgroundColor: color.border },
+  stepper: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: color.surface,
+    borderWidth: 1,
+    borderColor: color.border,
+    borderRadius: radius.md,
+    paddingHorizontal: space.sm,
+  },
+  stepperBtn: { width: 48, height: 48, alignItems: "center", justifyContent: "center" },
+  stepperGlyph: { fontSize: 24, color: color.action, fontWeight: "700" },
+  stepperValue: { ...typo.heading, color: color.ink },
+  divider: { height: 1, backgroundColor: color.border, marginVertical: space.lg },
+
 });
