@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
 from app.core.config import get_settings
 from app.core.db import get_engine, session_factory
@@ -19,8 +20,27 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("app")
 
 
+# Any int64 will do; it only has to be the same in every process that creates the schema.
+SCHEMA_LOCK_KEY = 0x6D6D_5343_4845_4D41  # "mmSCHEMA"
+
+
 def create_schema() -> None:
-    Base.metadata.create_all(get_engine())
+    """Create any missing tables, one process at a time.
+
+    create_all checks for each table and then creates it, and those two steps are not
+    atomic. Two processes starting together — several API replicas, or the API and the
+    seeder in CI — both see "members" missing and both issue CREATE TABLE; the loser
+    dies with a duplicate pg_type entry rather than a friendly "already exists".
+
+    A transaction-scoped advisory lock serialises them. The second caller blocks until
+    the first commits, then finds the tables present and creates nothing. The lock is
+    released with the transaction, so a process that crashes mid-creation cannot wedge
+    the rest, and Postgres's transactional DDL means a partial schema is never left
+    behind either.
+    """
+    with get_engine().begin() as conn:
+        conn.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": SCHEMA_LOCK_KEY})
+        Base.metadata.create_all(bind=conn)
 
 
 @asynccontextmanager
