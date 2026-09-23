@@ -25,7 +25,12 @@ env:
 
 jobs:
   label:
-    if: github.event_name == 'pull_request_target' && github.actor == 'dependabot[bot]'
+    # Gate on who *opened* the PR, not who triggered the event. github.actor is
+    # whoever pushed, so on a synchronize — a maintainer updating the branch,
+    # resolving a conflict, or pushing a fix onto a Dependabot PR — the actor is
+    # a human and this job would silently skip, leaving the PR unlabelled and
+    # therefore never auto-merged.
+    if: github.event_name == 'pull_request_target' && github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
