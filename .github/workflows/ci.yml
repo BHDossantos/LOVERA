@@ -111,7 +111,7 @@ jobs:
       # them away, so an intermittent failure left nothing to diagnose but the
       # console tail. Keep them for a fortnight instead.
       - if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-failure
           path: |
