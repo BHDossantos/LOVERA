@@ -1,0 +1,40 @@
+# API. Deploy with:  fly deploy --config infra/fly/api.toml --app <your-api-app>
+#
+# Frankfurt because the pilot is Rome: it is the nearest Fly region with real
+# capacity, and keeping member data in the EU removes a transfer-mechanism
+# problem from the privacy notice rather than creating one.
+primary_region = "fra"
+
+[build]
+  dockerfile = "../../apps/api/Dockerfile"
+
+[env]
+  MM_ENV = "production"
+  MM_MARKET_ID = "rome"
+  MM_MARKET_TIMEZONE = "Europe/Rome"
+  # Concierge review before anything is published to members. Flip only when you
+  # are ready for batches to go out unseen.
+  MM_MATCH_AUTO_PUBLISH = "false"
+  # Belt and braces: the one-time code is only ever returned when this is true
+  # AND the env is not production. Both say no here.
+  MM_EXPOSE_DEV_OTP = "false"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  # Never scale the API to zero. A cold start on the first request after a quiet
+  # night is exactly when an App Review tester opens the app.
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "4s"
+    grace_period = "20s"
+    method = "GET"
+    path = "/healthz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

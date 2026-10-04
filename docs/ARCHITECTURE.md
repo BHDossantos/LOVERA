@@ -31,6 +31,14 @@ independent release cadence, scaling profile or data residency; until then one i
 - `.github/workflows/publish.yml` publishes `ghcr.io/<repo>/api` and `ghcr.io/<repo>/web` on every
   push to `main` and on `v*` tags. Set repository variables `API_ORIGIN` and `NEXT_PUBLIC_WS_URL`
   for the deployed origins.
+- Deployment lives in `infra/fly/` as three committed toml files (api, worker, web), targeting
+  Frankfurt so member data stays in the EU. `docs/DEPLOY.md` is the runbook. Nothing in the
+  application knows where it runs, so the host is swappable.
+- `MM_ENV=production` is security-relevant, not cosmetic: it is the second condition that stops
+  `/auth/start` returning the one-time sign-in code in its response.
+- Email delivery is not implemented. Outside production the OTP comes back in the response,
+  which is how the e2e tests sign in; in production nothing sends it, so no member can sign in
+  until an email transport is wired into the account module.
 - `apps/mobile` is an Expo (SDK 57) React Native app sharing the same API. It carries its own
   copy of the design tokens and a transport that mirrors `apps/web/src/lib/api.ts`, differing
   only where the platform demands it: the refresh token lives in the device keychain via
