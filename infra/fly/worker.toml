@@ -1,0 +1,31 @@
+# Worker: the same image as the API with a different command. It runs the job
+# loop and the weekly match batch.
+#
+#   fly deploy --config infra/fly/worker.toml --app <your-worker-app>
+#
+# Exactly one machine. The batch is idempotent per cohort date, so a second
+# worker would not double-publish — but it would do the work twice and compete
+# for the same rows, and there is nothing to gain from that.
+primary_region = "fra"
+
+[build]
+  dockerfile = "../../apps/api/Dockerfile"
+
+[processes]
+  worker = "python -m app.jobs loop"
+
+[env]
+  MM_ENV = "production"
+  MM_MARKET_ID = "rome"
+  MM_MARKET_TIMEZONE = "Europe/Rome"
+  MM_MATCH_AUTO_PUBLISH = "false"
+  # Wednesday 16:00 Europe/Rome, matching the product's cadence.
+  MM_MATCH_BATCH_WEEKDAY = "3"
+  MM_MATCH_BATCH_HOUR = "16"
+
+# No http_service: the worker serves nothing and must not be publicly reachable.
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  processes = ["worker"]
