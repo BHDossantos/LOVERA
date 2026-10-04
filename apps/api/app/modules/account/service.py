@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from datetime import date, timedelta
 from typing import Any
 
@@ -11,6 +12,8 @@ from app.core.analytics import track
 from app.core.audit import audit
 from app.core.config import get_settings
 from app.core.errors import ApiError
+from app.core.mail import MailError
+from app.core.mail import send as send_mail
 from app.core.security import create_access_token, hash_secret, new_opaque_token, new_otp
 from app.core.timeutil import iso, utcnow
 from app.models.account import AuthChallenge, ConsentRecord, Member
@@ -20,6 +23,7 @@ from app.models.blueprint import BlueprintVersion
 from app.models.profile import Profile
 from app.models.safety import SafetyAction
 from app.models.verification import Verification
+from app.modules.account.mail import login_code_message
 
 CONSENT_PURPOSES = ("terms", "privacy", "community", "ai_processing", "special_category", "model_improvement", "marketing")
 
@@ -28,7 +32,11 @@ def normalize_email(email: str) -> str:
     return email.strip().lower()
 
 
+log = logging.getLogger("account")
+
 MAX_CHALLENGES_PER_WINDOW = 5
+# The email quotes this, so both must read it from here or the two will drift apart.
+CHALLENGE_TTL_MINUTES = 10
 
 
 def start_challenge(db: Session, email: str) -> tuple[AuthChallenge, str]:
@@ -38,10 +46,44 @@ def start_challenge(db: Session, email: str) -> tuple[AuthChallenge, str]:
     if recent >= MAX_CHALLENGES_PER_WINDOW:
         raise ApiError("RATE_LIMITED", "Too many codes requested. Try again in a few minutes.", retry_after=600)
     code = new_otp()
-    challenge = AuthChallenge(email=normalize_email(email), code_hash=hash_secret(code), expires_at=utcnow() + timedelta(minutes=10))
+    challenge = AuthChallenge(email=normalize_email(email), code_hash=hash_secret(code), expires_at=utcnow() + timedelta(minutes=CHALLENGE_TTL_MINUTES))
     db.add(challenge)
     db.flush()
     return challenge, code
+
+
+def deliver_login_code(email: str, code: str, locale: str = "en", *, required: bool = True) -> bool:
+    """Mail the sign-in code. Returns whether it reached a real mail host.
+
+    `required=False` is for the local and CI setup, where the code also comes back in
+    the response body: a mail host that is missing or misconfigured there is a nuisance
+    to log, not a reason to fail the request. In production the response carries no
+    code, so a send that fails leaves the member with no way in at all — far better to
+    tell them the service is unavailable and let them retry than to show "check your
+    inbox" for a mail that was never sent.
+    """
+    settings = get_settings()
+    message = login_code_message(
+        to=email,
+        code=code,
+        product=settings.mail_product_name,
+        minutes=CHALLENGE_TTL_MINUTES,
+        locale=locale,
+    )
+    try:
+        send_mail(message)
+    except MailError as exc:
+        # Never log `code`: this branch runs in production, where the log is not the inbox.
+        log.error("login code for %s was not sent: %s", email, exc)
+        if required:
+            raise ApiError(
+                "DEPENDENCY_UNAVAILABLE",
+                "We could not send the code just now. Try again in a moment.",
+                retryable=True,
+                retry_after=30,
+            ) from exc
+        return False
+    return settings.resolved_mail_transport != "console"
 
 
 def verify_challenge(db: Session, challenge_id: str, code: str, device_id: str | None, invite_code: str | None = None, locale: str = "en") -> tuple[Member, MemberSession, str, str]:

@@ -36,9 +36,15 @@ independent release cadence, scaling profile or data residency; until then one i
   application knows where it runs, so the host is swappable.
 - `MM_ENV=production` is security-relevant, not cosmetic: it is the second condition that stops
   `/auth/start` returning the one-time sign-in code in its response.
-- Email delivery is not implemented. Outside production the OTP comes back in the response,
-  which is how the e2e tests sign in; in production nothing sends it, so no member can sign in
-  until an email transport is wired into the account module.
+- Email is the only way anyone signs in, so `app/core/mail.py` is deliberately boring: SMTP and
+  nothing else, because every provider worth using speaks it and swapping one for another is
+  five secrets rather than a code change. The transport resolves from configuration — `smtp`
+  when a host is set, `console` (logs the code, delivers nothing) when one is not — and the API
+  refuses to start in production without a host, since the alternative is a deployment that
+  passes every health check while no member can get in. Outside production the OTP also comes
+  back in the `/auth/start` response, which is how the e2e tests sign in without a mailbox; a
+  failed send is only logged there, but in production it fails the request, because telling a
+  member to check an inbox that will stay empty is worse than telling them to retry.
 - `apps/mobile` is an Expo (SDK 57) React Native app sharing the same API. It carries its own
   copy of the design tokens and a transport that mirrors `apps/web/src/lib/api.ts`, differing
   only where the platform demands it: the refresh token lives in the device keychain via
