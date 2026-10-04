@@ -14,6 +14,7 @@ from app.core.config import get_settings
 from app.core.db import get_engine, session_factory
 from app.core.errors import ApiError, api_error_handler, error_payload
 from app.core.events import drain
+from app.core.mail import get_sender
 from app.models import Base
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -43,8 +44,34 @@ def create_schema() -> None:
         Base.metadata.create_all(bind=conn)
 
 
+def check_mail_transport() -> None:
+    """Refuse to start a production API that cannot send a sign-in code.
+
+    Sign-in is a one-time code sent by email, and outside production the API also
+    returns that code in the response body. So a production deploy with no mail host
+    looks perfectly healthy — every endpoint answers, every check is green — while
+    every single member who asks to sign in waits for a mail that will never arrive.
+    That is a failure worth refusing to boot over, because the alternative is finding
+    it from the first member who cannot get in.
+
+    An operator who really wants to run without mail can say so with
+    MM_MAIL_TRANSPORT=console, which boots and complains instead.
+    """
+    settings = get_settings()
+    if settings.is_production and settings.resolved_mail_transport == "console":
+        if settings.mail_transport == "auto":
+            raise RuntimeError(
+                "No mail host is configured, so no member could receive a sign-in code. "
+                "Set MM_SMTP_HOST (plus MM_SMTP_USERNAME, MM_SMTP_PASSWORD and MM_MAIL_FROM), "
+                "or set MM_MAIL_TRANSPORT=console to start without mail on purpose."
+            )
+        log.critical("MM_MAIL_TRANSPORT=console in production: sign-in codes are written to this log and delivered to nobody.")
+    log.info("mail: %s", get_sender().preflight())
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    check_mail_transport()
     create_schema()
     from app.jobs import register_handlers
 

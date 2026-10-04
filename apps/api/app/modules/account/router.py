@@ -16,8 +16,16 @@ router = APIRouter(tags=["account"])
 def auth_start(data: schemas.AuthStartIn, db: Session = Depends(get_db, scope="function")) -> dict:
     settings = get_settings()
     challenge, code = service.start_challenge(db, data.email)
-    # Email delivery is a vendor concern; the pilot exposes the code outside production.
-    return {"challenge_id": challenge.id, "delivery": "email", "dev_code": code if (settings.expose_dev_otp and not settings.is_production) else None}
+    # Outside production the response carries the code, so a mail host that is absent or
+    # broken is only worth logging. In production it is the member's only way in, so a
+    # failed send has to fail the request rather than promise an inbox that stays empty.
+    expose = settings.expose_dev_otp and not settings.is_production
+    delivered = service.deliver_login_code(challenge.email, code, data.locale, required=not expose)
+    return {
+        "challenge_id": challenge.id,
+        "delivery": "email" if delivered else "response",
+        "dev_code": code if expose else None,
+    }
 
 
 @router.post("/auth/verify", response_model=schemas.TokenOut)

@@ -92,6 +92,9 @@ fly secrets set --app matchmaker-api \
 fly secrets set --app matchmaker-api MM_ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
+Outbound mail has its own set — see the next section. It is not optional: without
+it the API will not start in production.
+
 The worker needs `MM_SECRET_KEY` and `MM_DATABASE_URL` too; the rest it does not
 touch.
 
@@ -109,13 +112,46 @@ public host, anyone can request a code for any email address and read it in the
 response. That is a full account takeover, so treat `MM_ENV` as a secret-grade
 setting rather than a label.
 
-### Email delivery is not wired up
+### Email, which is the only way anyone signs in
 
-With `MM_ENV=production` the code is no longer in the response, and nothing yet
-sends it by email. **Nobody can sign in until you connect an email provider.**
-This is the one remaining gap between "deployed" and "usable", and it is not
-configuration — it needs an SMTP or API provider wired into the account module.
-Plan for it before you invite anyone.
+With `MM_ENV=production` the code is no longer in the response, so email is the
+only path into the product. The API knows this and **refuses to start** if no
+mail host is configured — a deploy that forgets these secrets fails loudly at
+boot instead of looking healthy while every member waits for a mail that was
+never sent.
+
+Any provider that speaks SMTP works, and none of the configuration is
+vendor-specific. Resend, Postmark, Mailgun, SES and Fastmail all do; pick on
+price and deliverability, not on integration work, because swapping later is
+these five secrets and no code change.
+
+```bash
+fly secrets set --app matchmaker-api \
+  MM_SMTP_HOST='smtp.yourprovider.test' \
+  MM_SMTP_USERNAME='<provider username or API key id>' \
+  MM_SMTP_PASSWORD='<provider password or API key>' \
+  MM_MAIL_FROM='AI Matchmaker <no-reply@yourdomain>' \
+  MM_MAIL_REPLY_TO='help@yourdomain'
+```
+
+`MM_SMTP_PORT=587` and `MM_SMTP_SECURITY=starttls` are already in
+`infra/fly/api.toml` and suit nearly every provider. Use `ssl` with port 465 if
+yours insists; `none` exists for a local test server and nothing else.
+
+Two things decide whether these mails actually arrive, and neither is code:
+
+- **Authenticate the sending domain.** Publish the SPF, DKIM and DMARC records
+  your provider gives you, for the domain in `MM_MAIL_FROM`. A sign-in code that
+  lands in spam is indistinguishable from a broken product, and transactional
+  mail from an unauthenticated domain lands in spam.
+- **Send from a domain you control.** Not gmail.com, not the provider's shared
+  sandbox domain — both get a dating service filtered quickly.
+
+`MM_MAIL_TRANSPORT` is deliberately left unset, which means "work it out": SMTP
+when a host is configured, and refuse to start in production when one is not. You
+can set it to `console` to start a production machine with no mail at all, which
+logs each code instead of sending it and logs a CRITICAL line saying so. That is
+for a controlled smoke test, never for members.
 
 ## 3. Deploy
 
@@ -146,6 +182,32 @@ curl -sS -X POST https://matchmaker-api.fly.dev/v1/auth/start \
   -H 'Content-Type: application/json' -d '{"email":"probe@yourdomain"}'
 # dev_code MUST be null. If it is a six-digit number, the deployment is unsafe.
 ```
+
+Then confirm the code actually arrives. Use an address you can read, and send to
+a different provider than your own domain (a Gmail or Outlook address) so you
+find out about spam filtering now rather than from your first member:
+
+```bash
+curl -sS -X POST https://matchmaker-api.fly.dev/v1/auth/start \
+  -H 'Content-Type: application/json' -d '{"email":"you@gmail.com"}'
+# {"challenge_id":"...","delivery":"email","dev_code":null}
+```
+
+`"delivery":"email"` means a mail host accepted the message. Check the inbox —
+and the spam folder, which is the answer to a DKIM or DMARC record you have not
+published yet. Then finish the sign-in with the code from the mail:
+
+```bash
+curl -sS -X POST https://matchmaker-api.fly.dev/v1/auth/verify \
+  -H 'Content-Type: application/json' \
+  -d '{"challenge_id":"<from above>","code":"<from the email>","device_id":"probe"}'
+# access_token and refresh_token. That is the whole production login path proven.
+```
+
+A `503 DEPENDENCY_UNAVAILABLE` from `/auth/start` means the mail host rejected the
+message or could not be reached — check `fly logs --app matchmaker-api` for the
+reason. The API reports that rather than claiming to have sent a mail it did not,
+so members see "try again in a moment" instead of watching an empty inbox.
 
 ## 5. Point the mobile app at it
 
