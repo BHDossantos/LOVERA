@@ -65,6 +65,49 @@ jobs:
       - run: npx expo export --platform android --output-dir /tmp/mobile-export
         env:
           EXPO_NO_TELEMETRY: "1"
+      # The stores read AndroidManifest.xml and Info.plist, not app.config.ts, and the
+      # two can disagree: a plugin adds a purpose string for a permission we never use, a
+      # blocked permission comes back in through manifest merging, an unconfigured splash
+      # falls back to white. Prebuild is the only way to see what they will actually read,
+      # and it needs no Android SDK or Xcode — just the native templates from npm.
+      - run: npx expo prebuild --platform all --no-install --clean
+        env:
+          EXPO_NO_TELEMETRY: "1"
+      - run: python3 scripts/check-native-config.py
+      # A build for anything but a developer's laptop must name a reachable API origin.
+      # Expo inlines it at bundle time, so getting this wrong ships a binary that installs,
+      # launches, and then fails every request — which no test on the JS side can see.
+      # Note this reads the environment, not eas.json: eas.json's `env` is applied by the
+      # EAS builder, so these cases stand in for what it will pass.
+      - name: The shipping-build guards hold
+        run: |
+          set -euo pipefail
+          real_id=11111111-2222-3333-4444-555555555555
+          refuse() {  # label, then env assignments the build would carry
+            local label="$1"; shift
+            if env EAS_BUILD_PROFILE=production "$@" \
+                 npx expo config --type public --json >/dev/null 2>&1; then
+              echo "::error::a production build was allowed with $label"
+              exit 1
+            fi
+            echo "refused:  $label"
+          }
+          accept() {
+            local label="$1"; shift
+            env "$@" npx expo config --type public --json >/dev/null
+            echo "accepted: $label"
+          }
+          refuse "no API origin"            EXPO_PUBLIC_API_ORIGIN=  EXPO_PUBLIC_EAS_PROJECT_ID="$real_id"
+          refuse "the eas.json placeholder" EXPO_PUBLIC_API_ORIGIN=https://api.example.com EXPO_PUBLIC_EAS_PROJECT_ID="$real_id"
+          refuse "a cleartext origin"       EXPO_PUBLIC_API_ORIGIN=http://api.aimatchmaker.app EXPO_PUBLIC_EAS_PROJECT_ID="$real_id"
+          refuse "no EAS project id"        EXPO_PUBLIC_API_ORIGIN=https://api.aimatchmaker.app
+          refuse "a placeholder project id" EXPO_PUBLIC_API_ORIGIN=https://api.aimatchmaker.app EXPO_PUBLIC_EAS_PROJECT_ID=REPLACE-ME-run-eas-init
+          accept "a real origin and project id" EAS_BUILD_PROFILE=production \
+                 EXPO_PUBLIC_API_ORIGIN=https://api.aimatchmaker.app EXPO_PUBLIC_EAS_PROJECT_ID="$real_id"
+          accept "the development profile, unconfigured" EAS_BUILD_PROFILE=development
+          accept "no profile at all, as \`expo start\` runs" EXPO_NO_TELEMETRY=1
+        env:
+          EXPO_NO_TELEMETRY: "1"
   e2e:
     runs-on: ubuntu-latest
     needs: [api, web]

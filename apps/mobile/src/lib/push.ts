@@ -52,7 +52,7 @@ export async function ensureAndroidChannels() {
   });
 }
 
-export type PushOutcome = "registered" | "denied" | "unsupported" | "error";
+export type PushOutcome = "registered" | "denied" | "unsupported" | "misconfigured" | "error";
 
 export async function registerForPush(deviceId?: string): Promise<PushOutcome> {
   // A simulator has no push transport at all; asking there produces a confusing
@@ -68,9 +68,19 @@ export async function registerForPush(deviceId?: string): Promise<PushOutcome> {
     }
     if (status !== "granted") return "denied";
 
-    const token = await Notifications.getExpoPushTokenAsync(
-      projectId() ? { projectId: projectId() } : undefined,
-    );
+    // Expo mints the token against an EAS project. A standalone build with no project id
+    // cannot get one, and the failure looks exactly like "the member declined" unless we
+    // say so: push would simply never arrive, for everybody, with nothing in the UI to
+    // show it. EXPO_PUBLIC_EAS_PROJECT_ID comes from `eas init` — see docs/STORE-SUBMISSION.md.
+    const id = projectId();
+    if (!id && Constants.appOwnership !== "expo") {
+      console.warn(
+        "[push] no EAS project id, so no push token can be issued; " +
+          "set EXPO_PUBLIC_EAS_PROJECT_ID for this build",
+      );
+      return "misconfigured";
+    }
+    const token = await Notifications.getExpoPushTokenAsync(id ? { projectId: id } : undefined);
     await api("/notifications/devices", {
       method: "PUT",
       body: {
@@ -81,9 +91,12 @@ export async function registerForPush(deviceId?: string): Promise<PushOutcome> {
       },
     });
     return "registered";
-  } catch {
-    // Never surface this. A member who cannot receive push should still be able to
-    // use every part of the app, and there is nothing useful for them to do about it.
+  } catch (err) {
+    // Never surface this to the member: someone who cannot receive push should still be
+    // able to use every part of the app, and there is nothing useful for them to do about
+    // it. Do log it, though — a silently swallowed failure here means push is dead for
+    // everyone and nobody finds out until a member misses an introduction.
+    console.warn("[push] registration failed", err);
     return "error";
   }
 }

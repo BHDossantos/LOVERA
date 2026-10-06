@@ -70,9 +70,55 @@ issued without it.
 
 ## 3. Point the app at the real API — **You**
 
-`apps/mobile/eas.json` ships with placeholder origins. Replace
-`https://api.example.com` (production) and the staging one with the real hosts
-before building, or the app will install and then fail every request.
+`apps/mobile/eas.json` carries `REPLACE-ME` values for both the API origin and the
+EAS project ID, in the `preview` and `production` profiles. Replace all four.
+
+You cannot forget this. Expo inlines both values at bundle time, so a binary built
+against a placeholder installs, launches, and then fails every request — or never
+receives a push — and nothing on the device says why. So `app.config.ts` refuses
+to produce a config for any profile other than `development` unless the origin is
+a real `https://` host and the project ID is a real one. The build stops in seconds
+instead of at a reviewer's device:
+
+```
+EXPO_PUBLIC_API_ORIGIN is not an address anyone else can reach for the
+"production" profile: https://REPLACE-ME.example.com
+Every request in this build would fail. Set EXPO_PUBLIC_API_ORIGIN for the
+"production" profile in eas.json and build again.
+```
+
+It rejects an absent value, anything that looks like a placeholder, a loopback or
+private address, and plain `http://` — the last because release builds block
+cleartext on both platforms, so an `http` origin is unreachable even if the host
+is real. CI exercises all eight cases on every push.
+
+---
+
+## 3a. What the native projects actually say
+
+`app.config.ts` is not what the stores read. Expo's prebuild turns it into an
+`AndroidManifest.xml` and an `Info.plist`, and the two can disagree — a plugin
+adds a purpose string on your behalf, a permission you blocked returns through
+manifest merging, an unconfigured splash falls back to white. None of that is
+visible in the config file.
+
+```bash
+cd apps/mobile
+npm run check:native     # prebuild, then assert what came out
+```
+
+This needs no Android SDK and no Xcode; it only generates the project files and
+reads them. CI runs it on every push, and it is how the following were found and
+fixed rather than discovered during review:
+
+| Found in the generated config | Why it mattered |
+|---|---|
+| `NSMicrophoneUsageDescription`, boilerplate text | The image picker adds it for video capture. We take stills, so the app declared a permission with a generic string describing a feature a reviewer cannot find — guideline 5.1.1. |
+| `NSFaceIDUsageDescription`, boilerplate text | Added by expo-secure-store. We never gate the token behind biometrics. |
+| `SYSTEM_ALERT_WINDOW` | React Native's default. Draw-over-other-apps on a dating app invites questions we have no answer to, because we draw no overlays. |
+| `WRITE_EXTERNAL_STORAGE` | The image picker's default. We write nothing to shared storage. |
+| `allowBackup="true"` | Conversations, introductions and photos were eligible for a cloud backup neither the member nor we can audit. Now `false`. |
+| Splash background `#FFFFFF` | `assets/splash-icon.png` was never wired up, so the app opened on a white flash instead of the brand cream. |
 
 ---
 
@@ -90,6 +136,16 @@ EAS builds iOS on its own macOS machines, so no Mac is needed. The first build
 of each platform asks to generate signing credentials — say yes and let EAS
 manage them; hand-managed certificates are the single most common cause of a
 broken release six months later.
+
+**Or build from CI instead.** `.github/workflows/mobile-build.yml` runs the same
+thing from Actions → *Mobile build* → *Run workflow*, with a choice of platform
+and profile and an explicit opt-in to submit. It needs one repository secret,
+`EXPO_TOKEN`, from expo.dev → Account settings → Access tokens. It is manual on
+purpose: a store build consumes build quota, increments a version, and on the
+production profile is something you intend to submit — none of which should
+happen because somebody pushed a commit. Before spending twenty minutes on a
+remote build it reads `eas.json` for the chosen profile and runs the same guards
+as §3, so a placeholder fails in seconds.
 
 **Google Play's testing requirement.** A newly created *personal* developer
 account must run a closed test with at least 12 testers opted in for 14

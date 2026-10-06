@@ -52,6 +52,17 @@ independent release cadence, scaling profile or data residency; until then one i
   `docs/STORE-SUBMISSION.md`.
 - Push notifications: `push_devices` is keyed on the push token, not the device, because the
   platform reissues tokens freely and the same token can later belong to a different member.
+- The mobile app's store-facing configuration is checked against what prebuild generates, not
+  against what `app.config.ts` says, because those are different things: plugins add iOS purpose
+  strings on your behalf, manifest merging reinstates permissions you blocked, and an
+  unconfigured splash silently falls back to white. `apps/mobile/scripts/check-native-config.py`
+  reads the generated `AndroidManifest.xml` and `Info.plist` and asserts both what must be there
+  and what must not. It needs no Android SDK or Xcode and runs in CI.
+- A mobile build for anything but a developer's own machine must name a real `https` API origin
+  and a real EAS project id. Expo inlines both at bundle time, so a placeholder yields a binary
+  that installs and then reaches nothing, or never receives a push — a failure invisible from
+  the outside and an immediate App Review rejection. `app.config.ts` refuses to produce a config
+  in that state, so the build fails in seconds rather than on a reviewer's device.
   Registration is idempotent; signing out revokes that handset's tokens.
 - Dependabot keeps pip, npm, Docker base images and Actions current with weekly grouped PRs.
   `.github/workflows/dependabot-auto-merge.yml` labels a Dependabot PR when every dependency in
