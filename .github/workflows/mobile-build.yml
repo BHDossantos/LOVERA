@@ -1,0 +1,122 @@
+# Produce store binaries without a local toolchain.
+#
+# An iOS build needs macOS and an Apple certificate; an Android build needs the Android
+# SDK and a keystore. Rather than maintain either, this hands the job to EAS, which keeps
+# the signing credentials and returns a .ipa and an .aab. The only thing it needs from
+# this repository is a token.
+#
+# Setup, once:
+#   1. npx eas-cli login && npx eas-cli init     (in apps/mobile; creates the EAS project)
+#   2. Put the project id in the repository variable EXPO_PUBLIC_EAS_PROJECT_ID — without
+#      it push notifications cannot be issued a token.
+#   3. npx eas-cli build:configure                (generates the signing credentials)
+#   4. Create a token at expo.dev → Account settings → Access tokens, and store it as the
+#      repository secret EXPO_TOKEN.
+#   5. Replace the REPLACE-ME API origins in apps/mobile/eas.json. The build refuses to
+#      start while they are placeholders, which is the point of them.
+#
+# This is deliberately manual. A store build burns a build minute quota, increments a
+# version, and on the production profile is a thing you intend to submit — none of which
+# should happen because somebody pushed a commit.
+name: Mobile build
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Which binaries to build
+        type: choice
+        default: all
+        options: [all, android, ios]
+      profile:
+        description: eas.json build profile
+        type: choice
+        default: preview
+        options: [preview, production]
+      submit:
+        description: Submit to the store after a successful production build
+        type: boolean
+        default: false
+
+concurrency:
+  group: mobile-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - name: Check the token is present before doing anything slow
+        run: |
+          if [ -z "${EXPO_TOKEN}" ]; then
+            echo "::error::EXPO_TOKEN is not set. Create one at expo.dev (Account settings"
+            echo "::error::→ Access tokens) and add it as a repository secret."
+            exit 1
+          fi
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - run: npm ci
+      - run: npx tsc --noEmit
+
+      # Fail here, in seconds, rather than twenty minutes into a remote build. The API
+      # origin and the EAS project id are inlined into the bundle, and a placeholder
+      # produces a binary that installs and then reaches nothing, or never receives a push.
+      #
+      # This reads the values out of eas.json rather than this runner's environment,
+      # because the runner's environment is not what the build sees: `eas build` uploads
+      # the project and runs on EAS's machines, where the profile's `env` block is what
+      # gets applied. Checking the runner would prove nothing about the build.
+      - name: Confirm this profile is configured, the way the EAS builder will see it
+        run: |
+          set -euo pipefail
+          eval "$(python3 - "${{ inputs.profile }}" <<'EOF'
+          import json, shlex, sys
+          profile = sys.argv[1]
+          env = json.load(open("eas.json"))["build"][profile].get("env", {})
+          for key in ("EXPO_PUBLIC_API_ORIGIN", "EXPO_PUBLIC_EAS_PROJECT_ID"):
+              print(f"export {key}={shlex.quote(env.get(key, ''))}")
+          EOF
+          )"
+          echo "eas.json ${{ inputs.profile }} → origin=${EXPO_PUBLIC_API_ORIGIN:-<unset>} project=${EXPO_PUBLIC_EAS_PROJECT_ID:-<unset>}"
+          npx expo config --type public --json > /dev/null
+        env:
+          EAS_BUILD_PROFILE: ${{ inputs.profile }}
+          EXPO_NO_TELEMETRY: "1"
+
+      - name: Build
+        run: |
+          npx eas-cli@latest build \
+            --platform "${{ inputs.platform }}" \
+            --profile "${{ inputs.profile }}" \
+            --non-interactive \
+            --wait
+        env:
+          # The build's own EXPO_PUBLIC_* values come from eas.json, applied on EAS's
+          # builders; nothing set here would reach them.
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_NO_TELEMETRY: "1"
+
+      # Submission is opt-in and production-only. Submitting a preview APK to a store
+      # listing is not a thing you can undo quietly.
+      - name: Submit
+        if: ${{ inputs.submit && inputs.profile == 'production' }}
+        run: |
+          npx eas-cli@latest submit \
+            --platform "${{ inputs.platform }}" \
+            --profile production \
+            --latest \
+            --non-interactive
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_NO_TELEMETRY: "1"
