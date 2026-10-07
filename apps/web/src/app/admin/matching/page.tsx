@@ -44,7 +44,7 @@ type Correction = {
   applied: boolean;
   note: string | null;
   created_at: string | null;
-  review: { decision: string; note: string | null; reviewer_id: string; at: string | null } | null;
+  review: { decision: string; note: string | null; reviewer: { id: string; name: string }; at: string | null } | null;
 };
 
 /** Concierge matching: run the weekly batch, review pairs with internal scores and explanations, publish. No safety data. */
@@ -104,8 +104,13 @@ export default function AdminMatchingPage() {
   const resolve = (id: string, decision: "actioned" | "no_change") => {
     // Resolving the last row of a page it has just left would strand the reviewer on an empty page
     // with the rest of the queue behind them, so the page steps back with it.
+    //
+    // Inside the request, not after it: `act` catches the failure and resolves anyway, so a
+    // `.then()` here stepped the page back on a review the server had refused — hiding a row that
+    // is still unresolved and telling the reviewer, by moving them on, that it had been dealt with.
     const emptiesThePage = unresolvedOnly && page > 0 && (corrections.data?.items.length ?? 0) === 1;
-    return act(`correction:${id}`, () => post(`/admin/matching/corrections/${id}/review`, { decision, note: reviewNotes[id]?.trim() || null })).then(() => {
+    return act(`correction:${id}`, async () => {
+      await post(`/admin/matching/corrections/${id}/review`, { decision, note: reviewNotes[id]?.trim() || null });
       if (emptiesThePage) setPage((n) => Math.max(0, n - 1));
     });
   };
@@ -222,7 +227,10 @@ export default function AdminMatchingPage() {
                   </p>
                   {c.review ? (
                     <p className="mt-1 text-xs text-ink-secondary">
-                      Reviewed {formatDateTime(c.review.at)} · {c.review.decision === "actioned" ? "acted on" : "the inference stands"}
+                      {/* Named, not just dated: this queue is worked by several people, and
+                          "no change needed" is only useful if the next one can see who decided
+                          that and ask them why. */}
+                      Reviewed by {c.review.reviewer.name} · {formatDateTime(c.review.at)} · {c.review.decision === "actioned" ? "acted on" : "the inference stands"}
                       {c.review.note ? ` · “${c.review.note}”` : ""}
                     </p>
                   ) : (

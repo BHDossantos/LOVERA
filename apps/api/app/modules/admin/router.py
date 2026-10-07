@@ -77,6 +77,21 @@ def _name(db: Session, member_id: str | None) -> str:
     return (p.display_name if p and p.display_name else member_id[:8])
 
 
+def _review_payload(db: Session, review: IntroCorrectionReview) -> dict[str, Any]:
+    """One correction's review, with the reviewer named rather than only identified.
+
+    A concierge queue is worked by several people, so "reviewed, no change needed" is not a useful
+    record unless the next person can see who decided it and ask them why. The id alone was no use
+    to the client: there is no endpoint that turns a staff id into a person.
+    """
+    return {
+        "decision": review.decision,
+        "note": review.note,
+        "reviewer": {"id": review.reviewer_id, "name": _name(db, review.reviewer_id)},
+        "at": iso(review.created_at),
+    }
+
+
 # ---- Concierge matching -------------------------------------------------
 @router.get("/matching/runs")
 def list_runs(principal: Principal = Depends(require_roles("concierge", "admin")), db: Session = Depends(get_db, scope="function")) -> dict:
@@ -177,9 +192,7 @@ def list_corrections(
                 "applied": applied,
                 "note": c.note,
                 "created_at": iso(c.created_at),
-                "review": None
-                if review is None
-                else {"decision": review.decision, "note": review.note, "reviewer_id": review.reviewer_id, "at": iso(review.created_at)},
+                "review": None if review is None else _review_payload(db, review),
             }
         )
     audit(db, actor_type="staff", actor_id=principal.id, action="admin.corrections_viewed", resource_type="intro_correction", resource_id=None, purpose="concierge_review", metadata={"count": len(out)})
@@ -230,7 +243,7 @@ def review_correction(
         purpose="concierge_review",
         metadata={"decision": data.decision, "note": data.note, "signal_key": correction.signal_key},
     )
-    return {"id": correction.id, "review": {"decision": review.decision, "note": review.note, "reviewer_id": review.reviewer_id, "at": iso(review.created_at)}}
+    return {"id": correction.id, "review": _review_payload(db, review)}
 
 
 @router.post("/matching/runs/{run_id}/publish")

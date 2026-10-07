@@ -117,6 +117,9 @@ def test_the_unresolved_corrections_queue_can_be_drained(client):
     r = concierge.post(f"/admin/matching/corrections/{correction_id}/review", json={"decision": "no_change", "note": "Read it; the inference stands."})
     assert r.status_code == 200, r.text
     assert r.json()["review"]["decision"] == "no_change"
+    # Named, not only identified: nothing turns a staff id into a person on the client, and a
+    # shared queue needs to show who settled a dispute so the next reviewer can ask them why.
+    assert r.json()["review"]["reviewer"]["name"]
 
     after = concierge.get("/admin/matching/corrections?unresolved_only=true&limit=200").json()
     assert correction_id not in [c["id"] for c in after["items"]], "a reviewed correction must leave the unresolved queue"
@@ -127,7 +130,7 @@ def test_the_unresolved_corrections_queue_can_be_drained(client):
     full = concierge.get("/admin/matching/corrections?unapplied_only=true&limit=200").json()["items"]
     resolved = next(c for c in full if c["id"] == correction_id)
     assert resolved["review"]["note"] == "Read it; the inference stands."
-    assert resolved["review"]["reviewer_id"]
+    assert resolved["review"]["reviewer"]["id"] and resolved["review"]["reviewer"]["name"]
 
     # Two reviewers on the same row: the second is told rather than silently overwriting the first.
     # The unique constraint is what answers, not a preceding SELECT, so this is the same code path a
@@ -136,6 +139,7 @@ def test_the_unresolved_corrections_queue_can_be_drained(client):
     # And the first reviewer's decision survived the second attempt intact.
     again = next(c for c in concierge.get("/admin/matching/corrections?unapplied_only=true&limit=200").json()["items"] if c["id"] == correction_id)
     assert again["review"]["decision"] == "no_change" and again["review"]["note"] == "Read it; the inference stands."
+    assert again["review"]["reviewer"]["id"] == resolved["review"]["reviewer"]["id"]
     assert concierge.post("/admin/matching/corrections/nope/review", json={"decision": "actioned"}).status_code == 404
 
 
