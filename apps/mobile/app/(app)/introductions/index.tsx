@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Pressable, Text, View } from "react-native";
 import { ApiError, get } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
+import { awaitingServer, serverDriven } from "@/lib/query";
 import type { Introduction } from "@/api/types";
 import { INTRO_STATUS_LABEL, type IntroductionList } from "@/components/intro";
 import { Badge, Card, Empty, ErrorState, Loading, PageTitle, Screen } from "@/components/ui";
@@ -43,6 +44,7 @@ export default function IntroductionsScreen() {
   const router = useRouter();
   const q = useQuery({
     queryKey: ["introductions"],
+    ...serverDriven,
     queryFn: () => get<IntroductionList>("/introductions"),
     enabled: !!me,
   });
@@ -56,7 +58,7 @@ export default function IntroductionsScreen() {
         title="Who the matchmaker chose, and why"
         lede="A few explained, reciprocal introductions at a time. No stack, no likes, no rankings."
       />
-      {q.isLoading && <Loading label="Loading introductions" />}
+      {awaitingServer(q) && <Loading label="Loading introductions" />}
       <ErrorState error={(q.error as ApiError) ?? null} retry={() => q.refetch()} />
       {!!q.data && (
         <>

@@ -497,3 +497,30 @@ def test_a_sensitive_signal_needs_consent_before_it_can_be_corrected(client):
     value = next(iter(SIGNALS[key].options))
     r = consented.post(f"/blueprint/signals/{key}", json={"tier": "open", "value": {"value": value}})
     assert r.status_code == 200, r.text
+    assert next(s for s in consented.get("/blueprint/current").json()["signals"] if s["key"] == key)["correctable"] is True
+
+    # Withdrawing consent afterwards: the answer stays visible, stops being editable, and stops
+    # being matched on. Consent is the lawful basis, so withdrawing it has to end the processing
+    # and not only the collection — this used to set a flag on the snapshot that nothing read.
+    from app.core.db import session_factory
+    from app.models.account import Member
+    from app.modules.matching.snapshot import build_snapshot
+
+    consented.put("/consents/special_category", json={"status": "revoked", "policy_version": "2026-01-01"})
+    after = consented.get("/blueprint/current").json()
+    row = next((s for s in after["signals"] if s["key"] == key), None)
+    assert row is not None, "the member must still see what we hold about them"
+    assert row["correctable"] is False, "and must not be offered an edit that correct_signal refuses"
+    assert key not in {s["key"] for s in after["unanswered"]}
+    r = consented.post(f"/blueprint/signals/{key}", json={"tier": "open", "value": {"value": value}})
+    assert r.status_code == 403, r.text
+
+    db = session_factory()()
+    try:
+        snap = build_snapshot(db, db.get(Member, consented.id))
+        assert snap is not None
+        assert key not in snap.signals, "a signal whose consent was withdrawn must not be scored"
+        assert key not in snap.confidences
+        assert snap.special_category_consent is False
+    finally:
+        db.close()

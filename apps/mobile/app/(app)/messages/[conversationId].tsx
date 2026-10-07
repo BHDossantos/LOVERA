@@ -5,6 +5,7 @@ import { FlatList, KeyboardAvoidingView, Platform, Pressable, Text, View } from 
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ApiError, get, newIdempotencyKey, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
+import { serverDriven } from "@/lib/query";
 import type { ConversationSummary, Message } from "@/api/types";
 import { Badge, Button, ErrorState, Loading, StatusBanner, TextInput } from "@/components/ui";
 import { color, radius, space, type as typo } from "@/theme";
@@ -30,16 +31,25 @@ export default function Conversation() {
   const [sendError, setSendError] = useState<ApiError | null>(null);
   const listRef = useRef<FlatList<Message>>(null);
 
+  // The summary carries the state the notifications are about — a new message, a conversation
+  // closed, a safety hold — so it gets the full policy.
   const summary = useQuery({
     queryKey: ["conversation", id],
     queryFn: () => get<ConversationSummary>(`/conversations/${id}`),
     enabled: !!me && !!id,
+    ...serverDriven,
   });
+  // The history deliberately does not. It refetches on mount, so a new-message notification
+  // never opens a thread missing the message it was about, but it keeps its cache: `gcTime: 0`
+  // would blank a conversation every time the member stepped out of it and back, and the 8s poll
+  // already keeps it current. Showing the messages you had while the refetch lands is right for
+  // a chat in a way it is not for a yes/no answer about somebody.
   const history = useQuery({
     queryKey: ["messages", id],
     queryFn: () => get<History>(`/conversations/${id}/messages`),
     enabled: !!me && !!id,
     refetchInterval: 8_000,
+    refetchOnMount: "always",
   });
 
   const items = history.data?.items ?? [];

@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Text } from "react-native";
 import { ApiError, get } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
-import { serverDriven } from "@/lib/query";
+import { awaitingServer, serverDriven } from "@/lib/query";
 import type { Introduction } from "@/api/types";
 import { Badge, Button, Card, ErrorState, Loading, PageTitle, Screen, StatusBanner } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
@@ -29,7 +29,7 @@ export default function Mutual() {
     ...serverDriven,
   });
 
-  if (q.isLoading)
+  if (awaitingServer(q))
     return (
       <Screen scroll={false}>
         <Loading label="Loading" />

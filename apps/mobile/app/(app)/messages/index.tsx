@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Pressable, Text, View } from "react-native";
 import { ApiError, get } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
+import { awaitingServer, serverDriven } from "@/lib/query";
 import type { ConversationSummary } from "@/api/types";
 import { Badge, Card, Empty, ErrorState, Loading, PageTitle, Screen } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
@@ -13,6 +14,7 @@ export default function MessagesScreen() {
   const router = useRouter();
   const q = useQuery({
     queryKey: ["conversations"],
+    ...serverDriven,
     queryFn: () => get<{ items: ConversationSummary[] }>("/conversations"),
     enabled: !!me,
     refetchInterval: 30_000,
@@ -25,7 +27,7 @@ export default function MessagesScreen() {
         title="Conversations"
         lede="Only with people who also said yes. There is no inbox of strangers here."
       />
-      {q.isLoading && <Loading label="Loading conversations" />}
+      {awaitingServer(q) && <Loading label="Loading conversations" />}
       <ErrorState error={(q.error as ApiError) ?? null} retry={() => q.refetch()} />
       {!!q.data && q.data.items.length === 0 && (
         <Empty title="No conversations yet" body="A conversation opens the moment an introduction is mutual." />

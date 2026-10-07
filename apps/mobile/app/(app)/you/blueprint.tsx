@@ -124,17 +124,28 @@ export default function YouBlueprint() {
               <Text style={s.body}>{sig.value_label || sig.value || "—"}</Text>
               {!!sig.evidence && <Text style={s.meta}>{sig.evidence}</Text>}
               <Text style={s.fine}>Confidence: {sig.confidence}</Text>
-              {sig.options.length > 0 && (
-                <Button
-                  variant="ghost"
-                  onPress={() => {
-                    setEditing(sig);
-                    setValue(sig.value ?? "");
-                    setError(null);
-                  }}
-                >
-                  That's not right
-                </Button>
+              {/* A sensitive signal answered before consent was withdrawn still shows here —
+                  a member is entitled to see what we hold about them — but changing it needs the
+                  consent that was withdrawn, so the only honest thing is to say so rather than
+                  offer a button whose one outcome is a refusal. */}
+              {!sig.correctable ? (
+                <Text style={s.meta}>
+                  You withdrew consent for sensitive data, so this is no longer used for matching and cannot be
+                  changed here. Granting that consent again in Privacy makes it editable.
+                </Text>
+              ) : (
+                sig.options.length > 0 && (
+                  <Button
+                    variant="ghost"
+                    onPress={() => {
+                      setEditing(sig);
+                      setValue(sig.value ?? "");
+                      setError(null);
+                    }}
+                  >
+                    That's not right
+                  </Button>
+                )
               )}
             </Card>
           ))}

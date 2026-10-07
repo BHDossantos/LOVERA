@@ -21,8 +21,10 @@ export function CorrectionForm({ introId, suggestedKeys = [], title = "Something
    */
   const signals = useMemo(
     () => [
-      ...(blueprint.data?.signals ?? []).map((s) => ({ ...s, value_label: s.value_label })),
-      ...(blueprint.data?.unanswered ?? []).map((s) => ({ ...s, value: null, value_label: "" })),
+      // `correctable` is false for a sensitive signal answered before consent was withdrawn: the
+      // row is still shown on the Blueprint screen, but correct_signal refuses to change it.
+      ...(blueprint.data?.signals ?? []).filter((s) => s.correctable).map((s) => ({ ...s, value_label: s.value_label })),
+      ...(blueprint.data?.unanswered ?? []).map((s) => ({ ...s, value: null, value_label: "", correctable: true })),
     ],
     [blueprint.data],
   );

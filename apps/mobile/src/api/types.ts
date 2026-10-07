@@ -172,6 +172,12 @@ export type BlueprintSignal = {
   member_corrected: boolean;
   freshness_at: string | null;
   special_category: boolean;
+  /**
+   * False for a special-category signal the member has withdrawn consent for. The row is still
+   * returned — they are entitled to see what we hold — but `correct_signal` refuses to change it,
+   * so anything offering an edit has to respect this or it offers a guaranteed 403.
+   */
+  correctable: boolean;
   options: { value: string; label: string }[];
 };
 

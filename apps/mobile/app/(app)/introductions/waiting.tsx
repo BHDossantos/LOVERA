@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Text, View } from "react-native";
 import { ApiError, get } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
+import { awaitingServer, serverDriven } from "@/lib/query";
 import { Button, Card, Divider, ErrorState, Loading, PageTitle, Screen, StatusBanner } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
 
@@ -28,9 +29,14 @@ type Waiting = {
 export default function Waiting() {
   const { me } = useRequireMember();
   const router = useRouter();
-  const q = useQuery({ queryKey: ["introductions", "waiting"], queryFn: () => get<Waiting>("/introductions/waiting"), enabled: !!me });
+  const q = useQuery({
+    queryKey: ["introductions", "waiting"],
+    queryFn: () => get<Waiting>("/introductions/waiting"),
+    enabled: !!me,
+    ...serverDriven,
+  });
 
-  if (q.isLoading)
+  if (awaitingServer(q))
     return (
       <Screen scroll={false}>
         <Loading label="Checking why" />

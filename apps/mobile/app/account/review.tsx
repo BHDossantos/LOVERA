@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Text } from "react-native";
 import { ApiError, get, post } from "@/api/client";
 import { useAuth } from "@/lib/auth";
-import { serverDriven } from "@/lib/query";
+import { awaitingServer, serverDriven } from "@/lib/query";
 import { Badge, Button, Card, Divider, ErrorState, Field, Loading, PageTitle, Screen, StatusBanner, TextInput } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
 
@@ -72,7 +72,7 @@ export default function AccountReview() {
         body="You can still reach the safety centre and your own data."
       />
       <ErrorState error={error ?? ((q.error as ApiError) ?? null)} retry={() => q.refetch()} />
-      {q.isLoading && <Loading label="Loading the decision" />}
+      {awaitingServer(q) && <Loading label="Loading the decision" />}
 
       {q.data?.actions.length === 0 && (
         <Card>

@@ -44,9 +44,13 @@ export function CorrectionForm({ introId, suggestedKeys = [] }: { introId: strin
    * the *viewer* lacks, and those have no row in `signals` at all — so a list built from
    * `signals` alone silently dropped the one thing the member could usefully supply, while
    * showing a reordered list of values that were fine.
+   *
+   * `correctable` filters the other direction: a sensitive signal answered before consent was
+   * withdrawn is still shown on the Blueprint screen, but `correct_signal` refuses to change it,
+   * so offering it here would be a control whose only outcome is a 403.
    */
   const ordered = useMemo<Choice[]>(() => {
-    const answered: Choice[] = (blueprint.data?.signals ?? []).map((s) => ({
+    const answered: Choice[] = (blueprint.data?.signals ?? []).filter((s) => s.correctable).map((s) => ({
       key: s.key,
       label: s.label,
       valueLabel: s.value_label,

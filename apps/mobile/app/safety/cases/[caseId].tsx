@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Text } from "react-native";
 import { ApiError, get, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
-import { serverDriven } from "@/lib/query";
+import { awaitingServer, serverDriven } from "@/lib/query";
 import { CASE_STATUS_LABEL, CATEGORY_LABEL, PROTECTION_LABEL, type SafetyCase } from "@/components/safety";
 import { EvidenceAttach } from "@/components/EvidenceAttach";
 import { Badge, Button, Card, Divider, ErrorState, Field, Loading, PageTitle, Screen, StatusBanner, TextInput } from "@/components/ui";
@@ -47,7 +47,7 @@ export default function CaseDetailScreen() {
     }
   };
 
-  if (q.isLoading)
+  if (awaitingServer(q))
     return (
       <Screen scroll={false}>
         <Loading label="Loading case" />

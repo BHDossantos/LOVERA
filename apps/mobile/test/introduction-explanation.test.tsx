@@ -56,6 +56,7 @@ const BLUEPRINT = {
       member_corrected: false,
       freshness_at: null,
       special_category: false,
+      correctable: true,
       options: [
         { value: "early", label: "Early riser" },
         { value: "flexible", label: "Flexible" },
@@ -275,4 +276,41 @@ test("a signal the member has never answered can still be supplied", async () =>
     value: "open",
     note: null,
   });
+});
+
+test("a sensitive signal whose consent was withdrawn is not offered for correction", async () => {
+  // The row is still returned — a member is entitled to see what we hold about them — but
+  // correct_signal refuses to change it, so offering it here is a guaranteed 403. Filtering only
+  // `unanswered` on the API side left exactly this hole.
+  mockGet.mockImplementation(
+    routeGet({
+      "/introductions/intro_1": INTRO,
+      "/blueprint/current": {
+        ...BLUEPRINT,
+        signals: [
+          ...BLUEPRINT.signals,
+          {
+            key: "values.faith_importance",
+            category: "values",
+            label: "Faith in daily life",
+            value: "central",
+            value_label: "Central",
+            confidence: "strong",
+            evidence: null,
+            member_corrected: true,
+            freshness_at: null,
+            special_category: true,
+            correctable: false,
+            options: [{ value: "central", label: "Central" }],
+          },
+        ],
+      },
+    }),
+  );
+  const s = await renderScreen(<IntroductionDetail />);
+  await s.press("Correct something about me");
+
+  expect(s.joined()).not.toContain("Faith in daily life");
+  // And the ordinary ones are still there, so this is a filter and not an empty list.
+  expect(s.hasText("Sleep rhythm")).toBe(true);
 });

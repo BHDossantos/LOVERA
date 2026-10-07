@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Text } from "react-native";
 import { ApiError, get, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
-import { serverDriven } from "@/lib/query";
+import { awaitingServer, serverDriven } from "@/lib/query";
 import type { DatePlan } from "@/api/types";
 import { Button, Card, ChoiceCard, ErrorState, Loading, Options, PageTitle, Screen, StatusBanner, Toggle } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
@@ -68,10 +68,10 @@ export default function DateFeedback() {
       await Promise.all([
         q.refetch(),
         qc.invalidateQueries({ queryKey: ["date-plans"] }),
-        // The outcome is a different key, and this navigates straight to the screen that reads
-        // it. `serverDriven` makes that screen refetch, but without dropping the cached answer
-        // first it paints the old one for a frame — and the old one is "no mutual result yet".
-        qc.invalidateQueries({ queryKey: ["date-plan", dateId, "outcome"] }),
+        // Removed, not invalidated: invalidate marks an entry stale and leaves it in place, so
+        // the screen this navigates to would still have something to paint. The old answer is
+        // "no mutual result yet", which is the one thing it must not say here.
+        qc.removeQueries({ queryKey: ["date-plan", dateId, "outcome"] }),
       ]);
       router.replace(`/dates/${dateId}/mutual-second-date` as never);
     } catch (e) {
@@ -81,7 +81,7 @@ export default function DateFeedback() {
     }
   };
 
-  if (q.isLoading)
+  if (awaitingServer(q))
     return (
       <Screen scroll={false}>
         <Loading label="Loading date" />

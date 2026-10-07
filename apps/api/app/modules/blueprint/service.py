@@ -284,12 +284,15 @@ def upsert_preference(db: Session, member: Member, key: str, tier: str, value: d
 
 
 def current_payload(db: Session, member: Member) -> dict[str, Any]:
+    from app.modules.account.service import has_consent
+
+    sensitive_ok = has_consent(db, member.id, "special_category")
     version = db.execute(select(BlueprintVersion).where(BlueprintVersion.member_id == member.id, BlueprintVersion.status == "confirmed")).scalar_one_or_none()
     signals = []
     if version:
         for s in db.execute(select(BlueprintSignal).where(BlueprintSignal.blueprint_version_id == version.id)).scalars():
             sig = SIGNALS[s.key]
-            signals.append({"key": s.key, "category": sig.category, "label": sig.label, "value": s.normalized_value.get("value"), "value_label": sig.options.get(s.normalized_value.get("value"), ""), "confidence": s.confidence, "evidence": (s.evidence_refs or [{}])[0].get("text"), "member_corrected": s.member_corrected, "freshness_at": iso(s.freshness_at), "special_category": sig.special_category, "options": [{"value": v, "label": l} for v, l in sig.options.items()]})
+            signals.append({"key": s.key, "category": sig.category, "label": sig.label, "value": s.normalized_value.get("value"), "value_label": sig.options.get(s.normalized_value.get("value"), ""), "confidence": s.confidence, "evidence": (s.evidence_refs or [{}])[0].get("text"), "member_corrected": s.member_corrected, "freshness_at": iso(s.freshness_at), "special_category": sig.special_category, "correctable": sensitive_ok or not sig.special_category, "options": [{"value": v, "label": l} for v, l in sig.options.items()]})
     from app.core.config import get_settings
 
     settings = get_settings()
@@ -303,12 +306,13 @@ def current_payload(db: Session, member: Member) -> dict[str, Any]:
     answered = {s["key"] for s in signals}
     # A special-category signal is only offered to a member who has consented to that category.
     # Listing it unconditionally invited sensitive data from somebody who had declined or
-    # withdrawn consent — `correct_signal` now refuses it, and offering a control that is going
-    # to be refused is its own kind of wrong. Already-answered ones stay in `signals`: a member
-    # is entitled to see what we hold about them even after withdrawing consent to collect more.
-    from app.modules.account.service import has_consent
-
-    sensitive_ok = has_consent(db, member.id, "special_category")
+    # withdrawn consent — `correct_signal` refuses it, and offering a control that is going to be
+    # refused is its own kind of wrong.
+    #
+    # An already-answered one stays in `signals`, because a member is entitled to see what we
+    # hold about them even after withdrawing consent to collect more. But it carries
+    # `correctable: false`, because the same refusal applies to changing it: without the flag,
+    # filtering only `unanswered` left the answered row selectable and the 403 was guaranteed.
     unanswered = [
         {
             "key": sig.key,
