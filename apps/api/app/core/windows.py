@@ -35,6 +35,10 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+# The shortest stretch worth offering as a first date. Named once because it is applied twice — when
+# two members' windows are intersected, and again after an unavailable day has been cut out of the
+# result — and those two must not drift apart.
+MINIMUM_SLOT_MINUTES = 90
 WEEK_MINUTES = 7 * 24 * 60
 
 Interval = tuple[datetime, datetime]
@@ -69,7 +73,7 @@ def day_intervals(windows: list[dict[str, Any]], tz: str, days: list[date]) -> l
     return out
 
 
-def intersect(a: list[Interval], b: list[Interval], minimum_minutes: int = 90) -> list[Interval]:
+def intersect(a: list[Interval], b: list[Interval], minimum_minutes: int = MINIMUM_SLOT_MINUTES) -> list[Interval]:
     """The intervals both sides are free for, long enough to be worth offering, merged and sorted.
 
     Merging comes *before* the minimum, not after. A window cannot cross midnight, so an evening that
@@ -128,7 +132,7 @@ def weekly_overlaps(
     b_windows: list[dict[str, Any]],
     b_tz: str,
     at: datetime,
-    minimum_minutes: int = 90,
+    minimum_minutes: int = MINIMUM_SLOT_MINUTES,
     label_tz: str | None = None,
 ) -> tuple[int, list[dict[str, Any]]]:
     """Total overlapping minutes in a week, and the overlaps labelled in `label_tz` (default `a_tz`).

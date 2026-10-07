@@ -1,7 +1,7 @@
 """Date plans: coarse availability intersection, safe public venues, proposal/response with reconfirmation, check-in, feedback."""
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -15,7 +15,7 @@ from app.core.config import get_settings
 from app.core.errors import ApiError
 from app.core.events import publish
 from app.core.timeutil import iso, utcnow
-from app.core.windows import WEEKDAYS, day_intervals, intersect
+from app.core.windows import MINIMUM_SLOT_MINUTES, WEEKDAYS, day_intervals, intersect, merge
 from app.models.account import Member
 from app.models.availability import AvailabilityVersion
 from app.models.conversations import Conversation
@@ -33,21 +33,33 @@ def _availability(db: Session, member_id: str) -> AvailabilityVersion | None:
     return db.execute(select(AvailabilityVersion).where(AvailabilityVersion.member_id == member_id).order_by(AvailabilityVersion.created_at.desc())).scalars().first()
 
 
-def _dates_touched(start: datetime, end: datetime, zone: ZoneInfo) -> list[str]:
-    """The local calendar dates a slot actually occupies, in `zone`.
+def _available_parts(start: datetime, end: datetime, away: set[str | None], zone: ZoneInfo) -> list[tuple[datetime, datetime]]:
+    """`[start, end)` with the member's unavailable local days cut out, the rest rejoined.
 
-    The end is pulled back by a microsecond so a slot finishing exactly at midnight does not count
-    the day it never reaches — otherwise an evening ending at 00:00 would be refused by somebody who
-    is away the following day, which is not what they said.
+    Refusing the whole interval was wrong once slots could span midnight: Friday 22:00–24:00 and
+    Saturday 00:00–02:00 merge into one four-hour stretch, and a member who is away on the Saturday
+    would lose the Friday evening too — which the planner offered before those two windows were ever
+    merged. So the interval is cut at each local midnight the member has excluded, and what is left is
+    offered if it is still long enough. The caller reapplies the minimum, because a remaining piece can
+    be shorter than the whole was.
     """
-    first = start.astimezone(zone).date()
-    last = (end - timedelta(microseconds=1)).astimezone(zone).date()
-    out: list[str] = []
-    day = first
-    while day <= last:
-        out.append(day.isoformat())
-        day += timedelta(days=1)
-    return out
+    parts: list[tuple[datetime, datetime]] = []
+    cursor = start
+    while cursor < end:
+        day = cursor.astimezone(zone).date()
+        # The member's next local midnight. `fold=0` is deliberate: on a day that has two 00:00s the
+        # earlier is the boundary, and a zone whose midnight does not exist at all would otherwise
+        # produce a bound at or before `cursor` — hence the guard below.
+        boundary = datetime.combine(day + timedelta(days=1), time.min, tzinfo=zone)
+        piece_end = min(end, boundary)
+        if piece_end <= cursor:
+            break
+        if day.isoformat() not in away:
+            parts.append((cursor, piece_end))
+        cursor = piece_end
+    # Contiguous pieces are one stretch again: two available days either side of midnight are not two
+    # separate offers.
+    return merge(parts)
 
 
 def _timezone_of(db: Session, member_id: str) -> str:
@@ -100,24 +112,27 @@ def overlaps(db: Session, a_id: str, b_id: str, tz: str, horizon_days: int = 14)
         local, local_end = starts_at.astimezone(zone), ends_at.astimezone(zone)
         if not (earliest <= local.date() <= latest):
             continue
-        # Every local date the slot touches, for each member, not just the one it starts on. A slot
-        # can now span midnight — contiguous windows either side of it are merged into the stretch
-        # they are — so checking only `starts_at` would offer a Friday-into-Saturday evening to
-        # somebody who has marked that Saturday unavailable.
-        if any(d in away_a for d in _dates_touched(starts_at, ends_at, a_zone)):
-            continue
-        if any(d in away_b for d in _dates_touched(starts_at, ends_at, b_zone)):
-            continue
-        out.append(
-            {
-                "date": local.date().isoformat(),
-                "weekday": WEEKDAYS[local.weekday()],
-                "start": local.strftime("%H:%M"),
-                "end": local_end.strftime("%H:%M"),
-                "starts_at": iso(starts_at),
-                "ends_at": iso(ends_at),
-            }
-        )
+        # Each member's unavailable days are cut out of the slot rather than rejecting it whole: a slot
+        # can span midnight now, so one excluded day would otherwise take a perfectly good evening on
+        # the other side of it with it.
+        pieces = [(starts_at, ends_at)]
+        for away, member_zone in ((away_a, a_zone), (away_b, b_zone)):
+            pieces = [part for piece in pieces for part in _available_parts(piece[0], piece[1], away, member_zone)]
+
+        for piece_start, piece_end in pieces:
+            if piece_end - piece_start < timedelta(minutes=MINIMUM_SLOT_MINUTES):
+                continue
+            shown, shown_end = piece_start.astimezone(zone), piece_end.astimezone(zone)
+            out.append(
+                {
+                    "date": shown.date().isoformat(),
+                    "weekday": WEEKDAYS[shown.weekday()],
+                    "start": shown.strftime("%H:%M"),
+                    "end": shown_end.strftime("%H:%M"),
+                    "starts_at": iso(piece_start),
+                    "ends_at": iso(piece_end),
+                }
+            )
     return out[:12]
 
 

@@ -168,12 +168,21 @@ def test_a_slot_spanning_midnight_respects_an_exception_on_either_day(client):
     assert r.status_code in (200, 201), r.text
 
     offers = a.get(f"/date-plans/{plan_id}/overlaps").json()["items"]
+    rome = ZoneInfo("Europe/Rome")
     for offer in offers:
         touched = {
-            (datetime.fromisoformat(offer["starts_at"].replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/Rome"))).date().isoformat(),
-            (datetime.fromisoformat(offer["ends_at"].replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/Rome")) - timedelta(microseconds=1)).date().isoformat(),
+            (datetime.fromisoformat(offer["starts_at"].replace("Z", "+00:00")).astimezone(rome)).date().isoformat(),
+            (datetime.fromisoformat(offer["ends_at"].replace("Z", "+00:00")).astimezone(rome) - timedelta(microseconds=1)).date().isoformat(),
         }
         assert saturday not in touched, f"{offer['starts_at']}–{offer['ends_at']} runs into a day B said they are away"
+
+    # And the Friday evening either side of that boundary survives. Rejecting the whole merged stretch
+    # would have taken a perfectly good two hours with it — hours the planner offered before those two
+    # windows were ever merged, so losing them would be a regression dressed as a fix.
+    friday = (datetime.fromisoformat(saturday) - timedelta(days=1)).date().isoformat()
+    kept = [o for o in offers if o["date"] == friday and o["start"] >= "22:00"]
+    assert kept, f"the Friday evening before the excluded {saturday} should still be offered: {offers}"
+    assert kept[0]["end"] == "00:00", "clipped at the member's local midnight, not discarded"
 
 
 def test_the_planner_offers_only_slots_inside_both_members_own_evenings(client):
