@@ -12,12 +12,19 @@ The two have now disagreed in both directions:
     with the recording of the call could not attach it.
 
 A comment on each constant asking the next person to keep them in step is what we had, and it is
-what failed. This compares them, in two steps so that neither side can move alone:
+what failed. This compares them, and it has to do that per *call site branch* rather than per name:
+one endpoint serves two kinds of media from one conditional, so a check that only asked whether
+each named list appears somewhere in the API would pass with the two branches swapped, while both
+pickers offered files their own branch rejects.
 
-  1. every `decode_data_url` call in the API passes one of the named endpoint allow-lists from
-     `app/core/datauri.py` — not an expression assembled at the call site, which this check could
-     not read and which could therefore be narrowed without it noticing;
-  2. each client `*_ACCEPT` constant holds exactly the types of the list its endpoint passes.
+So the allow-list each picker is compared against is read out of the code in three steps:
+
+  1. find the `decode_data_url` calls in the API and read the `allowed` argument with `ast`. A bare
+     name, or a conditional on a media kind, is readable; anything assembled at the call site is
+     refused rather than guessed at, because a guess is what this check exists to replace;
+  2. key each one by the module it is in and the media kind its branch tests for, so a swap between
+     two branches of the same call changes what this check compares;
+  3. compare each client `*_ACCEPT` constant with the types of the list at the key it declares.
 
 Run: python tools/check_upload_types.py apps/web/src
 """
@@ -36,67 +43,92 @@ sys.path.insert(0, str(REPO / "apps" / "api"))
 
 from app.core import datauri  # noqa: E402
 
-# Which named allow-list each client picker has to match. The types themselves are *not* written
-# here — only the name of the list, which is read from `datauri` and checked against the call that
-# enforces it. A constant missing from this table fails rather than passing unchecked: a new picker,
-# or a new endpoint, is a new place to drift.
-EXPECTED: dict[str, str] = {
-    "EVIDENCE_ACCEPT": "EVIDENCE_TYPES",  # safety/service.py:add_evidence
-    "PHOTO_ACCEPT": "PHOTO_TYPES",  # profile/service.py:complete_media, on a photo
-    "VOICE_ACCEPT": "VOICE_TYPES",  # profile/service.py:complete_media, on a voice note
+# Marks the fall-through branch of a conditional allow-list, and the single allow-list of a call
+# that has no conditional. Not a media kind, so it cannot collide with one.
+OTHERWISE = None
+
+# Which call site, and which branch of it, each client picker has to match. The media types are
+# *not* written here — they come from the module, and the name of the list comes from the code at
+# the key below. A picker missing from this table fails rather than passing unchecked, and so does a
+# key with no call site, so a new picker or a moved endpoint is a loud failure.
+EXPECTED: dict[str, tuple[str, str | None]] = {
+    "EVIDENCE_ACCEPT": ("app/modules/safety/service.py", OTHERWISE),
+    "VOICE_ACCEPT": ("app/modules/profile/service.py", "voice"),
+    "PHOTO_ACCEPT": ("app/modules/profile/service.py", OTHERWISE),
 }
 
 DECLARATION = re.compile(r"const\s+(\w*ACCEPT)\s*=\s*\[(.*?)\]\s*\.join\(", re.S)
 QUOTED = re.compile(r"""["']([^"']+)["']""")
 
+Key = tuple[str, str | None]
 
-def allow_list_names(node: ast.expr) -> list[str] | None:
-    """The endpoint lists an `allowed` argument resolves to, or None if it is not readable here.
 
-    A bare name is the ordinary case; a conditional is how one endpoint serves two kinds of media.
-    Anything else — a concatenation, a call, a variable assembled earlier — is refused rather than
-    guessed at, because a guess is what this check exists to replace.
+def branch_kind(test: ast.expr) -> str | None:
+    """The media kind a conditional allow-list's test selects, e.g. `media.type == "voice"`.
+
+    Only a single `==` against a string literal counts. Anything else is unreadable, because the
+    association between a branch and the picker that feeds it is exactly what this check is for.
     """
-    if isinstance(node, ast.Name):
-        return [node.id]
-    if isinstance(node, ast.IfExp):
-        a, b = allow_list_names(node.body), allow_list_names(node.orelse)
-        return None if a is None or b is None else a + b
+    if isinstance(test, ast.Compare) and len(test.ops) == 1 and isinstance(test.ops[0], ast.Eq):
+        right = test.comparators[0]
+        if isinstance(right, ast.Constant) and isinstance(right.value, str):
+            return right.value
     return None
 
 
-def server_lists() -> tuple[set[str], int]:
-    """Every allow-list the API actually enforces, read from the calls that enforce it."""
-    names: set[str] = set()
+def allow_lists(node: ast.expr) -> dict[str, str] | None:
+    """`{media kind or OTHERWISE: list name}` for an `allowed` argument, or None if unreadable."""
+    if isinstance(node, ast.Name):
+        return {"": node.id}  # keyed below; "" stands in for OTHERWISE inside this dict
+    if isinstance(node, ast.IfExp):
+        kind = branch_kind(node.test)
+        chosen, fallback = allow_lists(node.body), allow_lists(node.orelse)
+        if kind is None or chosen is None or fallback is None:
+            return None
+        # Only the simple shape `A if x == "kind" else B` is read; a nested conditional would need
+        # its own key scheme and there is no such call site.
+        if list(chosen) != [""] or list(fallback) != [""]:
+            return None
+        return {kind: chosen[""], "": fallback[""]}
+    return None
+
+
+def server_lists() -> tuple[dict[Key, str], int, int]:
+    """Every allow-list the API enforces, keyed by the call site branch that enforces it."""
+    found: dict[Key, str] = {}
     calls = 0
+    problems = 0
     for path in sorted((REPO / "apps" / "api" / "app").rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             if not (isinstance(node, ast.Call) and getattr(node.func, "id", None) == "decode_data_url"):
                 continue
             calls += 1
+            rel = path.relative_to(REPO / "apps" / "api").as_posix()
             arg = node.args[2] if len(node.args) > 2 else next((k.value for k in node.keywords if k.arg == "allowed"), None)
-            found = allow_list_names(arg) if arg is not None else None
-            if found is None:
-                rel = path.relative_to(REPO)
-                print(f"FAIL {rel}:{node.lineno}: the allow-list passed here is not a named list from app/core/datauri.py, so no picker can be compared against it")
-                names.add("!unreadable")
-            else:
-                names.update(found)
-    return names, calls
+            lists = allow_lists(arg) if arg is not None else None
+            if lists is None:
+                print(f"FAIL {rel}:{node.lineno}: the allow-list passed here is not a named list from app/core/datauri.py, or is chosen by something this check cannot read, so no picker can be compared against it")
+                problems += 1
+                continue
+            for kind, name in lists.items():
+                key: Key = (rel, kind or OTHERWISE)
+                if key in found and found[key] != name:
+                    print(f"FAIL {rel}:{node.lineno}: two allow-lists claim {key!r} ({found[key]} and {name}); this check cannot tell which a picker means")
+                    problems += 1
+                found[key] = name
+    return found, calls, problems
 
 
 def main(roots: list[str]) -> int:
-    enforced, calls = server_lists()
-    problems = 1 if "!unreadable" in enforced else 0
-    enforced.discard("!unreadable")
+    enforced, calls, problems = server_lists()
 
     if not calls:
         print("FAIL: no decode_data_url calls found in apps/api/app; this check cannot have been passing for the right reason")
         return 1
 
-    for name in sorted(enforced - set(EXPECTED.values())):
-        print(f"FAIL: an endpoint enforces {name}, which no picker in this check's table declares — add it, with the client constant that offers it")
+    for key in sorted(set(enforced) - set(EXPECTED.values()), key=lambda k: (k[0], k[1] or "")):
+        print(f"FAIL: {key[0]} enforces {enforced[key]} for {key[1] or 'everything else'}, which no picker in this check's table declares — add it, with the client constant that offers it")
         problems += 1
 
     found: dict[str, tuple[Path, set[str]]] = {}
@@ -109,23 +141,24 @@ def main(roots: list[str]) -> int:
                 found[name] = (path, set(QUOTED.findall(body)))
 
     for name, (path, types) in sorted(found.items()):
-        list_name = EXPECTED.get(name)
-        if list_name is None:
+        key = EXPECTED.get(name)
+        if key is None:
             print(f"FAIL {path}: {name} is not in this check's table, so nothing compares it with the API")
             problems += 1
             continue
-        if list_name not in enforced:
-            print(f"FAIL {path}: {name} is checked against {list_name}, which no endpoint passes to decode_data_url any more")
+        list_name = enforced.get(key)
+        if list_name is None:
+            print(f"FAIL {path}: {name} is checked against {key[0]} for {key[1] or 'everything else'}, and no decode_data_url call there enforces anything for that any more")
             problems += 1
             continue
         expected = set(getattr(datauri, list_name))
         missing = sorted(expected - types)
         extra = sorted(types - expected)
         if missing:
-            print(f"FAIL {path}: {name} omits {', '.join(missing)} — {list_name} accepts them, so the picker hides a valid file")
+            print(f"FAIL {path}: {name} omits {', '.join(missing)} — {list_name}, enforced by {key[0]} for {key[1] or 'everything else'}, accepts them, so the picker hides a valid file")
             problems += 1
         if extra:
-            print(f"FAIL {path}: {name} offers {', '.join(extra)} — {list_name} refuses them, so the member is told no after choosing")
+            print(f"FAIL {path}: {name} offers {', '.join(extra)} — {list_name}, enforced by {key[0]} for {key[1] or 'everything else'}, refuses them, so the member is told no after choosing")
             problems += 1
 
     for name in sorted(set(EXPECTED) - set(found)):
@@ -134,7 +167,7 @@ def main(roots: list[str]) -> int:
 
     if problems:
         return 1
-    print(f"checked {len(found)} upload pickers against the {len(enforced)} allow-lists {calls} decode_data_url calls enforce; every one offers exactly what its endpoint accepts")
+    print(f"checked {len(found)} upload pickers against the {len(enforced)} allow-lists {calls} decode_data_url calls enforce, branch by branch; every one offers exactly what its own branch accepts")
     return 0
 
 
