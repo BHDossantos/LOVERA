@@ -25,7 +25,11 @@ So the allow-list each picker is compared against is read out of the code in thr
   2. key each one by the module it is in and, for a conditional, the whole discriminator — the field
      tested and the value it is tested against — so neither swapping two branches of the same call
      nor testing a different field leaves this check comparing what it did before;
-  3. compare each client `*_ACCEPT` constant with the types of the list at the key it declares.
+  3. compare each client `*_ACCEPT` constant with the types of the list at the key it declares;
+  4. find the `<input>` that actually carries each constant and check what it uploads. Comparing
+     declarations alone said nothing about which picker uses which list: swapping `accept={PHOTO_ACCEPT}`
+     and `accept={VOICE_ACCEPT}` between the two inputs leaves both declarations untouched, and the
+     photo picker would offer audio while its `upload(file, "photo")` went on sending a photo.
 
 Run: python tools/check_upload_types.py apps/web/src
 """
@@ -61,8 +65,24 @@ EXPECTED: dict[str, tuple[str, tuple[str, str] | None]] = {
     "PHOTO_ACCEPT": ("app/modules/profile/service.py", OTHERWISE),
 }
 
+# The kind the `<input>` carrying each constant has to upload, or None where its endpoint takes one
+# kind of file and the picker passes no kind at all. This is not a restatement of the server's
+# discriminator: it is checked *against* it below — a kind has to equal the literal its branch tests
+# for, and a picker on a fall-through branch has to upload something none of that call site's other
+# branches claim. So the three places this association lives — the picker, the upload call and the
+# endpoint's conditional — all have to agree, rather than two of them agreeing with each other.
+UPLOAD_KIND: dict[str, str | None] = {
+    "EVIDENCE_ACCEPT": None,
+    "VOICE_ACCEPT": "voice",
+    "PHOTO_ACCEPT": "photo",
+}
+
 DECLARATION = re.compile(r"const\s+(\w*ACCEPT)\s*=\s*\[(.*?)\]\s*\.join\(", re.S)
 QUOTED = re.compile(r"""["']([^"']+)["']""")
+ACCEPT_ATTR = re.compile(r"accept=\{(\w+)\}")
+# `upload(theFile, "photo")`: the kind the input sends, which is what decides the branch the server
+# validates it against.
+UPLOAD_CALL = re.compile(r"""upload\([^()]*(?:\([^()]*\))?[^()]*,\s*["'](\w+)["']\s*\)""")
 
 Key = tuple[str, tuple[str, str] | None]
 
@@ -131,6 +151,33 @@ def server_lists() -> tuple[dict[Key, str], int, int]:
     return found, calls, problems
 
 
+def pickers(roots: list[str]) -> tuple[dict[str, list[tuple[Path, str | None]]], int]:
+    """`{constant: [(file, the kind its input uploads)]}` for every `<input accept={...}>` found.
+
+    The tag is sliced from `<input` to the first `/>` rather than matched with `[^>]*`, because an
+    `onChange={(e) => ...}` arrow contains a `>` and would end the match early — exactly the kind of
+    near-miss that makes a scanner report success on a file it never really read.
+    """
+    found: dict[str, list[tuple[Path, str | None]]] = {}
+    problems = 0
+    for root in roots:
+        for path in sorted(Path(root).rglob("*.tsx")) + sorted(Path(root).rglob("*.ts")):
+            text = path.read_text(encoding="utf-8")
+            for match in re.finditer(r"<input\b", text):
+                close = text.find("/>", match.start())
+                if close == -1:
+                    print(f"FAIL {path}: an <input> tag at offset {match.start()} is not self-closing, so this check cannot read what it accepts")
+                    problems += 1
+                    continue
+                tag = text[match.start() : close]
+                accept = ACCEPT_ATTR.search(tag)
+                if not accept:
+                    continue  # an input that chooses no file type is not this check's business
+                kind = UPLOAD_CALL.search(tag)
+                found.setdefault(accept.group(1), []).append((path, kind.group(1) if kind else None))
+    return found, problems
+
+
 def main(roots: list[str]) -> int:
     enforced, calls, problems = server_lists()
 
@@ -176,9 +223,43 @@ def main(roots: list[str]) -> int:
         print(f"FAIL: {name} was not found in {', '.join(roots)}; this check cannot have been passing for the right reason")
         problems += 1
 
+    # Which picker actually carries which constant, and what it then uploads. Everything above
+    # compares declarations; a constant declared correctly and wired to the other input is still a
+    # picker offering the wrong files.
+    used, scan_problems = pickers(roots)
+    problems += scan_problems
+    siblings: dict[str, set[str]] = {}
+    for (module, kind) in enforced:
+        if kind is not None:
+            siblings.setdefault(module, set()).add(kind[1])
+
+    for name, key in sorted(EXPECTED.items()):
+        inputs = used.get(name, [])
+        if len(inputs) != 1:
+            where = ", ".join(str(p) for p, _ in inputs) or "nowhere"
+            print(f"FAIL: {name} is carried by {len(inputs)} <input accept=...> ({where}); exactly one picker has to use it, or this check is comparing a list nothing offers")
+            problems += 1
+            continue
+        path, kind = inputs[0]
+        expected_kind = UPLOAD_KIND[name]
+        if kind != expected_kind:
+            print(f"FAIL {path}: the input carrying {name} uploads {kind!r}, not {expected_kind!r} — the picker and the kind it sends have to name the same thing, or the server validates it against the other branch")
+            problems += 1
+            continue
+        if expected_kind is None:
+            continue
+        module, discriminator_pair = key
+        if discriminator_pair is not None:
+            if expected_kind != discriminator_pair[1]:
+                print(f"FAIL {path}: {name} uploads {expected_kind!r} but is checked against the branch where {describe(discriminator_pair)}, so the server would validate it against a different list")
+                problems += 1
+        elif expected_kind in siblings.get(module, set()):
+            print(f"FAIL {path}: {name} uploads {expected_kind!r}, which is a kind {module} branches on, so it does not reach the fall-through list this check compares it with")
+            problems += 1
+
     if problems:
         return 1
-    print(f"checked {len(found)} upload pickers against the {len(enforced)} allow-lists {calls} decode_data_url calls enforce, branch by branch; every one offers exactly what its own branch accepts")
+    print(f"checked {len(found)} upload pickers, at the {sum(len(v) for v in used.values())} inputs that carry them, against the {len(enforced)} allow-lists {calls} decode_data_url calls enforce, branch by branch; every one offers exactly what its own branch accepts")
     return 0
 
 
