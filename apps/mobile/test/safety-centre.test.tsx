@@ -225,4 +225,13 @@ test("two unblocks failing on the shared list component keeps both failures", as
   expect(s.joined()).toContain("Could not unblock Ana");
   expect(s.joined()).toContain("Could not unblock Ben");
   expect(s.texts().filter((t) => t === "Try again")).toHaveLength(2);
+
+  // Retrying Ana's clears only Ana's. Ben is still blocked, so his stays put.
+  mockDel.mockImplementation((path: string) =>
+    path === "/blocks/mem_a" ? Promise.resolve(undefined) : Promise.reject(offline("Ben")),
+  );
+  await s.press("Try again", 0);
+  await s.settle();
+  expect(s.joined()).not.toContain("Could not unblock Ana");
+  expect(s.joined()).toContain("Could not unblock Ben");
 });
