@@ -121,6 +121,10 @@ export default function Conversation() {
   const onHold = !!conversation?.safety_hold;
   const ended = conversation?.status === "ended" || conversation?.status === "closed";
   const them = conversation?.other;
+  // Not `them.member_id`: that is null once the conversation is closed, which silently
+  // disabled Block and dropped `subject` from the report on every ended thread.
+  const subjectId = conversation?.safety.subject_id ?? null;
+  const alreadyBlocked = !!conversation?.safety.blocked_by_you;
 
   /**
    * Blocking from inside the conversation, through POST /blocks.
@@ -131,7 +135,7 @@ export default function Conversation() {
    * the content itself (Apple guideline 1.2), and this screen had neither.
    */
   const block = () => {
-    const memberId = them?.member_id;
+    const memberId = subjectId;
     if (!memberId) return;
     Alert.alert(
       `Block ${them?.display_name ?? "them"}?`,
@@ -204,8 +208,12 @@ export default function Conversation() {
 
       {/* Report and block, from the conversation itself rather than three taps away in
           another tab — and the report carries the conversation and the person with it, so a
-          reviewer gets the context instead of a bare narrative. Shown whatever the state: a
-          safety hold or an ending is exactly when somebody may still want to block. */}
+          reviewer gets the context instead of a bare narrative.
+
+          Shown whatever the state, and that has to be true rather than merely intended: most
+          reports are written after the thing is over, so an ended thread is exactly where
+          this matters. Block is dropped once the member has blocked them, because a button
+          that repeats an action already taken reads as if the first one did not work. */}
       <View style={{ paddingHorizontal: space.lg, paddingBottom: space.sm }}>
         <ErrorState error={blockError} retry={blockError ? () => block() : undefined} />
         <View style={{ flexDirection: "row", gap: space.sm }}>
@@ -213,19 +221,23 @@ export default function Conversation() {
             <Button
               variant="ghost"
               onPress={() =>
-                router.push(
-                  `/safety/report?conversation=${id}${them?.member_id ? `&subject=${them.member_id}` : ""}` as never,
-                )
+                router.push(`/safety/report?conversation=${id}${subjectId ? `&subject=${subjectId}` : ""}` as never)
               }
             >
               Report
             </Button>
           </View>
-          <View style={{ flex: 1 }}>
-            <Button variant="ghost" loading={blocking} disabled={!them?.member_id} onPress={block}>
-              Block
-            </Button>
-          </View>
+          {alreadyBlocked ? (
+            <View style={{ flex: 1, justifyContent: "center" }}>
+              <Text style={s.blocked}>Blocked. Undo it in the safety centre.</Text>
+            </View>
+          ) : (
+            <View style={{ flex: 1 }}>
+              <Button variant="ghost" loading={blocking} disabled={!subjectId} onPress={block}>
+                Block
+              </Button>
+            </View>
+          )}
         </View>
       </View>
 
@@ -329,6 +341,7 @@ export default function Conversation() {
 }
 
 const s = {
+  blocked: { ...typo.small, color: color.inkSecondary, textAlign: "center" as const },
   headerAction: { ...typo.small, color: color.action, fontWeight: "600" as const, paddingLeft: space.sm },
   header: {
     flexDirection: "row",

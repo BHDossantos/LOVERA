@@ -49,9 +49,25 @@ def date_status(db: Session, conv: Conversation) -> dict[str, Any] | None:
 
 
 def summary(db: Session, conv: Conversation, viewer: Member) -> dict[str, Any]:
+    from app.models.safety import Block
+
     other = db.get(Member, conv.other(viewer.id))
     last = db.execute(select(Message).where(Message.conversation_id == conv.id, Message.deleted_at.is_(None)).order_by(Message.sequence.desc()).limit(1)).scalar_one_or_none()
     closed_neutral = conv.status in ("closed", "blocked")
+    # The neutral snapshot on a closed conversation is a privacy decision: no name, no photo,
+    # no age once it is over. But it also took away the only id the client had, so an ended
+    # thread could neither block nor report the person — and reporting afterwards is the
+    # ordinary case, not the edge one. A report with no subject reaches a reviewer who cannot
+    # act on anybody.
+    #
+    # So the safety target is carried separately from the profile. It is not a new disclosure:
+    # the viewer was handed this id for the whole time the conversation was open.
+    blocked_by_viewer = other is not None and (
+        db.execute(
+            select(Block.id).where(Block.blocker_id == viewer.id, Block.blocked_id == other.id, Block.removed_at.is_(None))
+        ).first()
+        is not None
+    )
     return {
         "id": conv.id,
         "introduction_id": conv.introduction_id,
@@ -63,6 +79,7 @@ def summary(db: Session, conv: Conversation, viewer: Member) -> dict[str, Any]:
         "date": date_status(db, conv),
         "opened_at": iso(conv.opened_at),
         "safety_hold": conv.safety_hold,
+        "safety": {"subject_id": other.id if other else None, "blocked_by_you": blocked_by_viewer},
     }
 
 

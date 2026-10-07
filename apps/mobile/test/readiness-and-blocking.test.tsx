@@ -29,6 +29,21 @@ const CONVERSATION = {
   date: null,
   opened_at: "2026-10-01T10:00:00Z",
   safety_hold: false,
+  safety: { subject_id: "mem_them", blocked_by_you: false },
+};
+
+/**
+ * What `summary()` returns once the conversation is over: `other` is neutralised — no name,
+ * no photo, no id — which is a deliberate privacy decision. The safety target is carried
+ * separately, because reading it off `other.member_id` meant an ended thread could neither
+ * block nor report the person, and reporting afterwards is the ordinary case.
+ */
+const ENDED = {
+  ...CONVERSATION,
+  status: "closed",
+  public_reason: "This conversation has ended.",
+  other: { member_id: null, display_name: "Member unavailable", verified: false, media: [] },
+  safety: { subject_id: "mem_them", blocked_by_you: false },
 };
 const PREFS = {
   tier_meaning: { must: "A hard gate." },
@@ -153,4 +168,42 @@ test("age range has no remove button, because the API would refuse it", async ()
   await s.press("Change", 1);
   expect(s.joined()).toContain("Age range");
   expect(s.texts()).not.toContain("Stop using this preference");
+});
+
+const conversationRoutes = (summary: unknown) =>
+  routeGet({ "/conversations/conv_1/messages": { items: [], next_cursor: null, has_more: false }, "/conversations/conv_1": summary });
+
+test("an ended conversation can still report the person, with the subject attached", async () => {
+  mockGet.mockImplementation(conversationRoutes(ENDED));
+  const s = await renderScreen(<Conversation />);
+
+  // The profile is gone, as it should be.
+  expect(s.joined()).toContain("Member unavailable");
+  expect(s.joined()).not.toContain("Ben");
+
+  // The report is not. A report with no subject reaches a reviewer who cannot act on anybody.
+  await s.press("Report");
+  expect(mockPush).toHaveBeenCalledWith("/safety/report?conversation=conv_1&subject=mem_them");
+});
+
+test("an ended conversation can still block the person", async () => {
+  const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+  mockGet.mockImplementation(conversationRoutes(ENDED));
+  const s = await renderScreen(<Conversation />);
+
+  await s.press("Block");
+  (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Block")?.onPress?.();
+  await s.settle();
+  expect(mockPost).toHaveBeenCalledWith("/blocks", { member_id: "mem_them" });
+});
+
+test("somebody already blocked is not offered a second Block", async () => {
+  // Repeating an action already taken reads as if the first one did not work. Reporting stays,
+  // because having blocked somebody is not a reason to be unable to report them.
+  mockGet.mockImplementation(conversationRoutes({ ...ENDED, safety: { subject_id: "mem_them", blocked_by_you: true } }));
+  const s = await renderScreen(<Conversation />);
+
+  expect(s.joined()).toContain("Blocked. Undo it in the safety centre.");
+  await expect(s.press("Block")).rejects.toThrow(/nothing pressable/);
+  expect(s.texts()).toContain("Report");
 });
