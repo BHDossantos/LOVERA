@@ -22,8 +22,9 @@ So the allow-list each picker is compared against is read out of the code in thr
   1. find the `decode_data_url` calls in the API and read the `allowed` argument with `ast`. A bare
      name, or a conditional on a media kind, is readable; anything assembled at the call site is
      refused rather than guessed at, because a guess is what this check exists to replace;
-  2. key each one by the module it is in and the media kind its branch tests for, so a swap between
-     two branches of the same call changes what this check compares;
+  2. key each one by the module it is in and, for a conditional, the whole discriminator — the field
+     tested and the value it is tested against — so neither swapping two branches of the same call
+     nor testing a different field leaves this check comparing what it did before;
   3. compare each client `*_ACCEPT` constant with the types of the list at the key it declares.
 
 Run: python tools/check_upload_types.py apps/web/src
@@ -44,52 +45,62 @@ sys.path.insert(0, str(REPO / "apps" / "api"))
 from app.core import datauri  # noqa: E402
 
 # Marks the fall-through branch of a conditional allow-list, and the single allow-list of a call
-# that has no conditional. Not a media kind, so it cannot collide with one.
+# that has no conditional. Not a discriminator, so it cannot collide with one.
 OTHERWISE = None
 
-# Which call site, and which branch of it, each client picker has to match. The media types are
-# *not* written here — they come from the module, and the name of the list comes from the code at
-# the key below. A picker missing from this table fails rather than passing unchecked, and so does a
-# key with no call site, so a new picker or a moved endpoint is a loud failure.
-EXPECTED: dict[str, tuple[str, str | None]] = {
+# Which call site, and which branch of it, each client picker has to match. A conditional branch is
+# named by its whole discriminator — the expression tested and the literal it is tested against —
+# because the literal alone is not the association: `media.upload_state == "voice"` is never true,
+# and would quietly send voice uploads to the photo branch while still looking like the voice one.
+# The media types are *not* written here; they come from the module, and the name of the list comes
+# from the code at the key below. A picker missing from this table fails rather than passing
+# unchecked, and so does a key with no call site, so a new picker or a moved endpoint is loud.
+EXPECTED: dict[str, tuple[str, tuple[str, str] | None]] = {
     "EVIDENCE_ACCEPT": ("app/modules/safety/service.py", OTHERWISE),
-    "VOICE_ACCEPT": ("app/modules/profile/service.py", "voice"),
+    "VOICE_ACCEPT": ("app/modules/profile/service.py", ("media.type", "voice")),
     "PHOTO_ACCEPT": ("app/modules/profile/service.py", OTHERWISE),
 }
 
 DECLARATION = re.compile(r"const\s+(\w*ACCEPT)\s*=\s*\[(.*?)\]\s*\.join\(", re.S)
 QUOTED = re.compile(r"""["']([^"']+)["']""")
 
-Key = tuple[str, str | None]
+Key = tuple[str, tuple[str, str] | None]
 
 
-def branch_kind(test: ast.expr) -> str | None:
-    """The media kind a conditional allow-list's test selects, e.g. `media.type == "voice"`.
+def discriminator(test: ast.expr) -> tuple[str, str] | None:
+    """A conditional allow-list's test as `(what is tested, the value)`, e.g. `("media.type", "voice")`.
 
-    Only a single `==` against a string literal counts. Anything else is unreadable, because the
-    association between a branch and the picker that feeds it is exactly what this check is for.
+    Both halves are kept. Reading only the literal would accept a test against a different field —
+    `media.upload_state == "voice"`, which is never true — and go on reporting that branch as the
+    voice one while every voice upload fell through to the photo allow-list. Only a single `==`
+    against a string literal is readable at all; anything else is refused rather than guessed at,
+    because the association between a branch and the picker that feeds it is what this check is for.
     """
     if isinstance(test, ast.Compare) and len(test.ops) == 1 and isinstance(test.ops[0], ast.Eq):
         right = test.comparators[0]
         if isinstance(right, ast.Constant) and isinstance(right.value, str):
-            return right.value
+            return ast.unparse(test.left), right.value
     return None
 
 
-def allow_lists(node: ast.expr) -> dict[str, str] | None:
-    """`{media kind or OTHERWISE: list name}` for an `allowed` argument, or None if unreadable."""
+def describe(kind: tuple[str, str] | None) -> str:
+    return "everything else" if kind is None else f"{kind[0]} == {kind[1]!r}"
+
+
+def allow_lists(node: ast.expr) -> dict[tuple[str, str] | None, str] | None:
+    """`{discriminator or OTHERWISE: list name}` for an `allowed` argument, or None if unreadable."""
     if isinstance(node, ast.Name):
-        return {"": node.id}  # keyed below; "" stands in for OTHERWISE inside this dict
+        return {OTHERWISE: node.id}
     if isinstance(node, ast.IfExp):
-        kind = branch_kind(node.test)
+        kind = discriminator(node.test)
         chosen, fallback = allow_lists(node.body), allow_lists(node.orelse)
         if kind is None or chosen is None or fallback is None:
             return None
-        # Only the simple shape `A if x == "kind" else B` is read; a nested conditional would need
+        # Only the simple shape `A if x == "value" else B` is read; a nested conditional would need
         # its own key scheme and there is no such call site.
-        if list(chosen) != [""] or list(fallback) != [""]:
+        if list(chosen) != [OTHERWISE] or list(fallback) != [OTHERWISE]:
             return None
-        return {kind: chosen[""], "": fallback[""]}
+        return {kind: chosen[OTHERWISE], OTHERWISE: fallback[OTHERWISE]}
     return None
 
 
@@ -112,7 +123,7 @@ def server_lists() -> tuple[dict[Key, str], int, int]:
                 problems += 1
                 continue
             for kind, name in lists.items():
-                key: Key = (rel, kind or OTHERWISE)
+                key: Key = (rel, kind)
                 if key in found and found[key] != name:
                     print(f"FAIL {rel}:{node.lineno}: two allow-lists claim {key!r} ({found[key]} and {name}); this check cannot tell which a picker means")
                     problems += 1
@@ -127,8 +138,8 @@ def main(roots: list[str]) -> int:
         print("FAIL: no decode_data_url calls found in apps/api/app; this check cannot have been passing for the right reason")
         return 1
 
-    for key in sorted(set(enforced) - set(EXPECTED.values()), key=lambda k: (k[0], k[1] or "")):
-        print(f"FAIL: {key[0]} enforces {enforced[key]} for {key[1] or 'everything else'}, which no picker in this check's table declares — add it, with the client constant that offers it")
+    for key in sorted(set(enforced) - set(EXPECTED.values()), key=lambda k: (k[0], describe(k[1]))):
+        print(f"FAIL: {key[0]} enforces {enforced[key]} for {describe(key[1])}, which no picker in this check's table declares — add it, with the client constant that offers it")
         problems += 1
 
     found: dict[str, tuple[Path, set[str]]] = {}
@@ -148,17 +159,17 @@ def main(roots: list[str]) -> int:
             continue
         list_name = enforced.get(key)
         if list_name is None:
-            print(f"FAIL {path}: {name} is checked against {key[0]} for {key[1] or 'everything else'}, and no decode_data_url call there enforces anything for that any more")
+            print(f"FAIL {path}: {name} is checked against {key[0]} for {describe(key[1])}, and no decode_data_url call there enforces anything for that any more")
             problems += 1
             continue
         expected = set(getattr(datauri, list_name))
         missing = sorted(expected - types)
         extra = sorted(types - expected)
         if missing:
-            print(f"FAIL {path}: {name} omits {', '.join(missing)} — {list_name}, enforced by {key[0]} for {key[1] or 'everything else'}, accepts them, so the picker hides a valid file")
+            print(f"FAIL {path}: {name} omits {', '.join(missing)} — {list_name}, enforced by {key[0]} for {describe(key[1])}, accepts them, so the picker hides a valid file")
             problems += 1
         if extra:
-            print(f"FAIL {path}: {name} offers {', '.join(extra)} — {list_name}, enforced by {key[0]} for {key[1] or 'everything else'}, refuses them, so the member is told no after choosing")
+            print(f"FAIL {path}: {name} offers {', '.join(extra)} — {list_name}, enforced by {key[0]} for {describe(key[1])}, refuses them, so the member is told no after choosing")
             problems += 1
 
     for name in sorted(set(EXPECTED) - set(found)):
