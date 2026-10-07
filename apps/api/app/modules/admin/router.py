@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -425,7 +425,18 @@ def safety_evidence(
         # Metadata without bytes: an upload that never completed, or retention has expired. Not an
         # error the reviewer can act on, so it says which rather than reading as a missing case.
         raise ApiError("NOT_FOUND", "This attachment is no longer in the vault.")
-    ev.access_count += 1
+    # Incremented by the database, and read back from it.
+    #
+    # `ev.access_count += 1` is a read-modify-write: two reviewers opening the same attachment at
+    # once both read the same count, both write the same next value, and one open vanishes from the
+    # counter while the audit log correctly records two. The divergence this endpoint exists to
+    # prevent is exactly that — a count that disagrees with the log — so it is worth one statement.
+    access_count = db.execute(
+        update(SafetyEvidence)
+        .where(SafetyEvidence.id == ev.id)
+        .values(access_count=SafetyEvidence.access_count + 1)
+        .returning(SafetyEvidence.access_count)
+    ).scalar_one()
     audit(
         db,
         actor_type="staff",
@@ -444,7 +455,7 @@ def safety_evidence(
         "size_bytes": ev.size_bytes,
         "checksum": ev.checksum,
         "collected_at": iso(ev.collected_at),
-        "access_count": ev.access_count,
+        "access_count": access_count,
         "data_url": data_url,
     }
 

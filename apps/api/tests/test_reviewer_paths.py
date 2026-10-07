@@ -235,3 +235,49 @@ def test_the_corrections_queue_is_pageable_past_its_limit(client):
     assert {first, second} <= seen
     # Past the end is an empty page, not an error and not a wrapped-around first page.
     assert concierge.get(f"/admin/matching/corrections?unapplied_only=true&limit=1&offset={page['total']}").json()["items"] == []
+
+
+def test_two_reviewers_opening_the_same_attachment_are_both_counted(client):
+    """The count the case screen shows has to agree with the audit trail beside it.
+
+    `ev.access_count += 1` is a read-modify-write: two reviewers opening the same attachment at
+    once both read the same count, both write the same next value, and one open disappears from the
+    counter while the log correctly records two. A count that disagrees with the log is exactly the
+    thing this endpoint exists to prevent, and a reporter was promised that every access to their
+    screenshot is accounted for.
+    """
+    import threading
+
+    from sqlalchemy import select
+
+    from app.core.db import session_factory
+    from app.models.privacy import AuditEvent
+    from app.models.safety import SafetyEvidence
+
+    _, report_id, evidence_id = _report_with_evidence(client)
+    reviewer = staff(client, "safety@example.test")
+
+    # Two opens driven through the service the same way the endpoint does, in parallel sessions, so
+    # the two transactions really do overlap rather than taking turns.
+    errors: list[BaseException] = []
+    ready = threading.Barrier(2)
+
+    def open_it():
+        try:
+            ready.wait(timeout=5)
+            r = reviewer.get(f"/admin/safety/evidence/{evidence_id}?purpose=case_review")
+            assert r.status_code == 200, r.text
+        except BaseException as e:  # noqa: BLE001 - surfaced below so a thread failure is not silent
+            errors.append(e)
+
+    threads = [threading.Thread(target=open_it) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=20)
+    assert not errors, errors
+
+    with session_factory()() as db:
+        ev = db.execute(select(SafetyEvidence).where(SafetyEvidence.id == evidence_id)).scalar_one()
+        opens = db.execute(select(AuditEvent).where(AuditEvent.resource_type == "safety_evidence", AuditEvent.resource_id == evidence_id, AuditEvent.action == "admin.evidence_opened")).scalars().all()
+    assert ev.access_count == len(opens), f"counter says {ev.access_count}, the log says {len(opens)}"

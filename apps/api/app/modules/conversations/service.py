@@ -166,11 +166,22 @@ def mark_read(db: Session, conv: Conversation, member_id: str, sequence: int) ->
     raised again — so `read_cursors` stayed empty and nobody's unread count ever cleared.
     """
     now = utcnow()
+    # Clamped to the conversation's head, read inside the same statement.
+    #
+    # Nothing stopped a client sending a sequence higher than any message that exists, and
+    # `GREATEST` below then made it permanent: `unread_count` counts messages *above* the cursor, so
+    # a cursor past the end marks every real message read and every future one too, until the
+    # conversation catches up with whatever number was sent. A client bug would be enough, and the
+    # member has no way to undo it — their unread badge simply never comes back.
+    #
+    # One clamp, applied to the inserted value, so the conflict path below inherits it through
+    # `excluded` rather than repeating the bound and having to agree with it.
+    head = select(Conversation.message_seq).where(Conversation.id == conv.id).scalar_subquery()
     insert = pg_insert(ReadCursor).values(
         id=new_id(),
         conversation_id=conv.id,
         member_id=member_id,
-        last_read_sequence=sequence,
+        last_read_sequence=func.least(sequence, head),
         updated_at=now,
     )
     db.execute(

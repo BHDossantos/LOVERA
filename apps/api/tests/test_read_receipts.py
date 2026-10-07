@@ -139,3 +139,35 @@ def test_two_overlapping_reads_cannot_lose_the_higher_one(client):
 
     assert _stored_sequence(conv_id, b.id) == high, "the older read overwrote the newer one"
     assert _unread_for(b, conv_id) == 0
+
+
+def test_a_cursor_cannot_be_advanced_past_the_last_message(client):
+    """A sequence from beyond the end of the conversation is clamped to its head.
+
+    Nothing stopped a client sending one, and `GREATEST` made it permanent: `unread_count` counts
+    messages *above* the cursor, so a cursor past the end marks every real message read and every
+    future one too, until the conversation catches up with whatever number arrived. A client bug
+    would be enough to do it, and the member has no way back — the unread badge simply never
+    returns.
+    """
+    from app.modules.conversations.service import unread_count
+
+    a, b, conv_id = mutual_pair(client, "clamp")
+    for i in range(3):
+        r = b.post(f"/conversations/{conv_id}/messages", json={"client_message_id": f"m{i}-{uuid.uuid4().hex[:6]}", "text": f"Message {i}", "type": "text"})
+        assert r.status_code == 201, r.text
+
+    r = a.post(f"/conversations/{conv_id}/read", json={"sequence": 10**9})
+    assert r.status_code == 204, r.text
+
+    with session_factory()() as db:
+        conv = db.execute(select(Conversation).where(Conversation.id == conv_id)).scalar_one()
+        cursor = db.execute(select(ReadCursor).where(ReadCursor.conversation_id == conv_id, ReadCursor.member_id == a.id)).scalar_one()
+        assert cursor.last_read_sequence == conv.message_seq, f"cursor {cursor.last_read_sequence} past head {conv.message_seq}"
+        # And the member still sees what arrives next, which is the half that actually hurt.
+        assert unread_count(db, conv, a.id) == 0
+    r = b.post(f"/conversations/{conv_id}/messages", json={"client_message_id": f"after-{uuid.uuid4().hex[:6]}", "text": "And one more", "type": "text"})
+    assert r.status_code == 201, r.text
+    with session_factory()() as db:
+        conv = db.execute(select(Conversation).where(Conversation.id == conv_id)).scalar_one()
+        assert unread_count(db, conv, a.id) == 1, "a message sent after the bad cursor has to count as unread"
