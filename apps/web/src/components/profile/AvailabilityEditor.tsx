@@ -50,7 +50,21 @@ export function AvailabilityEditor({ onSaved, cta = "Save availability" }: { onS
     }
   };
 
-  if (!q.data) return <Skeleton lines={5} />;
+  // The same on this side: a first load that fails has no data, so an unconditional skeleton left
+  // the readiness editor loading for ever with no error and no retry. The button is unconditional
+  // too, unlike ErrorState's own, because while this is the whole screen there is no other way on.
+  if (!q.data) {
+    if (q.isError && !q.isFetching)
+      return (
+        <Card>
+          <ErrorState error={q.error as ApiError} />
+          <Button variant="secondary" onClick={() => void q.refetch()}>
+            Try again
+          </Button>
+        </Card>
+      );
+    return <Skeleton lines={5} />;
+  }
   return (
     <div>
       <ErrorState error={error} />

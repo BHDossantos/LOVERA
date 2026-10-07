@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Text, View } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, get, put } from "@/api/client";
-import { Button, Card, ChipGroup, ErrorState, Field, Loading, Options, Toggle } from "@/components/ui";
+import { AwaitingServer, Button, Card, ChipGroup, ErrorState, Field, Options, Toggle } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
 
 type Window = { weekday: number; start: string; end: string };
@@ -79,7 +79,11 @@ export function AvailabilityEditor({ onSaved, cta = "Save availability" }: { onS
   const set = (i: number, patch: Partial<Window>) =>
     setWindows(windows.map((w, j) => (j === i ? { ...w, ...patch } : w)));
 
-  if (!q.data) return <Loading label="Loading your availability" />;
+  // Not an unconditional spinner: a first load that fails has no data, so returning the loader here
+  // meant a transient failure left this screen loading for ever, with no error and nothing to press
+  // — on the one screen a member goes to when they want to stop being introduced to people.
+  // `AwaitingServer` is the same two states the server-driven screens show, and it exists already.
+  if (!q.data) return <AwaitingServer label="Loading your availability" query={q} />;
 
   return (
     <View>

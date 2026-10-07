@@ -277,6 +277,20 @@ test("blocking drops the cached date and introduction it has just cancelled", as
   expect(s.client.getQueryState(["introductions"])?.isInvalidated).toBe(true);
 });
 
+test("availability that will not load offers the failure and a retry, not a spinner", async () => {
+  // `if (!q.data) return <Loading/>` is an unconditional spinner: a first load that fails has no
+  // data either, so a transient failure left this editor loading for ever with no error and nothing
+  // to press — on the screen a member opens when they want to stop being introduced to people.
+  mockGet.mockImplementation(() => Promise.reject(apiFailure("We could not load your availability.")));
+  const s = await renderScreen(<YouAvailability />);
+
+  expect(s.hasText("We could not load your availability.")).toBe(true);
+  await s.press("Try again");
+  // The retry goes back to the server rather than giving up on the screen.
+  expect(mockGet).toHaveBeenCalledWith("/availability");
+  expect(mockGet.mock.calls.length).toBeGreaterThan(1);
+});
+
 test("saving readiness refreshes Today, not only the member", async () => {
   // This screen is normally opened from Today's readiness task, so `router.back()` returns to a
   // Today that was never unmounted — `refetchOnMount` cannot fire, and it would go on offering
