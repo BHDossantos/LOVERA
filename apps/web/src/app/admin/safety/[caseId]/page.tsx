@@ -10,6 +10,8 @@ import { AdminShell } from "@/components/admin/AdminShell";
 import { CATEGORY_LABEL, CASE_STATUS_LABEL, SeverityTag } from "@/components/safety/shared";
 import { formatDateTime } from "@/lib/format";
 
+type EvidenceFile = { id: string; content_type: string; description: string | null; data_url: string; size_bytes: number; checksum: string | null; access_count: number };
+
 type CaseDetail = {
   id: string;
   receipt_code: string;
@@ -58,6 +60,9 @@ function CaseInner({ caseId }: { caseId: string }) {
   const [aDays, setADays] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
+  // Fetched on demand rather than with the case: a reviewer reading the narrative does not need
+  // every attachment's bytes, and each open is a separate audited access.
+  const [opened, setOpened] = useState<Record<string, EvidenceFile>>({});
 
   const run = async (label: string, fn: () => Promise<unknown>) => {
     setBusy(label);
@@ -74,6 +79,19 @@ function CaseInner({ caseId }: { caseId: string }) {
   };
   const update = () => run("update", () => post(`/admin/safety/cases/${caseId}`, { status: status || null, note: note.trim() || null, visible_to_reporter: visible, purpose })).then(() => { setNote(""); setStatus(""); });
   const applyAction = () => run("action", () => post(`/admin/safety/cases/${caseId}/actions`, { type: aType, reason_code: aReason, public_notice: aNotice.trim() || null, duration_days: aDays ? Number(aDays) : null, purpose })).then(() => setActionOpen(false));
+
+  /**
+   * Open one attachment.
+   *
+   * Until this existed the reporter was told the reviewer would see their screenshot and the
+   * reviewer could see its MIME type. On a harassment report the screenshot is usually the whole
+   * substance of the case, so the attachment list was a vault with no door.
+   */
+  const openEvidence = (id: string) =>
+    run(`evidence:${id}`, async () => {
+      const file = await get<EvidenceFile>(`/admin/safety/evidence/${id}?purpose=${encodeURIComponent(purpose)}`);
+      setOpened((prev) => ({ ...prev, [id]: file }));
+    });
 
   if (purpose.length < 3) {
     return (
@@ -130,14 +148,39 @@ function CaseInner({ caseId }: { caseId: string }) {
               <h2 className="mb-1 font-bold">Evidence ({c.evidence.length})</h2>
               {c.evidence.length === 0 && <p className="text-sm text-ink-secondary">None attached. Never require the reporter to obtain more.</p>}
               <ul className="divide-y divide-border text-sm">
-                {c.evidence.map((e) => (
-                  <li key={e.id} className="py-2">
-                    <span className="font-semibold">{e.content_type}</span> · collected {formatDateTime(e.collected_at)} · opened {e.access_count}×
-                    {e.description && <p className="text-ink-secondary">{e.description}</p>}
-                  </li>
-                ))}
+                {c.evidence.map((e) => {
+                  const file = opened[e.id];
+                  return (
+                    <li key={e.id} className="py-2">
+                      <span className="font-semibold">{e.content_type}</span> · collected {formatDateTime(e.collected_at)} · opened {e.access_count}×
+                      {e.description && <p className="text-ink-secondary">{e.description}</p>}
+                      {!file && (
+                        <Button variant="secondary" className="mt-1" loading={busy === `evidence:${e.id}`} onClick={() => openEvidence(e.id)}>
+                          Open this attachment
+                        </Button>
+                      )}
+                      {file && (
+                        <div className="mt-2">
+                          {/* An attachment is whatever the reporter had to hand, so the type decides
+                              what can be shown. An image is rendered; anything else gets the
+                              download, because guessing wrong here means a reviewer concluding
+                              there is nothing to see. */}
+                          {file.content_type.startsWith("image/") ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={file.data_url} alt={file.description ?? "Evidence attached by the reporter"} className="max-h-[32rem] w-auto rounded-[var(--radius-md)] border border-border" />
+                          ) : (
+                            <p className="text-sm text-ink-secondary">{file.content_type} cannot be previewed here. Download it below.</p>
+                          )}
+                          <a href={file.data_url} download={`evidence-${file.id}`} className="mt-1 inline-flex min-h-11 items-center text-sm font-semibold text-action">
+                            Download ({Math.max(1, Math.round(file.size_bytes / 1024))} KB)
+                          </a>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
-              <p className="mt-2 text-xs text-ink-tertiary">Files live in the restricted vault; downloads are controlled separately and each access is logged.</p>
+              <p className="mt-2 text-xs text-ink-tertiary">Files live in the restricted vault. Opening one is a separate audited access against the purpose you declared, and is counted on the attachment.</p>
             </Card>
             <Card className="mb-4">
               <h2 className="mb-1 font-bold">Conversation context (last 20)</h2>

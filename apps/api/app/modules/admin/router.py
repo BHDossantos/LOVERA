@@ -17,7 +17,7 @@ from app.models.account import Member
 from app.models.billing import CreditLedger, Subscription
 from app.models.conversations import Conversation, Message
 from app.models.dates import DatePlan, PostDateFeedback
-from app.models.introductions import IntroCorrection, IntroDecision, Introduction, MatchExplanation
+from app.models.introductions import IntroCorrection, IntroCorrectionReview, IntroDecision, Introduction, MatchExplanation
 from app.models.matching import CandidatePair, MatchRun
 from app.models.privacy import AnalyticsEvent, AuditEvent
 from app.models.profile import Profile
@@ -36,6 +36,11 @@ class RunIn(BaseModel):
 
 class PairReviewIn(BaseModel):
     decision: str = Field(pattern="^(approve|reject)$")
+    note: str | None = Field(default=None, max_length=300)
+
+
+class CorrectionReviewIn(BaseModel):
+    decision: str = Field(pattern="^(actioned|no_change)$")
     note: str | None = Field(default=None, max_length=300)
 
 
@@ -114,7 +119,9 @@ def review_pair(pair_id: str, data: PairReviewIn, principal: Principal = Depends
 @router.get("/matching/corrections")
 def list_corrections(
     unapplied_only: bool = Query(False),
+    unresolved_only: bool = Query(False),
     limit: int = Query(50, le=200),
+    offset: int = Query(0, ge=0),
     principal: Principal = Depends(require_roles("concierge", "admin")),
     db: Session = Depends(get_db, scope="function"),
 ) -> dict:
@@ -124,17 +131,38 @@ def list_corrections(
     "noted for a reviewer" — a promise no reviewer could keep. The useful ones are those with no
     replacement value: the member said an inference was wrong but could not say what the right
     answer is, so nothing about their matching changed and only a person can act on it.
+
+    Paged, and with the reviewer's own decision in the payload, because the first version of this
+    endpoint was a queue that could not drain: it took the newest 50 and had no offset and no
+    notion of a correction having been dealt with, so past 50 unapplied rows the oldest disputed
+    signals were permanently unreachable while still affecting matching. `total` is the size of
+    the filtered set, so a caller can tell there is more behind what it asked for.
     """
     from app.catalog.signals import SIGNALS
 
-    stmt = select(IntroCorrection).order_by(IntroCorrection.created_at.desc())
+    stmt = select(IntroCorrection).order_by(IntroCorrection.created_at.desc(), IntroCorrection.id.desc())
     rows = db.execute(stmt).scalars().all()
-    out = []
+    reviews = {
+        r.correction_id: r
+        for r in db.execute(select(IntroCorrectionReview).where(IntroCorrectionReview.correction_id.in_([c.id for c in rows]))).scalars().all()
+    } if rows else {}
+
+    # `applied` is derived from JSON the member supplied, so the filter cannot be a WHERE clause
+    # without reaching into the JSON column; it is applied here and the page is cut afterwards.
+    matching_rows = []
     for c in rows:
         applied = bool((c.corrected_value or {}).get("value"))
         if unapplied_only and applied:
             continue
+        if unresolved_only and (applied or c.id in reviews):
+            continue
+        matching_rows.append((c, applied))
+
+    total = len(matching_rows)
+    out = []
+    for c, applied in matching_rows[offset : offset + limit]:
         sig = SIGNALS.get(c.signal_key)
+        review = reviews.get(c.id)
         out.append(
             {
                 "id": c.id,
@@ -148,12 +176,50 @@ def list_corrections(
                 "applied": applied,
                 "note": c.note,
                 "created_at": iso(c.created_at),
+                "review": None
+                if review is None
+                else {"decision": review.decision, "note": review.note, "reviewer_id": review.reviewer_id, "at": iso(review.created_at)},
             }
         )
-        if len(out) >= limit:
-            break
     audit(db, actor_type="staff", actor_id=principal.id, action="admin.corrections_viewed", resource_type="intro_correction", resource_id=None, purpose="concierge_review", metadata={"count": len(out)})
-    return {"items": out}
+    return {"items": out, "total": total, "limit": limit, "offset": offset}
+
+
+@router.post("/matching/corrections/{correction_id}/review")
+def review_correction(
+    correction_id: str,
+    data: CorrectionReviewIn,
+    principal: Principal = Depends(require_roles("concierge", "admin")),
+    db: Session = Depends(get_db, scope="function"),
+) -> dict:
+    """Resolve one correction, so the unresolved queue has a way out.
+
+    A correction the member filed without a replacement value changes nothing on its own: the
+    member is told it has been noted for a reviewer, and this is the endpoint by which a reviewer
+    says they have done that. It does not touch the member's blueprint — a signal is changed
+    through the blueprint endpoints, which audit it in the member's own name — it records that a
+    person has handled this row.
+    """
+    correction = db.get(IntroCorrection, correction_id)
+    if correction is None:
+        raise ApiError("NOT_FOUND")
+    existing = db.execute(select(IntroCorrectionReview).where(IntroCorrectionReview.correction_id == correction.id)).scalar_one_or_none()
+    if existing is not None:
+        raise ApiError("CONFLICT", "Another reviewer has already resolved this correction.")
+    review = IntroCorrectionReview(correction_id=correction.id, reviewer_id=principal.id, decision=data.decision, note=data.note)
+    db.add(review)
+    db.flush()
+    audit(
+        db,
+        actor_type="staff",
+        actor_id=principal.id,
+        action="admin.correction_reviewed",
+        resource_type="intro_correction",
+        resource_id=correction.id,
+        purpose="concierge_review",
+        metadata={"decision": data.decision, "note": data.note, "signal_key": correction.signal_key},
+    )
+    return {"id": correction.id, "review": {"decision": review.decision, "note": review.note, "reviewer_id": review.reviewer_id, "at": iso(review.created_at)}}
 
 
 @router.post("/matching/runs/{run_id}/publish")
@@ -254,6 +320,59 @@ def safety_case(report_id: str, principal: Principal = Depends(require_roles("sa
         context = [{"from": "reporter" if m.sender_id == r.reporter_id else "subject", "text": m.body, "at": iso(m.sent_at), "flags": (m.meta or {}).get("flags", [])} for m in reversed(msgs)]
         audit(db, actor_type="staff", actor_id=principal.id, action="admin.conversation_context_viewed", resource_type="conversation", resource_id=r.conversation_id, purpose=purpose)
     return {"id": r.id, "receipt_code": r.receipt_code, "severity": r.severity, "category": r.category, "urgency": r.urgency, "status": r.status, "specialist_workflow": r.specialist_workflow, "narrative": r.narrative, "reporter": {"id": r.reporter_id, "name": _name(db, r.reporter_id)}, "subject": {"id": r.subject_id, "name": _name(db, r.subject_id), "status": db.get(Member, r.subject_id).status if r.subject_id else None}, "evidence": [{"id": e.id, "content_type": e.content_type, "description": e.description, "collected_at": iso(e.collected_at), "access_count": e.access_count} for e in evidence], "notes": [{"id": n.id, "role": n.author_role, "note": n.note, "visible_to_reporter": n.visible_to_reporter, "at": iso(n.created_at)} for n in notes], "actions": [{"id": a.id, "type": a.type, "scope": a.scope, "reason_code": a.reason_code, "decision_source": a.decision_source, "appealable": a.appealable, "public_notice": a.public_notice, "ends_at": iso(a.ends_at), "lifted_at": iso(a.lifted_at)} for a in actions], "conversation_context": context, "submitted_at": iso(r.submitted_at)}
+
+
+@router.get("/safety/evidence/{evidence_id}")
+def safety_evidence(
+    evidence_id: str,
+    principal: Principal = Depends(require_roles("safety_reviewer", "admin")),
+    db: Session = Depends(get_db, scope="function"),
+    purpose: str = Query(min_length=3),
+) -> dict:
+    """The bytes of one piece of evidence, for the person handling the case.
+
+    The upload endpoint answers a reporter with "Kept under the case retention policy with
+    restricted access; every access is audited", and the case page lists each attachment's MIME
+    type and description. Neither was a way to open it: the screenshot a member attached — often
+    the whole substance of a report, a threat or a demand for money — was stored and could be read
+    by nobody. A reporter was being asked to send evidence into a vault with no door.
+
+    Same shape as the member-facing media read: a declared purpose, an audit row naming this
+    reviewer and this attachment, and the access counted on the row itself so the case page shows
+    how often it has been opened.
+    """
+    ev = db.get(SafetyEvidence, evidence_id)
+    if ev is None:
+        raise ApiError("NOT_FOUND")
+    from app.modules.profile.storage import get_object
+
+    data_url = get_object(ev.storage_key)
+    if not data_url:
+        # Metadata without bytes: an upload that never completed, or retention has expired. Not an
+        # error the reviewer can act on, so it says which rather than reading as a missing case.
+        raise ApiError("NOT_FOUND", "This attachment is no longer in the vault.")
+    ev.access_count += 1
+    audit(
+        db,
+        actor_type="staff",
+        actor_id=principal.id,
+        action="admin.evidence_opened",
+        resource_type="safety_evidence",
+        resource_id=ev.id,
+        purpose=purpose,
+        metadata={"report_id": ev.report_id, "content_type": ev.content_type},
+    )
+    return {
+        "id": ev.id,
+        "report_id": ev.report_id,
+        "content_type": ev.content_type,
+        "description": ev.description,
+        "size_bytes": ev.size_bytes,
+        "checksum": ev.checksum,
+        "collected_at": iso(ev.collected_at),
+        "access_count": ev.access_count,
+        "data_url": data_url,
+    }
 
 
 @router.post("/safety/cases/{report_id}")

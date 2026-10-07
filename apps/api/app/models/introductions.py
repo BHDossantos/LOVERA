@@ -86,3 +86,29 @@ class IntroCorrection(Base):
     corrected_value: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     note: Mapped[str | None] = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = created_at_column()
+
+
+class IntroCorrectionReview(Base):
+    """A staff decision on one correction, which is what makes the queue drainable.
+
+    A correction with no replacement value changes nothing about the member's blueprint, so the
+    row itself is the only record and `applied` can never become true. Without somewhere to
+    record "a person has looked at this", every such correction stayed in the unresolved queue
+    for ever and the newest ones pushed the oldest out of reach.
+
+    It is a table rather than columns on `intro_corrections` because the schema is created by
+    `Base.metadata.create_all`, which creates missing tables and does not alter existing ones —
+    so a new column would be silently absent on a database that already exists, while a new
+    table appears on the next boot.
+    """
+
+    __tablename__ = "intro_correction_reviews"
+
+    id: Mapped[str] = id_column()
+    correction_id: Mapped[str] = mapped_column(ForeignKey("intro_corrections.id", ondelete="CASCADE"), nullable=False, unique=True)
+    reviewer_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    # `actioned`: the reviewer changed something because of it. `no_change`: they read it and
+    # decided the inference stands. Both resolve the row; only the queue's filter cares which.
+    decision: Mapped[str] = mapped_column(String(16), nullable=False)
+    note: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    created_at: Mapped[datetime] = created_at_column()

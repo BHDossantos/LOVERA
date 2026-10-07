@@ -269,7 +269,9 @@ describe("shrinkSteps", () => {
     const steps = shrinkSteps(1170);
     expect(steps.length).toBeGreaterThan(0);
     for (const s of steps) expect(s.width).toBeLessThan(1170);
-    expect(steps.map((s) => s.width)).toEqual([585, 386, 293]);
+    // The last rung is the floor itself, which is what makes the ladder worth climbing all the way
+    // down: 293 is still a third more pixels than 240.
+    expect(steps.map((s) => s.width)).toEqual([585, 386, 293, 240]);
   });
 
   test("no step ever enlarges the source, at any width", () => {
@@ -297,10 +299,29 @@ describe("shrinkSteps", () => {
 
   test("a source already at the floor still gets one real attempt", () => {
     // Nothing narrower is worth asking for, but a huge PNG re-encoded as JPEG is most of the
-    // saving, so refusing without trying would be giving up early.
+    // saving, so refusing without trying would be giving up early. The full-width re-encode comes
+    // first, so an image that fits as it is never gets downscaled for nothing.
     const steps = shrinkSteps(300);
-    expect(steps).toHaveLength(1);
     expect(steps[0].width).toBe(300);
+  });
+
+  test("the floor is reachable from a narrow source", () => {
+    // Every fraction of a source under about 479px rounds below MIN_WIDTH and is skipped, so a
+    // narrow but very tall screenshot used to get one no-op re-encode and then a refusal — while
+    // 240px, the width this file calls readable, was never tried. 300 and 400 are both in that
+    // band; 460 is just inside it.
+    for (const w of [300, 400, 460]) {
+      expect(shrinkSteps(w).map((s) => s.width)).toContain(240);
+    }
+    // And from a source whose fractions stop above the floor: 700 halves to 350 and then every
+    // further fraction is skipped, so without this the ladder stopped 110px short of its own floor.
+    expect(shrinkSteps(700).map((s) => s.width)).toEqual([350, 240]);
+  });
+
+  test("a source at the floor is not asked to go below it", () => {
+    // 240 is the floor, not a step to descend from: the only thing left is the re-encode.
+    expect(shrinkSteps(240).map((s) => s.width)).toEqual([240]);
+    expect(shrinkSteps(200).map((s) => s.width)).toEqual([200]);
   });
 
   test("steps only ever descend", () => {

@@ -70,10 +70,19 @@ export function shrinkSteps(sourceWidth: number | undefined): { width: number; c
     steps.push({ width, compress });
   }
 
-  // Nothing narrower is worth asking for — a source already near the floor. Re-encode at the width
-  // it has: the resize is a no-op, and turning a PNG screenshot into a JPEG is most of the saving
-  // anyway, so this is a real attempt rather than a formality.
+  // Nothing narrower came out of the ceilings or the fractions — a source already near the floor.
+  // Re-encode at the width it has: the resize is a no-op, and turning a PNG screenshot into a JPEG
+  // is most of the saving anyway, so this is a real attempt rather than a formality. It is tried
+  // first, being the widest, so an image that fits at full width is never downscaled for nothing.
   if (!steps.length) steps.push({ width: sourceWidth, compress: 0.6 });
+
+  // And the floor itself, which the ladder could not previously reach. Every fraction of a source
+  // under about 479px rounds below MIN_WIDTH and is skipped, so a 400px-wide screenshot thousands
+  // of pixels tall got one no-op re-encode and then a refusal — while 240px, the width this file
+  // declares readable, was never tried at all. The member was told their evidence was too large on
+  // a safety report when the one step that would have fitted was the one being withheld.
+  const narrowest = steps.reduce((min, step) => Math.min(min, step.width), Infinity);
+  if (MIN_WIDTH < sourceWidth && narrowest > MIN_WIDTH) steps.push({ width: MIN_WIDTH, compress: 0.5 });
 
   return steps.sort((a, b) => b.width - a.width);
 }
