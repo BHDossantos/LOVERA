@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Text } from "react-native";
 import { ApiError, get, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
+import { serverDriven } from "@/lib/query";
 import type { DatePlan } from "@/api/types";
 import { Button, Card, ChoiceCard, ErrorState, Loading, Options, PageTitle, Screen, StatusBanner, Toggle } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
@@ -43,6 +44,7 @@ export default function DateFeedback() {
 
   const q = useQuery({
     queryKey: ["date-plan", dateId],
+    ...serverDriven,
     queryFn: () => get<DatePlan>(`/date-plans/${dateId}`),
     enabled: !!me && !!dateId,
   });
@@ -63,7 +65,14 @@ export default function DateFeedback() {
         safety_flag: safetyFlag,
         learning_consent: false,
       });
-      await Promise.all([q.refetch(), qc.invalidateQueries({ queryKey: ["date-plans"] })]);
+      await Promise.all([
+        q.refetch(),
+        qc.invalidateQueries({ queryKey: ["date-plans"] }),
+        // The outcome is a different key, and this navigates straight to the screen that reads
+        // it. `serverDriven` makes that screen refetch, but without dropping the cached answer
+        // first it paints the old one for a frame — and the old one is "no mutual result yet".
+        qc.invalidateQueries({ queryKey: ["date-plan", dateId, "outcome"] }),
+      ]);
       router.replace(`/dates/${dateId}/mutual-second-date` as never);
     } catch (e) {
       setError(e as ApiError);

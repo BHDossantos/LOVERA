@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Linking, Text, View } from "react-native";
 import { ApiError, get, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
+import { serverDriven } from "@/lib/query";
 import { telUri } from "@/components/safety";
 import type { DatePlan } from "@/api/types";
 import { Badge, Button, Card, Divider, ErrorState, Loading, PageTitle, Screen, StatusBanner } from "@/components/ui";
@@ -20,6 +21,7 @@ export default function DateDetail() {
 
   const q = useQuery({
     queryKey: ["date-plan", dateId],
+    ...serverDriven,
     queryFn: () => get<DatePlan>(`/date-plans/${dateId}`),
     enabled: !!me && !!dateId,
   });

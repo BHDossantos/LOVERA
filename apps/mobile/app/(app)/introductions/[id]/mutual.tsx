@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Text } from "react-native";
 import { ApiError, get } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
+import { serverDriven } from "@/lib/query";
 import type { Introduction } from "@/api/types";
 import { Badge, Button, Card, ErrorState, Loading, PageTitle, Screen, StatusBanner } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
@@ -25,13 +26,7 @@ export default function Mutual() {
     queryKey: ["introduction", id],
     queryFn: () => get<Introduction>(`/introductions/${id}`),
     enabled: !!me && !!id,
-    // This screen is opened from the "you both said yes" notification, and it shares a cache
-    // key with the introduction screen. The client's default staleTime is 15s, so a member who
-    // had just looked at the introduction while it still said awaiting_other_member would get
-    // that cached answer back and be told "Not mutual yet" — by the very screen the server
-    // sent them to because it had become mutual. Same pattern as the verification screen.
-    staleTime: 0,
-    refetchOnMount: "always",
+    ...serverDriven,
   });
 
   if (q.isLoading)

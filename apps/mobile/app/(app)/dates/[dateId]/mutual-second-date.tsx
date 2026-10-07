@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Text } from "react-native";
 import { ApiError, get } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
+import { serverDriven } from "@/lib/query";
 import { Button, Card, ErrorState, Loading, PageTitle, Screen, StatusBanner } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
 
@@ -29,6 +30,7 @@ export default function DateOutcome() {
 
   const q = useQuery({
     queryKey: ["date-plan", dateId, "outcome"],
+    ...serverDriven,
     queryFn: () => get<Outcome>(`/date-plans/${dateId}/mutual-outcome`),
     enabled: !!me && !!dateId,
   });

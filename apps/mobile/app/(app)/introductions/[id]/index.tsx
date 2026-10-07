@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Image, Text, View, useWindowDimensions, type LayoutChangeEvent } from "react-native";
 import { ApiError, get, newIdempotencyKey, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
+import { serverDriven } from "@/lib/query";
 import type { Introduction, Strength } from "@/api/types";
 import { DECLINE_REASONS, INTRO_STATUS_LABEL, PROMPT_LABEL, type DecisionResult } from "@/components/intro";
 import { CorrectionForm } from "@/components/CorrectionForm";
@@ -44,11 +45,7 @@ export default function IntroductionDetail() {
     queryKey: ["introduction", id],
     queryFn: () => get<Introduction>(`/introductions/${id}`),
     enabled: !!me && !!id,
-    // Same hazard as the mutual screen, through the same cache key: this is reached from a
-    // notification and from Today, and what it shows is a decision on a clock. A 15-second-old
-    // cached status is enough to offer Accept on an introduction the server has since expired.
-    staleTime: 0,
-    refetchOnMount: "always",
+    ...serverDriven,
   });
 
   const [choice, setChoice] = useState<"accept" | "decline" | null>(null);

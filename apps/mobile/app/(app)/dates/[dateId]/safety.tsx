@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Linking, Text } from "react-native";
 import { ApiError, get, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
+import { serverDriven } from "@/lib/query";
 import { telUri } from "@/components/safety";
 import type { DatePlan } from "@/api/types";
 import { Button, Card, Divider, ErrorState, Field, Loading, Options, PageTitle, Screen, StatusBanner, TextInput } from "@/components/ui";
@@ -47,6 +48,7 @@ export default function DateCheckIn() {
 
   const q = useQuery({
     queryKey: ["date-plan", dateId],
+    ...serverDriven,
     queryFn: () => get<DatePlan>(`/date-plans/${dateId}`),
     enabled: !!me && !!dateId,
   });

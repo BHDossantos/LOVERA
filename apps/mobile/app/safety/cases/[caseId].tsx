@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Text } from "react-native";
 import { ApiError, get, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
+import { serverDriven } from "@/lib/query";
 import { CASE_STATUS_LABEL, CATEGORY_LABEL, PROTECTION_LABEL, type SafetyCase } from "@/components/safety";
 import { EvidenceAttach } from "@/components/EvidenceAttach";
 import { Badge, Button, Card, Divider, ErrorState, Field, Loading, PageTitle, Screen, StatusBanner, TextInput } from "@/components/ui";
@@ -21,6 +22,7 @@ export default function CaseDetailScreen() {
   const { caseId } = useLocalSearchParams<{ caseId: string }>();
   const q = useQuery({
     queryKey: ["safety-case", caseId],
+    ...serverDriven,
     queryFn: () => get<SafetyCase>(`/safety/cases/${caseId}`),
     enabled: !!me && !!caseId,
   });

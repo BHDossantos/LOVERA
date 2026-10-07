@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Text } from "react-native";
 import { ApiError, get, post } from "@/api/client";
 import { useAuth } from "@/lib/auth";
+import { serverDriven } from "@/lib/query";
 import { Badge, Button, Card, Divider, ErrorState, Field, Loading, PageTitle, Screen, StatusBanner, TextInput } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
 
@@ -44,7 +45,7 @@ export default function AccountReview() {
   const [error, setError] = useState<ApiError | null>(null);
   const [sent, setSent] = useState<string | null>(null);
 
-  const q = useQuery({ queryKey: ["account-review"], queryFn: () => get<Review>("/account/review"), enabled: !!me });
+  const q = useQuery({ queryKey: ["account-review"], queryFn: () => get<Review>("/account/review"), enabled: !!me, ...serverDriven });
 
   const submit = async (actionId: string) => {
     setBusy(true);
