@@ -16,6 +16,7 @@ import type { ExpoConfig, ConfigContext } from "expo/config";
  */
 const BUNDLE_ID = process.env.EXPO_PUBLIC_BUNDLE_ID ?? "com.aimatchmaker.app";
 
+const WEBSITE_URL = "https://joinlovera.com";
 const BRAND_BACKGROUND = "#faf7f1";
 const BRAND_TEAL = "#0f766e";
 
@@ -100,6 +101,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   primaryColor: BRAND_TEAL,
   extra: {
     apiOrigin: apiOrigin(),
+    websiteUrl: WEBSITE_URL,
     eas: { projectId: easProjectId() },
   },
   ios: {
