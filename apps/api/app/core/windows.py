@@ -85,6 +85,24 @@ def day_intervals(windows: list[dict[str, Any]], tz: str, days: list[date]) -> l
     return out
 
 
+def local_dates_covering(opens: datetime, closes: datetime, tz: str) -> list[date]:
+    """Every local date in `tz` that a window overlapping `[opens, closes)` could sit on.
+
+    Derived from the horizon's own instants, with a day either side: a window late on one local day
+    runs into the next, and one that begins before `opens` can still end inside the horizon.
+
+    A fixed day count from "yesterday" in each member's zone is what this replaced, and it does not
+    reach the far end of the horizon once the two zones are far apart. At 11:00 UTC on 1 January a plan
+    in Kiritimati (UTC+14) closes on the 17th local — the 15th at 22:00 for a member on UTC-12 — while
+    sixteen days counted from that member's own yesterday stop on the 14th, so a window on their 15th
+    was never built and an overlap on the plan's last day could be reported as no availability at all.
+    """
+    zone = ZoneInfo(tz)
+    first = opens.astimezone(zone).date() - timedelta(days=1)
+    last = closes.astimezone(zone).date() + timedelta(days=1)
+    return [first + timedelta(days=i) for i in range((last - first).days + 1)]
+
+
 def intersect(a: list[Interval], b: list[Interval], minimum_minutes: int = MINIMUM_SLOT_MINUTES) -> list[Interval]:
     """The intervals both sides are free for, long enough to be worth offering, merged and sorted.
 

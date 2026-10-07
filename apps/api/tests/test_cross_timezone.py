@@ -17,10 +17,10 @@ These tests pin the arithmetic, and then the endpoint, with two members an hour 
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from app.core.windows import day_intervals, intersect, offset_minutes, weekly_overlaps
+from app.core.windows import day_intervals, intersect, local_dates_covering, offset_minutes, weekly_overlaps
 from tests.conftest import Actor, onboard, staff, subscribe, unique_email
 
 # A Friday, and well clear of any European DST change so the offsets in the assertions are stable.
@@ -196,6 +196,31 @@ def test_the_horizon_is_judged_on_what_survives_the_cut(client):
     # And the far boundary stays respected, which it was.
     latest = today + timedelta(days=14)
     assert not [o for o in offers if o["date"] > latest.isoformat() or o["date"] < tomorrow.isoformat()]
+
+
+def test_each_member_gets_the_dates_the_horizon_actually_covers():
+    """The candidate dates come from the horizon's instants, not from a count of days.
+
+    A count from each member's own "yesterday" does not reach the far end of the horizon once the two
+    zones are far apart, and the far end is exactly where it matters: a window that is never built
+    cannot be offered, so an overlap on the plan's last day reads as no availability at all.
+    """
+    now = datetime(2026, 1, 1, 11, 0, tzinfo=timezone.utc)
+    plan_zone = ZoneInfo("Pacific/Kiritimati")  # UTC+14
+    plan_today = now.astimezone(plan_zone).date()
+    opens = datetime.combine(plan_today + timedelta(days=1), time.min, tzinfo=plan_zone)
+    closes = datetime.combine(plan_today + timedelta(days=15), time.min, tzinfo=plan_zone)
+
+    other = "Etc/GMT+12"  # UTC-12, twenty-six hours behind the plan
+    assert closes.astimezone(ZoneInfo(other)) == datetime(2026, 1, 15, 22, 0, tzinfo=ZoneInfo(other))
+    covered = local_dates_covering(opens, closes, other)
+    assert date(2026, 1, 15) in covered, "the horizon closes during that member's 15th"
+
+    # What a fixed count of days gave instead, pinned so the reason for the change is legible.
+    counted_from_yesterday = [now.astimezone(ZoneInfo(other)).date() - timedelta(days=1) + timedelta(days=i) for i in range(16)]
+    assert date(2026, 1, 15) not in counted_from_yesterday
+    # And it still covers the near end, a day before the horizon opens, for a window that runs into it.
+    assert opens.astimezone(ZoneInfo(other)).date() - timedelta(days=1) == covered[0]
 
 
 def _mutual_conversation(client) -> tuple[Actor, Actor, str]:

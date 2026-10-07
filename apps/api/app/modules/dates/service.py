@@ -15,7 +15,7 @@ from app.core.config import get_settings
 from app.core.errors import ApiError
 from app.core.events import publish
 from app.core.timeutil import iso, utcnow
-from app.core.windows import MINIMUM_SLOT_MINUTES, WEEKDAYS, day_intervals, intersect, merge
+from app.core.windows import MINIMUM_SLOT_MINUTES, WEEKDAYS, day_intervals, intersect, local_dates_covering, merge
 from app.models.account import Member
 from app.models.availability import AvailabilityVersion
 from app.models.conversations import Conversation
@@ -85,14 +85,6 @@ def overlaps(db: Session, a_id: str, b_id: str, tz: str, horizon_days: int = 14)
     a_tz, b_tz = _timezone_of(db, a_id), _timezone_of(db, b_id)
     zone = ZoneInfo(tz)
     now = utcnow()
-    # One day either side of the horizon, because a window late in the evening of one member's local
-    # day can be early the next day in the other's.
-    span = horizon_days + 2
-
-    def local_days(name: str) -> list[date]:
-        first = now.astimezone(ZoneInfo(name)).date() - timedelta(days=1)
-        return [first + timedelta(days=i) for i in range(span)]
-
     away_a = {e.get("date") for e in av_a.dated_exceptions if e.get("available") is False}
     away_b = {e.get("date") for e in av_b.dated_exceptions if e.get("available") is False}
     # A member's "I am away that day" is a date in their calendar, not in whoever is looking.
@@ -108,9 +100,11 @@ def overlaps(db: Session, a_id: str, b_id: str, tz: str, horizon_days: int = 14)
     closes = datetime.combine(latest + timedelta(days=1), time.min, tzinfo=zone)
 
     out: list[dict[str, Any]] = []
+    # Each member's candidate dates come from the horizon's instants in their own calendar, not from a
+    # day count: a count does not reach the far end of the horizon once the two zones are far apart.
     for starts_at, ends_at in intersect(
-        day_intervals(av_a.recurring_windows, a_tz, local_days(a_tz)),
-        day_intervals(av_b.recurring_windows, b_tz, local_days(b_tz)),
+        day_intervals(av_a.recurring_windows, a_tz, local_dates_covering(opens, closes, a_tz)),
+        day_intervals(av_b.recurring_windows, b_tz, local_dates_covering(opens, closes, b_tz)),
     ):
         if ends_at <= now:
             continue
