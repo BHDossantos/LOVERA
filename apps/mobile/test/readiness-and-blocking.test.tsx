@@ -91,9 +91,10 @@ jest.mock("@/api/client", () => ({
   newIdempotencyKey: () => "idem_test",
   ApiError: class extends Error {},
 }));
+const mockRefresh = jest.fn();
 jest.mock("@/lib/auth", () => ({
   useRequireMember: () => ({ me: { id: "mem_me" } }),
-  useAuth: () => ({ refresh: jest.fn() }),
+  useAuth: () => ({ refresh: () => mockRefresh() }),
   nextOnboardingPath: () => "/today",
 }));
 jest.mock("expo-router", () => ({
@@ -103,6 +104,7 @@ jest.mock("expo-router", () => ({
 
 import Conversation from "../app/(app)/messages/[conversationId]";
 import Preferences from "../app/(app)/you/preferences";
+import YouAvailability from "../app/(app)/you/availability";
 
 afterEach(() => jest.restoreAllMocks());
 
@@ -112,6 +114,7 @@ beforeEach(() => {
   mockDel.mockReset();
   mockPush.mockReset();
   mockReplace.mockReset();
+  mockRefresh.mockReset();
   mockPost.mockResolvedValue({});
   mockDel.mockResolvedValue(undefined);
 });
@@ -206,4 +209,55 @@ test("somebody already blocked is not offered a second Block", async () => {
   expect(s.joined()).toContain("Blocked. Undo it in the safety centre.");
   await expect(s.press("Block")).rejects.toThrow(/nothing pressable/);
   expect(s.texts()).toContain("Report");
+});
+
+test("blocking drops the cached date and introduction it has just cancelled", async () => {
+  // `create_block` cancels every open date plan on the conversation and closes any open
+  // introduction between the two (safety/service.py:46-54) — which is what the dialog promises.
+  // Invalidating only conversations, blocks and Today left a mounted Dates tab or date detail
+  // showing a confirmed date with the blocked member, Confirm and Check in still on it.
+  const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+  mockGet.mockImplementation(conversationRoutes(CONVERSATION));
+  const s = await renderScreen(<Conversation />);
+
+  // What another screen would be holding when the member blocks from here. The harness client
+  // runs gcTime: 0, which collects an unobserved entry the moment it is written — so without
+  // this the removals below would pass against code that removes nothing.
+  for (const key of [["date-plan"], ["introduction"], ["date-plans"], ["introductions"]]) {
+    s.client.setQueryDefaults(key, { gcTime: Infinity });
+  }
+  s.client.setQueryData(["date-plan", "dp_1"], { id: "dp_1", status: "confirmed" });
+  s.client.setQueryData(["date-plan", "dp_1", "outcome"], { state: "no_mutual_result_yet" });
+  s.client.setQueryData(["introduction", "intro_1"], { id: "intro_1", status: "mutual" });
+  s.client.setQueryData(["date-plans"], { items: [{ id: "dp_1" }] });
+  s.client.setQueryData(["introductions"], { current: [{ id: "intro_1" }], mutual: [] });
+
+  await s.press("Block");
+  (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Block")?.onPress?.();
+  await s.settle();
+
+  // The details are gone, not merely stale: stale data is still painted.
+  expect(s.client.getQueryData(["date-plan", "dp_1"])).toBeUndefined();
+  expect(s.client.getQueryData(["date-plan", "dp_1", "outcome"])).toBeUndefined();
+  expect(s.client.getQueryData(["introduction", "intro_1"])).toBeUndefined();
+  // The lists are invalidated: a mounted one refetches at once, and a row is not an action.
+  expect(s.client.getQueryState(["date-plans"])?.isInvalidated).toBe(true);
+  expect(s.client.getQueryState(["introductions"])?.isInvalidated).toBe(true);
+});
+
+test("saving readiness refreshes Today, not only the member", async () => {
+  // This screen is normally opened from Today's readiness task, so `router.back()` returns to a
+  // Today that was never unmounted — `refetchOnMount` cannot fire, and it would go on offering
+  // the task that has just been done until its next sixty-second poll.
+  mockGet.mockImplementation(routeGet({ "/availability": AVAILABILITY }));
+  const s = await renderScreen(<YouAvailability />);
+  s.client.setQueryDefaults(["today"], { gcTime: Infinity });
+  s.client.setQueryData(["today"], { tasks: [{ key: "set_availability", title: "Say when you could meet" }] });
+
+  await s.press("Save my availability");
+  await s.settle();
+
+  expect(mockPost).toHaveBeenCalledWith("/availability", expect.objectContaining({ date_ready: expect.anything() }));
+  expect(mockRefresh).toHaveBeenCalled();
+  expect(s.client.getQueryState(["today"])?.isInvalidated).toBe(true);
 });

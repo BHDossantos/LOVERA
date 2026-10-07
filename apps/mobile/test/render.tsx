@@ -54,7 +54,7 @@ export async function renderScreen(ui: ReactElement) {
      * The screen's own cache, so a test can seed an entry another screen would be holding and
      * then assert what an action did to it. Whether a mutation invalidates or *removes* is not
      * a detail: invalidate marks an entry stale and leaves the data in place, so a screen left
-     * mounted keeps painting it.
+     * mounted keeps painting it, which is exactly how a cancelled date stayed actionable.
      */
     client,
     /** Every string rendered anywhere in the tree. */

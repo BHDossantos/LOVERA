@@ -151,10 +151,25 @@ export default function Conversation() {
               setBlockError(null);
               try {
                 await post("/blocks", { member_id: memberId });
+                // `create_block` does more than close this conversation: it cancels every
+                // draft, proposed, countered or confirmed date plan on it and closes any open
+                // introduction between the two (safety/service.py:46-54). The dialog above
+                // promises exactly that, so a Dates tab or a date detail left mounted must not
+                // go on showing a confirmed date with somebody who has just been blocked —
+                // with Confirm and Check in still on it.
+                //
+                // The details are removed rather than invalidated: invalidate marks an entry
+                // stale and leaves the data in place, which is the whole failure mode. The
+                // lists are invalidated, because a mounted list refetches at once and a row is
+                // not an action.
+                qc.removeQueries({ queryKey: ["date-plan"] });
+                qc.removeQueries({ queryKey: ["introduction"] });
                 await Promise.all([
                   qc.invalidateQueries({ queryKey: ["conversations"] }),
                   qc.invalidateQueries({ queryKey: ["blocks"] }),
                   qc.invalidateQueries({ queryKey: ["today"] }),
+                  qc.invalidateQueries({ queryKey: ["date-plans"] }),
+                  qc.invalidateQueries({ queryKey: ["introductions"] }),
                 ]);
                 router.replace("/messages" as never);
               } catch (e) {
