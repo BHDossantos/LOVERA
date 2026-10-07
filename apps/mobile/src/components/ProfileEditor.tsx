@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Alert, Image, Pressable, Text, View } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as ImagePicker from "expo-image-picker";
-import { ApiError, get, patch, post } from "@/api/client";
+import { ApiError, del, get, patch, post } from "@/api/client";
 import { Badge, Button, Card, ErrorState, Field, Loading, TextInput } from "@/components/ui";
 import { color, radius, space, type as typo } from "@/theme";
 
@@ -150,6 +150,30 @@ export function ProfileEditor({ onSaved }: { onSaved?: () => void }) {
                   <Badge label={m.state === "pending" ? "In review" : m.state} tone="muted" />
                 </View>
               )}
+              {/* A photo you cannot take down is a photo you did not really choose to post. */}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Remove this photo"
+                hitSlop={8}
+                style={s.thumbRemove}
+                onPress={() =>
+                  Alert.alert("Remove this photo?", "It stops being visible to anyone straight away.", [
+                    { text: "Keep it", style: "cancel" },
+                    {
+                      text: "Remove",
+                      style: "destructive",
+                      onPress: () => {
+                        setError(null);
+                        void del(`/profile/media/${m.id}`)
+                          .then(() => qc.invalidateQueries({ queryKey: ["profile"] }))
+                          .catch((e) => setError(e as ApiError));
+                      },
+                    },
+                  ])
+                }
+              >
+                <Text style={s.thumbRemoveText}>×</Text>
+              </Pressable>
             </View>
           ))}
         </View>
@@ -255,6 +279,18 @@ const s = {
   h2: { ...typo.heading, color: color.ink, marginBottom: space.xs },
   note: { ...typo.small, color: color.inkSecondary, marginBottom: space.md },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: space.sm, marginBottom: space.md },
+  thumbRemove: {
+    position: "absolute",
+    top: 4,
+    right: 4,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  thumbRemoveText: { color: "#fff", fontSize: 18, lineHeight: 20, fontWeight: "700" },
   thumbWrap: { position: "relative" },
   thumb: { width: 96, height: 120, borderRadius: radius.md, backgroundColor: color.surfaceMuted },
   thumbEmpty: { borderWidth: 1, borderColor: color.border },

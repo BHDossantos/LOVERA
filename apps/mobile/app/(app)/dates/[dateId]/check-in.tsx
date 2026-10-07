@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Linking, Text } from "react-native";
 import { ApiError, get, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
+import { telUri } from "@/components/safety";
 import type { DatePlan } from "@/api/types";
 import { Button, Card, Divider, ErrorState, Field, Loading, Options, PageTitle, Screen, StatusBanner, TextInput } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
@@ -127,7 +128,7 @@ export default function DateCheckIn() {
             Escalate now
           </Button>
           {!!d?.safety.emergency && (
-            <Button variant="secondary" onPress={() => void Linking.openURL(`tel:${d.safety.emergency}`)}>
+            <Button variant="secondary" onPress={() => void Linking.openURL(telUri(d.safety.emergency))}>
               {`Call emergency services (${d.safety.emergency})`}
             </Button>
           )}
