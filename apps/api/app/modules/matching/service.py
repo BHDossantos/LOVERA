@@ -11,7 +11,7 @@ from app.core.analytics import track
 from app.core.audit import audit
 from app.core.config import get_settings
 from app.core.events import publish
-from app.core.timeutil import iso, utcnow
+from app.core.timeutil import iso, market_date, utcnow
 from app.models.account import Member
 from app.models.introductions import Introduction, MatchExplanation
 from app.models.matching import CandidatePair, MatchRun
@@ -61,9 +61,13 @@ def capacity_for(db: Session, member: Member) -> int:
     return max(0, cap)
 
 
-def run_batch(db: Session, market_id: str, triggered_by: str | None = None, auto_publish: bool = True) -> MatchRun:
+def run_batch(db: Session, market_id: str, triggered_by: str | None = None, auto_publish: bool = True, cohort_date: str | None = None) -> MatchRun:
     settings = get_settings()
-    run = MatchRun(market_id=market_id, cohort_date=utcnow().date().isoformat(), rules_version=RULES_VERSION, model_version=MODEL_VERSION, triggered_by=triggered_by, config={"weekly_cap_paid": settings.weekly_intro_cap_paid, "weekly_cap_free": settings.trial_introductions, "auto_publish": auto_publish})
+    # Passed in by the scheduler, which has already worked out which market day it is deciding
+    # about: the run and the guard that stops it running twice then read the same value, instead of
+    # each deriving its own from a different clock. A batch triggered by hand has no such day, so
+    # it takes the market's date now.
+    run = MatchRun(market_id=market_id, cohort_date=cohort_date or market_date(), rules_version=RULES_VERSION, model_version=MODEL_VERSION, triggered_by=triggered_by, config={"weekly_cap_paid": settings.weekly_intro_cap_paid, "weekly_cap_free": settings.trial_introductions, "auto_publish": auto_publish})
     db.add(run)
     db.flush()
     members = db.execute(select(Member).where(Member.status == "active", Member.market_id == market_id)).scalars().all()
