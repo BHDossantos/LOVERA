@@ -41,36 +41,32 @@ export async function renderScreen(ui: ReactElement) {
      */
     joined: () => collect(r.root).join(""),
     /**
-     * Press the first pressable whose subtree renders `label`.
+     * Press an enabled control whose subtree renders `label`.
      *
      * A disabled control is skipped rather than fired, because calling onPress directly
      * would let a test "press" a button a member cannot — and then assert behaviour the
      * real app does not have.
+     *
+     * `nth` counts controls, not nodes, and counts from the end when negative. Leaving it out
+     * presses the last one, which is what a screen with several "Yes" options wants and a list
+     * of rows sharing a button label does not: taking whichever was last made a concurrency
+     * test press the same row twice and pass against the bug it was written to catch. So a
+     * test over a list has to say which row it means.
      */
-    press: async (label: string) => {
-      const matches = r.root.findAll((n) => {
-        const props = n.props as { onPress?: unknown; disabled?: boolean; accessibilityState?: { disabled?: boolean } };
-        if (typeof props.onPress !== "function") return false;
-        if (props.disabled || props.accessibilityState?.disabled) return false;
-        return collect(n).some((t) => t.includes(label));
-      });
-      if (!matches.length) {
-        const disabled = r.root.findAll((n) => {
-          const props = n.props as { onPress?: unknown; disabled?: boolean; accessibilityState?: { disabled?: boolean } };
-          return (
-            typeof props.onPress === "function" &&
-            Boolean(props.disabled || props.accessibilityState?.disabled) &&
-            collect(n).some((t) => t.includes(label))
-          );
-        });
+    press: async (label: string, nth = -1) => {
+      const controls = pressables(r.root, label, false);
+      if (!controls.length) {
         throw new Error(
-          disabled.length
+          pressables(r.root, label, true).length
             ? `${JSON.stringify(label)} is rendered but disabled, so a member could not press it`
             : `nothing pressable renders ${JSON.stringify(label)}`,
         );
       }
-      // The innermost match is the actual control rather than a wrapper around it.
-      const node = matches[matches.length - 1];
+      const node = at(controls, nth);
+      if (!node)
+        throw new Error(
+          `only ${controls.length} enabled control(s) render ${JSON.stringify(label)}, so there is no #${nth}`,
+        );
       await act(async () => {
         (node.props as { onPress: () => void }).onPress();
       });
@@ -87,6 +83,31 @@ async function flush(rounds = 6) {
       jest.advanceTimersByTime?.(0);
     });
   }
+}
+
+/** Negative indices count from the end, so a test can say "the last one" without counting. */
+function at<T>(list: T[], index: number): T | undefined {
+  return index < 0 ? list[list.length + index] : list[index];
+}
+
+/**
+ * The controls whose subtree renders `label`, one node per control, in tree order.
+ *
+ * A control shows up once per wrapper around it, and every one of those nodes carries the
+ * same onPress, so the handler identity is what distinguishes one control from another. The
+ * innermost node is kept for each: that is the control rather than something wrapping it.
+ */
+function pressables(root: ReactTestInstance, label: string, wantDisabled: boolean): ReactTestInstance[] {
+  const byHandler = new Map<unknown, ReactTestInstance>();
+  for (const n of root.findAll((node) => {
+    const props = node.props as { onPress?: unknown; disabled?: boolean; accessibilityState?: { disabled?: boolean } };
+    if (typeof props.onPress !== "function") return false;
+    if (Boolean(props.disabled || props.accessibilityState?.disabled) !== wantDisabled) return false;
+    return collect(node).some((t) => t.includes(label));
+  })) {
+    byHandler.set((n.props as { onPress: unknown }).onPress, n); // later = deeper = the control
+  }
+  return [...byHandler.values()];
 }
 
 function collect(node: ReactTestInstance): string[] {

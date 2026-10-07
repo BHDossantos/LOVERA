@@ -18,9 +18,12 @@ import { color, space, type as typo } from "@/theme";
 export default function SafetyCentre() {
   const { me } = useRequireMember({ allowRestricted: true, allowOnboarding: true });
   const router = useRouter();
-  const [unblocking, setUnblocking] = useState<string | null>(null);
-  const [unblockError, setUnblockError] = useState<ApiError | null>(null);
-  const [failedUnblock, setFailedUnblock] = useState<Block | null>(null);
+  // Both are per-member, because rows other than the one spinning stay pressable and so two
+  // unblocks really can be in flight at once. A single id and a split error/block pair let one
+  // request stomp on the other's state: Ana succeeding cleared the block Ben's failure needed
+  // for its retry, so Ben's error stayed on screen with no way to act on it.
+  const [unblocking, setUnblocking] = useState<string[]>([]);
+  const [failure, setFailure] = useState<{ block: Block; error: ApiError } | null>(null);
 
   const centre = useQuery({ queryKey: ["safety"], queryFn: () => get<SafetyCenter>("/safety"), enabled: !!me });
   const cases = useQuery({
@@ -31,20 +34,23 @@ export default function SafetyCentre() {
   const blocks = useQuery({ queryKey: ["blocks"], queryFn: () => get<{ items: Block[] }>("/blocks"), enabled: !!me });
 
   const emergency = centre.data?.emergency;
+  const forgetFailure = (memberId: string) =>
+    setFailure((f) => (f?.block.member_id === memberId ? null : f));
+
   const runUnblock = async (b: Block) => {
-    setUnblocking(b.member_id);
-    setUnblockError(null);
+    setUnblocking((u) => [...u, b.member_id]);
+    forgetFailure(b.member_id);
     try {
       await del(`/blocks/${b.member_id}`);
-      setFailedUnblock(null);
+      forgetFailure(b.member_id);
       await Promise.all([blocks.refetch(), centre.refetch()]);
     } catch (e) {
       // An offline device used to leave this as an unhandled rejection: the block stayed,
-      // nothing was said, and the member had no way to tell it had failed.
-      setUnblockError(e as ApiError);
-      setFailedUnblock(b);
+      // nothing was said, and the member had no way to tell it had failed. The error and the
+      // block it belongs to are set together so neither can outlive the other.
+      setFailure({ block: b, error: e as ApiError });
     } finally {
-      setUnblocking(null);
+      setUnblocking((u) => u.filter((id) => id !== b.member_id));
     }
   };
 
@@ -74,7 +80,7 @@ export default function SafetyCentre() {
           The retry calls the unblock directly rather than reopening the confirmation: the
           member already said yes, and asking twice because our request failed is our problem
           to absorb, not theirs to re-answer. */}
-      <ErrorState error={unblockError} retry={failedUnblock ? () => void runUnblock(failedUnblock) : undefined} />
+      <ErrorState error={failure?.error ?? null} retry={failure ? () => void runUnblock(failure.block) : undefined} />
 
       {/* The emergency number comes first and does not depend on anything else loading. */}
       <StatusBanner
@@ -135,7 +141,7 @@ export default function SafetyCentre() {
           <Text style={s.name}>{b.display_name}</Text>
           <Text style={s.meta}>Blocked {new Date(b.created_at).toLocaleDateString()}</Text>
           {/* A block you cannot lift is a decision made for you. */}
-          <Button variant="ghost" loading={unblocking === b.member_id} onPress={() => unblock(b)}>
+          <Button variant="ghost" loading={unblocking.includes(b.member_id)} onPress={() => unblock(b)}>
             Unblock
           </Button>
         </Card>

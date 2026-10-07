@@ -135,3 +135,45 @@ test("retrying a failed unblock retries the unblock, not the safety query", asyn
   expect(mockDel.mock.calls.filter(([p]) => String(p).startsWith("/blocks/"))).toHaveLength(2);
   expect(s.joined()).not.toContain("You appear to be offline");
 });
+
+test("one unblock succeeding does not strand another's failure", async () => {
+  // Rows other than the one spinning stay pressable, so two unblocks can be in flight at once.
+  // Ana's success used to clear the block Ben's failure needed, leaving Ben's error on screen
+  // with no "Try again" and Ben still blocked.
+  const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+  const offline = Object.assign(new Error("You appear to be offline. Nothing was lost."), {
+    status: 0,
+    body: { code: "OFFLINE", message: "You appear to be offline. Nothing was lost.", retryable: true },
+  });
+
+  let finishAna: () => void = () => {};
+  mockDel.mockImplementation((path: string) =>
+    path === "/blocks/mem_a"
+      ? new Promise<void>((resolve) => {
+          finishAna = resolve;
+        })
+      : Promise.reject(offline),
+  );
+
+  const s = await renderScreen(<SafetyCentre />);
+  const confirmLast = () =>
+    (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Unblock")?.onPress?.();
+
+  // Ana's row first, and her request stays in flight.
+  await s.press("Unblock", 0);
+  confirmLast();
+  await s.settle();
+  // Then Ben's, which fails while Ana's is still open.
+  await s.press("Unblock", 1);
+  confirmLast();
+  await s.settle();
+  expect(s.joined()).toContain("You appear to be offline");
+
+  // Ana now succeeds. Ben's failure is not hers to clear.
+  finishAna();
+  await s.settle();
+  expect(s.joined()).toContain("You appear to be offline");
+  expect(s.texts()).toContain("Try again");
+  // Ben is still blocked, so his row is still there to retry from.
+  expect(mockDel.mock.calls.map(([p]) => p)).toEqual(["/blocks/mem_a", "/blocks/mem_b"]);
+});
