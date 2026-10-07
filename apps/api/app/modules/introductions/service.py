@@ -202,14 +202,27 @@ def correct(db: Session, intro_id: str, member: Member, signal_key: str, value: 
     if signal_key not in SIGNALS:
         raise ApiError("VALIDATION_ERROR", "Unknown signal.", field_errors={"signal_key": "unknown"})
     db.add(IntroCorrection(introduction_id=intro.id, member_id=member.id, signal_key=signal_key, corrected_value={"value": value}, note=(note or "")[:300] or None))
-    if value:
+    applied = bool(value)
+    if applied:
         from app.modules.blueprint.router import PreferenceIn, correct_signal  # reuse the versioned correction path
 
         from app.core.deps import Principal
 
         correct_signal(signal_key, PreferenceIn(tier="open", value={"value": value}), Principal(member=member, session_id="", roles=list(member.roles or []), request_id=""), db)
     audit(db, actor_type="member", actor_id=member.id, action="introduction.correction", resource_type="introduction", resource_id=intro.id, metadata={"signal_key": signal_key})
-    return {"recorded": True, "message": "Thanks. Your Blueprint is updated and future introductions use the corrected value."}
+    # Without a replacement value nothing about matching changes: the IntroCorrection row is
+    # read by nothing, and correct_signal is skipped, so the signal the member says is wrong
+    # stays live. Saying "your Blueprint is updated" either way told them their own data had
+    # been fixed when it had not — the one claim this product cannot afford to get wrong.
+    return {
+        "recorded": True,
+        "applied": applied,
+        "message": (
+            "Thanks. Your Blueprint is updated and future introductions use the corrected value."
+            if applied
+            else "Noted for a reviewer. Your matching has not changed, because you didn't pick a replacement value — choose one if you want future introductions to use it."
+        ),
+    }
 
 
 def expire_due(db: Session) -> int:

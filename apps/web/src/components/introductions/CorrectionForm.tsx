@@ -53,7 +53,7 @@ export function CorrectionForm({ introId, suggestedKeys = [], title = "Something
       </h2>
       <p className="mt-1 text-sm text-ink-secondary">If an assumption about you is off, correct it here. Corrections update your own Blueprint only; they are never shown to the other member.</p>
       {result ? (
-        <StatusBanner type="success" title="Correction recorded" body={result.message} />
+        <StatusBanner type={result.applied ? "success" : "info"} title={result.applied ? "Your Blueprint is corrected" : "On record, but nothing changed yet"} body={result.message} />
       ) : (
         <form onSubmit={submit} className="mt-4">
           <ErrorState error={error} />
@@ -69,9 +69,9 @@ export function CorrectionForm({ introId, suggestedKeys = [], title = "Something
             </Select>
           </Field>
           {active && (
-            <Field label="Correct value" htmlFor="correction-value" help={active.special_category ? "This is a sensitive category. It is only ever used because you declared it, never inferred." : "Optional. Leave blank to flag the signal without changing it."}>
+            <Field label="Correct value" htmlFor="correction-value" help={active.special_category ? "This is a sensitive category. It is only ever used because you declared it, never inferred." : "Pick the right value to change what you are matched on. Flagging alone only tells a reviewer."}>
               <Select id="correction-value" value={value} onChange={(e) => setValue(e.target.value)}>
-                <option value="">Just flag it as wrong</option>
+                <option value="">Just flag it as wrong (does not change matching)</option>
                 {active.options.map((o) => (
                   <option key={o.value} value={o.value}>
                     {o.label}

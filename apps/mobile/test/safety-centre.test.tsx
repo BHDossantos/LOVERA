@@ -199,3 +199,30 @@ test("one unblock succeeding does not strand another's failure", async () => {
   // Ben is still blocked, so his row is still there to retry from.
   expect(mockDel.mock.calls.map(([p]) => p)).toEqual(["/blocks/mem_a", "/blocks/mem_b"]);
 });
+
+test("two unblocks failing on the shared list component keeps both failures", async () => {
+  // Same bug as above, in the extracted BlockList: this branch carried the earlier
+  // single-value fix, not the per-member one, so a second failure overwrote the first.
+  const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+  const offline = (who: string) =>
+    Object.assign(new Error(`Could not unblock ${who}.`), {
+      status: 0,
+      body: { code: "OFFLINE", message: `Could not unblock ${who}.`, retryable: true },
+    });
+  mockDel.mockImplementation((path: string) => Promise.reject(offline(path === "/blocks/mem_a" ? "Ana" : "Ben")));
+
+  const s = await renderScreen(<SafetyCentre />);
+  const confirmLast = () =>
+    (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Unblock")?.onPress?.();
+
+  await s.press("Unblock", 0);
+  confirmLast();
+  await s.settle();
+  await s.press("Unblock", 1);
+  confirmLast();
+  await s.settle();
+
+  expect(s.joined()).toContain("Could not unblock Ana");
+  expect(s.joined()).toContain("Could not unblock Ben");
+  expect(s.texts().filter((t) => t === "Try again")).toHaveLength(2);
+});

@@ -183,5 +183,10 @@ export type Blueprint = {
   data_use: string;
 };
 
-/** POST /introductions/{id}/correction */
-export type CorrectionResult = { recorded: boolean; message: string };
+/**
+ * POST /introductions/{id}/correction
+ *
+ * `applied` is false when no replacement value was chosen: the correction is on record for a
+ * reviewer, but nothing about matching changed, and the screen must not claim otherwise.
+ */
+export type CorrectionResult = { recorded: boolean; applied: boolean; message: string };

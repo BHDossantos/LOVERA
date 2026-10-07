@@ -72,7 +72,13 @@ const posted = (path: string) => mockPost.mock.calls.filter(([p]) => p === path)
 beforeEach(() => {
   mockGet.mockReset();
   mockPost.mockReset();
-  mockPost.mockResolvedValue({});
+  // A bare {} is not what any of these endpoints returns, and for /correction the difference
+  // matters: `applied` decides whether the screen says the Blueprint changed.
+  mockPost.mockImplementation((path: string) =>
+    path.endsWith("/correction")
+      ? Promise.resolve({ recorded: true, applied: true, message: "Thanks. Your Blueprint is updated." })
+      : Promise.resolve({}),
+  );
   mockGet.mockImplementation(routeGet({ "/introductions/intro_1": INTRO, "/blueprint/current": BLUEPRINT }));
 });
 
@@ -123,7 +129,46 @@ test("a wrong assumption can be corrected, and the signal the matcher guessed co
     value: "early",
     note: null,
   });
-  expect(s.hasText("Correction recorded")).toBe(true);
+  expect(s.hasText("Your Blueprint is corrected")).toBe(true);
+});
+
+test("flagging without a value does not claim the Blueprint changed", async () => {
+  // correct() skips correct_signal when there is no value, and nothing reads IntroCorrection
+  // for matching — so the signal the member says is wrong stays live. Telling them it was
+  // fixed is the one claim this product cannot afford to get wrong.
+  mockPost.mockImplementation((path: string) =>
+    path.endsWith("/correction")
+      ? Promise.resolve({
+          recorded: true,
+          applied: false,
+          message: "Noted for a reviewer. Your matching has not changed, because you didn't pick a replacement value — choose one if you want future introductions to use it.",
+        })
+      : Promise.resolve({}),
+  );
+  const s = await renderScreen(<IntroductionDetail />);
+  await s.press("Correct something about me");
+  await s.press("Sleep rhythm");
+  await s.press("Correct my Blueprint");
+  await s.settle();
+
+  expect(s.joined()).toContain("On record, but nothing changed yet");
+  expect(s.joined()).not.toContain("Your Blueprint is corrected");
+});
+
+test("a correction with a value says the Blueprint was corrected", async () => {
+  mockPost.mockImplementation((path: string) =>
+    path.endsWith("/correction")
+      ? Promise.resolve({ recorded: true, applied: true, message: "Thanks. Your Blueprint is updated." })
+      : Promise.resolve({}),
+  );
+  const s = await renderScreen(<IntroductionDetail />);
+  await s.press("Correct something about me");
+  await s.press("Sleep rhythm");
+  await s.press("Early riser");
+  await s.press("Correct my Blueprint");
+  await s.settle();
+
+  expect(s.joined()).toContain("Your Blueprint is corrected");
 });
 
 test("a correction with no value still flags the signal", async () => {

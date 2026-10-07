@@ -30,7 +30,7 @@ export type DecisionResult = {
 };
 
 /** POST /introductions/{id}/correction */
-export type CorrectionResult = { recorded: boolean; message: string };
+export type CorrectionResult = { recorded: boolean; applied: boolean; message: string };
 
 /** Subset of GET /blueprint/current used by the correction form. */
 export type BlueprintSignal = { key: string; category: string; label: string; value: string | null; value_label: string; options: { value: string; label: string }[]; special_category: boolean };

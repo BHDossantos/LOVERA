@@ -61,7 +61,13 @@ export function CorrectionForm({ introId, suggestedKeys = [] }: { introId: strin
   if (result)
     return (
       <Card>
-        <StatusBanner tone="success" title="Correction recorded" body={result.message} />
+        {/* The title follows what actually happened. "Correction recorded" over a message
+            saying nothing changed is the kind of mismatch a member reads as being managed. */}
+        <StatusBanner
+          tone={result.applied ? "success" : "context"}
+          title={result.applied ? "Your Blueprint is corrected" : "On record, but nothing changed yet"}
+          body={result.message}
+        />
       </Card>
     );
 
@@ -103,14 +109,18 @@ export function CorrectionForm({ introId, suggestedKeys = [] }: { introId: strin
               help={
                 active.special_category
                   ? "This is a sensitive category. It is only ever used because you declared it, never inferred."
-                  : "Optional. Leave it as 'just flag it' to tell us it's wrong without picking a value."
+                  : "Pick the right value to change what you are matched on. Flagging alone only tells a reviewer."
               }
             >
               <Options
                 value={value}
                 onChange={setValue}
                 options={[
-                  { value: "", label: "Just flag it as wrong" },
+                  {
+                    value: "",
+                    label: "Just flag it as wrong",
+                    body: "A reviewer sees it. Your matching does not change until you pick a value.",
+                  },
                   ...active.options.map((o) => ({ value: o.value, label: o.label })),
                 ]}
               />
