@@ -1,4 +1,4 @@
-import { renderScreen, routeGet } from "./render";
+import { apiFailure, renderScreen, routeGet } from "./render";
 
 /**
  * Consent is the lawful basis for a sensitive criterion, so changing it changes the preferences
@@ -35,6 +35,7 @@ jest.mock("expo-router", () => ({
 }));
 
 import YouPrivacy from "../app/(app)/you/privacy";
+import Messages from "../app/(app)/messages/index";
 
 beforeEach(() => {
   mockGet.mockReset();
@@ -63,4 +64,36 @@ test("changing a consent refreshes the payloads that depend on it", async () => 
   expect(s.client.getQueryState(["blueprint"])?.isInvalidated).toBe(true);
   // `consents` is not asserted: this screen observes it, so invalidating an active query
   // refetches at once and clears the flag — which is the behaviour we want, not a gap.
+});
+
+
+test("a failed poll does not take the conversation list away", async () => {
+  /**
+   * The Messages list polls every 30 seconds and nulls its data while it is not fresh, so what
+   * "fresh" means decides whether one bad poll blanks a screen the member is reading.
+   *
+   * It did. The predicate asked `isSuccess`, and the installed types are explicit that
+   * `QueryObserverRefetchErrorResult` has `isSuccess: false` with `data` still present — so a
+   * transient failure of the poll replaced a correct list of conversations with an error, thirty
+   * seconds after it had loaded, on a screen nobody had even touched. Freshness is now "did this
+   * screen's own answer arrive", which a later failure cannot undo.
+   */
+  mockGet.mockImplementation(
+    routeGet({
+      "/conversations": {
+        items: [
+          { id: "conv_1", status: "active", other: { member_id: "mem_them", display_name: "Bruno", verified: true, media: [] }, last_message: { text: "Hello", at: "2026-10-01T10:00:00Z" }, unread_count: 0, date: null, safety: { subject_id: "mem_them", blocked_by_you: false } },
+        ],
+      },
+    }),
+  );
+  const s = await renderScreen(<Messages />);
+  expect(s.hasText("Bruno")).toBe(true);
+
+  mockGet.mockImplementation(() => Promise.reject(apiFailure("The network is unavailable.")));
+  await s.refetch(["conversations"]);
+
+  // Still there, with the failure reported beside it rather than in place of it.
+  expect(s.hasText("Bruno")).toBe(true);
+  expect(s.hasText("The network is unavailable.")).toBe(true);
 });

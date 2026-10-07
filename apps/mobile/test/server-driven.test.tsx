@@ -1,4 +1,4 @@
-import { awaitingServer, serverDriven } from "@/lib/query";
+import { freshSince, serverDriven } from "@/lib/query";
 
 /**
  * The rule, asserted against the screens rather than remembered.
@@ -75,31 +75,36 @@ test("the policy is what it claims to be, and all three parts are load-bearing",
   // `isLoading` is false whenever there is cached data. gcTime drops the entry when the screen
   // closes; awaitingServer withholds an answer fetched before the member arrived.
   expect(serverDriven).toEqual({ staleTime: 0, gcTime: 0, refetchOnMount: "always" });
-  expect(awaitingServer({ isSuccess: false, isFetchedAfterMount: false })).toBe(true);
-  expect(awaitingServer({ isSuccess: true, isFetchedAfterMount: true })).toBe(false);
-  // Success from the cache, with no fetch since the screen opened: the answer may predate the
-  // member's arrival, which is the case the whole policy exists for.
-  expect(awaitingServer({ isSuccess: true, isFetchedAfterMount: false })).toBe(true);
+  const opened = 1_000;
+  // Nothing fetched yet.
+  expect(freshSince({ dataUpdatedAt: 0 }, opened)).toBe(false);
+  // Cached from before the member arrived — the case the whole policy exists for.
+  expect(freshSince({ dataUpdatedAt: opened - 1 }, opened)).toBe(false);
+  // This screen's own answer, including one that landed in the same millisecond as the first
+  // render: a stale entry cannot land there, and gating on it would never open.
+  expect(freshSince({ dataUpdatedAt: opened }, opened)).toBe(true);
+  expect(freshSince({ dataUpdatedAt: opened + 1 }, opened)).toBe(true);
 });
 
-test("a fetch that failed is not freshness, whether or not anything was cached", () => {
-  // query-core computes isFetchedAfterMount as
-  //   dataUpdateCount > initial.dataUpdateCount || errorUpdateCount > initial.errorUpdateCount
-  // so a *failed* fetch satisfies it. Both error cases therefore have isFetchedAfterMount true and
-  // are told apart only by whether there is data, which is exactly what `isSuccess` answers.
-  //
-  // A failed refetch over cached data: the stale answer and its actionable controls would otherwise
-  // render under an error banner, which is worse than the bug this policy exists for.
-  expect(awaitingServer({ isSuccess: false, isFetchedAfterMount: true })).toBe(true);
-  // A failed *first* load, with nothing cached. This is the one the first version got wrong: it
-  // tested `isRefetchError`, which is `isError && hasData` and so false here, and declared the
-  // screen fresh. On the conversation screen that meant rendering with a null summary — `onHold`
-  // and `ended` both false, the composer, End and date planning live on a thread whose state was
-  // unknown, Block hidden because there was no subject id, and Report opening with no subject.
-  // Nothing on that screen renders the summary's error either, so it looked loaded and was not.
-  expect(awaitingServer({ isSuccess: false, isFetchedAfterMount: true })).toBe(true);
-  // And it recovers: a retry that succeeds is fresh.
-  expect(awaitingServer({ isSuccess: true, isFetchedAfterMount: true })).toBe(false);
+test("a failed fetch is not freshness, and does not take away freshness already earned", () => {
+  const opened = 1_000;
+  // A first load that failed. `dataUpdatedAt` only moves on success — an error moves
+  // `errorUpdatedAt` — so there is nothing to compare and the screen stays gated. The version
+  // before this tested `isFetchedAfterMount && !isRefetchError`, and `isRefetchError` is
+  // `isError && hasData`: with nothing cached it was false, so the screen was called fresh. On the
+  // conversation screen that meant a null summary with `onHold` and `ended` both false — the
+  // composer, End and date planning live on a thread whose state was unknown, Block hidden for want
+  // of a subject id, and Report opening with no subject on it.
+  expect(freshSince({ dataUpdatedAt: 0 }, opened)).toBe(false);
+  // A refetch that failed over data cached from before the member arrived: still not this screen's
+  // answer, so still gated.
+  expect(freshSince({ dataUpdatedAt: opened - 5_000 }, opened)).toBe(false);
+  // And the other end, which the version after that one broke: once this screen's own answer has
+  // arrived, a later failed poll must not take it away. The installed types are explicit that
+  // `QueryObserverRefetchErrorResult` has `isSuccess: false` with `data` still present, so testing
+  // `isSuccess` blanked the Messages list — which polls every 30 seconds — on one failed poll.
+  // `dataUpdatedAt` does not move on that failure, so the list stays.
+  expect(freshSince({ dataUpdatedAt: opened + 10 }, opened)).toBe(true);
 });
 
 test("a screen gated on a first load that failed shows the failure, not a spinner", () => {
@@ -112,7 +117,7 @@ test("a screen gated on a first load that failed shows the failure, not a spinne
   // And the three screens that gate in place rather than returning early.
   for (const rel of ["app/account/review.tsx", "app/(app)/introductions/index.tsx", "app/(app)/messages/index.tsx"]) {
     const inPlace = readFileSync(join(__dirname, "..", rel), "utf8");
-    expect(inPlace).toContain("!q.isError && <Loading");
+    expect(inPlace).toContain("awaiting && !q.isError && <Loading");
     expect(inPlace).not.toContain("!q.isRefetchError && <Loading");
   }
 });
@@ -145,10 +150,12 @@ test("a destination withholds the cached answer rather than rendering it", () =>
   // turned every send into a CONFLICT.
   for (const rel of ["app/account/review.tsx", "app/(app)/introductions/index.tsx", "app/(app)/messages/index.tsx"]) {
     const src = readFileSync(join(__dirname, "..", rel), "utf8");
-    expect(src).toContain("awaitingServer(q) ? null : q.data");
+    expect(src).toContain("const awaiting = useAwaitingServer(q)");
+    expect(src).toContain("const data = awaiting ? null : q.data");
   }
   const conv = readFileSync(join(__dirname, "..", "app/(app)/messages/[conversationId].tsx"), "utf8");
-  expect(conv).toContain("if (awaitingServer(summary)");
+  expect(conv).toContain("const awaiting = useAwaitingServer(summary)");
+  expect(conv).toContain("if (awaiting ||");
   // The old gate, which is false whenever anything is cached, must not be the one deciding this.
   expect(conv).not.toContain("if (summary.isLoading");
 });
@@ -178,7 +185,7 @@ test("a gated screen that cannot refetch says so, and offers a way out", () => {
     const src = readFileSync(join(__dirname, "..", rel), "utf8");
     expect(src).toContain("<AwaitingServer");
     // The spinner must not be what a gated screen falls back to on its own any more.
-    const gate = src.slice(src.indexOf("if (awaitingServer("));
+    const gate = src.slice(src.indexOf("if (awaiting"));
     expect(gate.slice(0, 400)).not.toContain("<Loading");
   }
 
@@ -186,7 +193,7 @@ test("a gated screen that cannot refetch says so, and offers a way out", () => {
   // only has to stop competing with it — on a first load that failed as much as on a refetch.
   for (const rel of ["app/account/review.tsx", "app/(app)/introductions/index.tsx", "app/(app)/messages/index.tsx"]) {
     const src = readFileSync(join(__dirname, "..", rel), "utf8");
-    expect(src).toContain("awaitingServer(q) && !q.isError && <Loading");
+    expect(src).toContain("awaiting && !q.isError && <Loading");
   }
 });
 

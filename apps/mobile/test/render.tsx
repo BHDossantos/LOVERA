@@ -158,6 +158,19 @@ export async function renderScreen(ui: ReactElement) {
       });
       await flush();
     },
+    /**
+     * Refetch what this screen is observing, as its own poll would.
+     *
+     * The failing poll is a state in its own right — the data is still there and the status is
+     * `error` — and there was no way to reach it: changing the stub and waiting for a 30-second
+     * interval is not something this renderer's clock does.
+     */
+    refetch: async (queryKey: unknown[]) => {
+      await act(async () => {
+        await client.refetchQueries({ queryKey });
+      });
+      await flush();
+    },
     settle: flush,
   };
 }

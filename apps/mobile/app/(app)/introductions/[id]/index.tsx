@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Image, Text, View, useWindowDimensions, type LayoutChangeEvent } from "react-native";
 import { ApiError, get, newIdempotencyKey, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
-import { awaitingServer, serverDriven } from "@/lib/query";
+import { serverDriven, useAwaitingServer } from "@/lib/query";
 import type { Introduction, Strength } from "@/api/types";
 import { DECLINE_REASONS, INTRO_STATUS_LABEL, PROMPT_LABEL, type DecisionResult } from "@/components/intro";
 import { CorrectionForm } from "@/components/CorrectionForm";
@@ -203,7 +203,8 @@ export default function IntroductionDetail() {
     }
   };
 
-  if (awaitingServer(q))
+  const awaiting = useAwaitingServer(q);
+  if (awaiting)
     return (
       <Screen scroll={false}>
         <AwaitingServer label="Loading introduction" query={q} />

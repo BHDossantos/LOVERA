@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Text, View } from "react-native";
 import { ApiError, get } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
-import { awaitingServer, serverDriven } from "@/lib/query";
+import { serverDriven, useAwaitingServer } from "@/lib/query";
 import { AwaitingServer, Button, Card, Divider, ErrorState, PageTitle, Screen, StatusBanner } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
 
@@ -36,7 +36,8 @@ export default function Waiting() {
     ...serverDriven,
   });
 
-  if (awaitingServer(q))
+  const awaiting = useAwaitingServer(q);
+  if (awaiting)
     return (
       <Screen scroll={false}>
         <AwaitingServer label="Checking why" query={q} />

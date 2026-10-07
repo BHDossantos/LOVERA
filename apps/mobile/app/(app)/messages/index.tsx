@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Pressable, Text, View } from "react-native";
 import { ApiError, get } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
-import { awaitingServer, serverDriven } from "@/lib/query";
+import { serverDriven, useAwaitingServer } from "@/lib/query";
 import type { ConversationSummary } from "@/api/types";
 import { Badge, Card, Empty, ErrorState, Loading, PageTitle, Screen } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
@@ -26,7 +26,8 @@ export default function MessagesScreen() {
    * another mounted screen still observes, so the previous answer stayed on screen — and
    * actionable — underneath the loading indicator.
    */
-  const data = awaitingServer(q) ? null : q.data;
+  const awaiting = useAwaitingServer(q);
+  const data = awaiting ? null : q.data;
 
   return (
     <Screen>
@@ -35,7 +36,7 @@ export default function MessagesScreen() {
         title="Conversations"
         lede="Only with people who also said yes. There is no inbox of strangers here."
       />
-      {awaitingServer(q) && !q.isError && <Loading label="Loading conversations" />}
+      {awaiting && !q.isError && <Loading label="Loading conversations" />}
       <ErrorState error={(q.error as ApiError) ?? null} retry={() => q.refetch()} />
       {!!data && data.items.length === 0 && (
         <Empty title="No conversations yet" body="A conversation opens the moment an introduction is mutual." />

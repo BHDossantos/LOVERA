@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Text } from "react-native";
 import { ApiError, get, post } from "@/api/client";
 import { useAuth, useRequireMember } from "@/lib/auth";
-import { awaitingServer, serverDriven } from "@/lib/query";
+import { serverDriven, useAwaitingServer } from "@/lib/query";
 import { Badge, Button, Card, Divider, ErrorState, Field, Loading, PageTitle, Screen, StatusBanner, TextInput } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
 
@@ -60,7 +60,8 @@ export default function AccountReview() {
    * another mounted screen still observes, so the previous answer stayed on screen — and
    * actionable — underneath the loading indicator.
    */
-  const data = awaitingServer(q) ? null : q.data;
+  const awaiting = useAwaitingServer(q);
+  const data = awaiting ? null : q.data;
 
   const submit = async (actionId: string) => {
     setBusy(true);
@@ -87,7 +88,7 @@ export default function AccountReview() {
         body="You can still reach the safety centre and your own data."
       />
       <ErrorState error={error ?? ((q.error as ApiError) ?? null)} retry={() => q.refetch()} />
-      {awaitingServer(q) && !q.isError && <Loading label="Loading the decision" />}
+      {awaiting && !q.isError && <Loading label="Loading the decision" />}
 
       {data?.actions.length === 0 && (
         <Card>

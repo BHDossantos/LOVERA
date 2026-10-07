@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Text } from "react-native";
 import { ApiError, get } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
-import { awaitingServer, serverDriven } from "@/lib/query";
+import { serverDriven, useAwaitingServer } from "@/lib/query";
 import { AwaitingServer, Button, Card, ErrorState, PageTitle, Screen, StatusBanner } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
 
@@ -35,7 +35,8 @@ export default function DateOutcome() {
     enabled: !!me && !!dateId,
   });
 
-  if (awaitingServer(q))
+  const awaiting = useAwaitingServer(q);
+  if (awaiting)
     return (
       <Screen scroll={false}>
         <AwaitingServer label="Checking" query={q} />

@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Text } from "react-native";
 import { ApiError, get, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
-import { awaitingServer, serverDriven } from "@/lib/query";
+import { serverDriven, useAwaitingServer } from "@/lib/query";
 import type { DatePlan } from "@/api/types";
 import { AwaitingServer, Button, Card, ChoiceCard, ErrorState, Options, PageTitle, Screen, StatusBanner, Toggle } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
@@ -81,7 +81,8 @@ export default function DateFeedback() {
     }
   };
 
-  if (awaitingServer(q))
+  const awaiting = useAwaitingServer(q);
+  if (awaiting)
     return (
       <Screen scroll={false}>
         <AwaitingServer label="Loading date" query={q} />

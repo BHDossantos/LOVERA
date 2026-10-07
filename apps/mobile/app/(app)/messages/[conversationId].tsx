@@ -5,7 +5,7 @@ import { Alert, FlatList, KeyboardAvoidingView, Platform, Pressable, Text, View 
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ApiError, get, newIdempotencyKey, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
-import { awaitingServer, serverDriven } from "@/lib/query";
+import { serverDriven, useAwaitingServer } from "@/lib/query";
 import type { ConversationSummary, Message } from "@/api/types";
 import { AwaitingServer, Badge, Button, ErrorState, StatusBanner, TextInput } from "@/components/ui";
 import { color, radius, space, type as typo } from "@/theme";
@@ -110,7 +110,8 @@ export default function Conversation() {
   // on a conversation the server had closed or put on hold, and every message then came back
   // CONFLICT or SAFETY_HOLD. `summary.isLoading` is not the question either; it is false whenever
   // anything is cached, which is the whole point of this policy.
-  if (awaitingServer(summary) || (history.isLoading && !history.data))
+  const awaiting = useAwaitingServer(summary);
+  if (awaiting || (history.isLoading && !history.data))
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: color.canvas }}>
         <AwaitingServer label="Loading conversation" query={summary} />

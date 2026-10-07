@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Pressable, Text, View } from "react-native";
 import { ApiError, get } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
-import { awaitingServer, serverDriven } from "@/lib/query";
+import { serverDriven, useAwaitingServer } from "@/lib/query";
 import type { Introduction } from "@/api/types";
 import { INTRO_STATUS_LABEL, type IntroductionList } from "@/components/intro";
 import { Badge, Card, Empty, ErrorState, Loading, PageTitle, Screen } from "@/components/ui";
@@ -55,7 +55,8 @@ export default function IntroductionsScreen() {
    * another mounted screen still observes, so the previous answer stayed on screen — and
    * actionable — underneath the loading indicator.
    */
-  const data = awaitingServer(q) ? null : q.data;
+  const awaiting = useAwaitingServer(q);
+  const data = awaiting ? null : q.data;
 
   const open = (id: string) => router.push(`/introductions/${id}` as never);
 
@@ -66,7 +67,7 @@ export default function IntroductionsScreen() {
         title="Who the matchmaker chose, and why"
         lede="A few explained, reciprocal introductions at a time. No stack, no likes, no rankings."
       />
-      {awaitingServer(q) && !q.isError && <Loading label="Loading introductions" />}
+      {awaiting && !q.isError && <Loading label="Loading introductions" />}
       <ErrorState error={(q.error as ApiError) ?? null} retry={() => q.refetch()} />
             {!!data && (
         <>
