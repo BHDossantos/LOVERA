@@ -2,7 +2,10 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
-    "paths": { "@/*": ["./src/*"] }
+    "paths": { "@/*": ["./src/*"] },
+    // Without this, every jest global in test/ is an error. Naming the types explicitly
+    // rather than letting @types/* all load keeps the app's own files honest.
+    "types": ["jest", "expo/types"]
   },
   "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts"]
 }

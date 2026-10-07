@@ -72,6 +72,11 @@ jobs:
           cache-dependency-path: apps/mobile/package-lock.json
       - run: npm ci
       - run: npx tsc --noEmit
+      # Typecheck and a bundle prove the app compiles. They proved nothing about whether a
+      # screen survives the payload the API actually sends — which is how the Safety tab came
+      # to crash on cases.map and dial tel:[object Object]. These render screens against
+      # payloads copied from the API's own responses.
+      - run: npm test -- --ci
       # A Metro export is the cheapest thing that proves the app still builds:
       # it resolves every route and native module without needing a device or a
       # signing certificate.
