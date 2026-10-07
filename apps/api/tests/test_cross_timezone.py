@@ -130,6 +130,45 @@ def test_the_offset_is_taken_at_the_instant_not_at_its_clock_reading():
     assert weekly_overlaps(rome_evening, "Europe/Rome", utc_evening, "UTC", AT)[0] == 180
 
 
+def test_the_horizon_is_judged_on_what_survives_the_cut(client):
+    """The horizon was checked against the interval, not the piece left after an excluded day was cut.
+
+    The reachable half of that is the near boundary. An overlap that starts late *today* and runs into
+    tomorrow is outside the horizon as a whole — a first date is not sprung on somebody the same evening —
+    but once today is cut out of it, what remains is tomorrow's small hours, which is inside. Judging the
+    whole interval threw that away.
+
+    The far boundary cannot be reached today, and only by luck: `local_days` stops at `latest`, so the
+    window on `latest + 1` that would extend an interval past the horizon is never built. That is two
+    numbers happening to agree rather than a guarantee, so the check belongs on the piece either way.
+    """
+    a, b, conv_id = _mutual_conversation(client)
+    overnight = [{"weekday": d, "start": "22:00", "end": "24:00"} for d in range(7)]
+    overnight += [{"weekday": d, "start": "00:00", "end": "02:00"} for d in range(7)]
+    rome = ZoneInfo("Europe/Rome")
+    today = datetime.now(timezone.utc).astimezone(rome).date()
+    tomorrow = today + timedelta(days=1)
+
+    for who in (a, b):
+        assert who.put("/availability", json={"recurring_windows": overnight, "date_styles": ["drinks"], "timezone": "Europe/Rome"}).status_code in (200, 201)
+    # B is away today, so the evening that starts today is cut and only its small hours remain.
+    assert b.put(
+        "/availability",
+        json={"recurring_windows": overnight, "date_styles": ["drinks"], "timezone": "Europe/Rome", "dated_exceptions": [{"date": today.isoformat(), "available": False}]},
+    ).status_code in (200, 201)
+
+    plan_id = a.post("/date-plans", json={"conversation_id": conv_id}).json()["id"]
+    offers = a.get(f"/date-plans/{plan_id}/overlaps").json()["items"]
+
+    small_hours = [o for o in offers if o["date"] == tomorrow.isoformat() and o["start"] == "00:00"]
+    assert small_hours, f"tomorrow's remainder of tonight's window is inside the horizon: {offers}"
+    assert small_hours[0]["end"] == "02:00"
+
+    # And the far boundary stays respected, which it was.
+    latest = today + timedelta(days=14)
+    assert not [o for o in offers if o["date"] > latest.isoformat() or o["date"] < tomorrow.isoformat()]
+
+
 def _mutual_conversation(client) -> tuple[Actor, Actor, str]:
     """Two members through onboarding, matched, both accepting: the state a date needs."""
     a = Actor(client, unique_email("tz-a"))

@@ -107,10 +107,7 @@ def overlaps(db: Session, a_id: str, b_id: str, tz: str, horizon_days: int = 14)
         day_intervals(av_a.recurring_windows, a_tz, local_days(a_tz)),
         day_intervals(av_b.recurring_windows, b_tz, local_days(b_tz)),
     ):
-        if starts_at <= now:
-            continue
-        local, local_end = starts_at.astimezone(zone), ends_at.astimezone(zone)
-        if not (earliest <= local.date() <= latest):
+        if ends_at <= now:
             continue
         # Each member's unavailable days are cut out of the slot rather than rejecting it whole: a slot
         # can span midnight now, so one excluded day would otherwise take a perfectly good evening on
@@ -119,10 +116,19 @@ def overlaps(db: Session, a_id: str, b_id: str, tz: str, horizon_days: int = 14)
         for away, member_zone in ((away_a, a_zone), (away_b, b_zone)):
             pieces = [part for piece in pieces for part in _available_parts(piece[0], piece[1], away, member_zone)]
 
+        # Everything below is per piece, including the horizon. Checking the horizon against the whole
+        # interval was wrong once a slot could be cut in two: an interval beginning on the last allowed
+        # day and running past midnight, with that first day excluded, left a piece on `latest + 1` that
+        # was appended because the interval it came from had started inside the horizon. The mirror case
+        # threw away a good piece — an interval starting late today whose remainder is tomorrow.
         for piece_start, piece_end in pieces:
+            if piece_start <= now:
+                continue
             if piece_end - piece_start < timedelta(minutes=MINIMUM_SLOT_MINUTES):
                 continue
             shown, shown_end = piece_start.astimezone(zone), piece_end.astimezone(zone)
+            if not (earliest <= shown.date() <= latest):
+                continue
             out.append(
                 {
                     "date": shown.date().isoformat(),
