@@ -1,10 +1,32 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import * as ImagePicker from "expo-image-picker";
+import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { Alert, Text, View } from "react-native";
 import { ApiError, post } from "@/api/client";
 import { Button, Card, ErrorState, Field, StatusBanner, TextInput } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
+
+/**
+ * `EvidenceIn.data_url` is capped at 15,000,000 characters
+ * (apps/api/app/modules/safety/router.py), and base64 is four characters per three bytes, so
+ * anything over about 11 MB is refused. A screenshot is comfortably under that; a photo
+ * straight off a flagship camera often is not, and "Take a photo" is one of the two buttons
+ * here. Unshrunk, those came back as a generic validation error on a safety path.
+ */
+const DATA_URL_LIMIT = 15_000_000;
+
+/**
+ * Tried in order, only when the original does not fit. 2400px keeps the text in a screenshot
+ * of a message legible, which is what most of this evidence is.
+ */
+const SHRINK_STEPS = [
+  { width: 2400, compress: 0.8 },
+  { width: 1600, compress: 0.7 },
+  { width: 1200, compress: 0.6 },
+];
+
+const dataUrl = (contentType: string, base64: string) => `data:${contentType};base64,${base64}`;
 
 /**
  * S02/S03 evidence. A screenshot is often the whole report — a threatening message, a demand
@@ -48,15 +70,25 @@ export function EvidenceAttach({ reportId, onAdded }: { reportId: string; onAdde
       setError(new ApiError(0, { code: "UPLOAD_FAILED", message: "That image could not be read. Try another one." }));
       return;
     }
-    const contentType = asset.mimeType ?? "image/jpeg";
     setBusy(true);
     try {
+      const prepared = await fitForUpload(asset, asset.base64);
+      if (!prepared) {
+        setError(
+          new ApiError(0, {
+            code: "TOO_LARGE",
+            message:
+              "That image is too large to attach, even after shrinking it. A screenshot of the same thing will usually go through.",
+          }),
+        );
+        return;
+      }
       await post(`/safety/reports/${reportId}/evidence`, {
-        content_type: contentType,
-        size_bytes: asset.fileSize ?? Math.round((asset.base64.length * 3) / 4),
+        content_type: prepared.contentType,
+        size_bytes: Math.round((prepared.base64.length * 3) / 4),
         checksum: null,
         description: description.trim() || null,
-        data_url: `data:${contentType};base64,${asset.base64}`,
+        data_url: dataUrl(prepared.contentType, prepared.base64),
       });
       setDescription("");
       setAdded((n) => n + 1);
@@ -100,6 +132,32 @@ export function EvidenceAttach({ reportId, onAdded }: { reportId: string; onAdde
       </View>
     </Card>
   );
+}
+
+/**
+ * The image as the API will accept it, or null when even the smallest step is too big.
+ *
+ * An image that already fits is sent untouched — re-encoding a clean PNG screenshot as JPEG
+ * for no reason would soften the text a reviewer needs to read. Shrinking happens only when
+ * the alternative is not sending it at all.
+ */
+async function fitForUpload(
+  asset: ImagePicker.ImagePickerAsset,
+  base64: string,
+): Promise<{ contentType: string; base64: string } | null> {
+  const original = asset.mimeType ?? "image/jpeg";
+  if (dataUrl(original, base64).length <= DATA_URL_LIMIT) {
+    return { contentType: original, base64 };
+  }
+  for (const step of SHRINK_STEPS) {
+    // The contextual API; manipulateAsync is deprecated in this SDK.
+    const rendered = await ImageManipulator.manipulate(asset.uri).resize({ width: step.width }).renderAsync();
+    const out = await rendered.saveAsync({ base64: true, compress: step.compress, format: SaveFormat.JPEG });
+    if (out.base64 && dataUrl("image/jpeg", out.base64).length <= DATA_URL_LIMIT) {
+      return { contentType: "image/jpeg", base64: out.base64 };
+    }
+  }
+  return null;
 }
 
 const s = {
