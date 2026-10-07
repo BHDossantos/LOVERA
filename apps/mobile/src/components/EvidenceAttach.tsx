@@ -59,9 +59,14 @@ export function EvidenceAttach({ reportId, onAdded }: { reportId: string; onAdde
       );
       return;
     }
-    // No cropping: evidence should reach the reviewer as the member has it, and an editor in
-    // the middle of this flow is one more thing to get through on a bad day.
-    const opts: ImagePicker.ImagePickerOptions = { mediaTypes: ["images"], quality: 0.9, base64: true };
+    // No cropping, and no `quality`: evidence should reach the reviewer as the member has it,
+    // and an editor in the middle of this flow is one more thing to get through on a bad day.
+    //
+    // `quality` defaults to 1.0 and anything lower asks the picker to recompress. Passing 0.9
+    // — carried over from the profile photo flow, where a crop is re-encoded anyway — meant
+    // every screenshot was softened on the way in, including the ones small enough to send
+    // untouched. Compression now happens only in fitForUpload, only when it has to.
+    const opts: ImagePicker.ImagePickerOptions = { mediaTypes: ["images"], base64: true };
     const res =
       from === "camera" ? await ImagePicker.launchCameraAsync(opts) : await ImagePicker.launchImageLibraryAsync(opts);
     if (res.canceled || !res.assets?.length) return;

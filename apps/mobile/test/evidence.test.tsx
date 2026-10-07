@@ -123,6 +123,24 @@ test("a failed upload is shown rather than silently dropped", async () => {
 /** `EvidenceIn.data_url` is capped at 15,000,000 characters, so base64 over ~11 MB is refused. */
 const OVERSIZED = "A".repeat(15_000_001);
 
+test("the picker is not asked to recompress on the way in", async () => {
+  // `quality` defaults to 1.0 and anything lower asks the picker to recompress, so passing 0.9
+  // softened every screenshot before fitForUpload ever saw it — including the ones that could
+  // have been sent exactly as the member had them.
+  picker.requestMediaLibraryPermissionsAsync.mockResolvedValue({ granted: true } as never);
+  picker.launchImageLibraryAsync.mockResolvedValue({
+    canceled: false,
+    assets: [{ uri: "file:///shot.png", base64: "QUJD", mimeType: "image/png" }],
+  } as never);
+
+  const s = await renderScreen(<EvidenceAttach reportId="case_1" />);
+  await s.press("Choose a screenshot");
+  await s.settle();
+
+  const opts = picker.launchImageLibraryAsync.mock.calls.at(-1)![0] as { quality?: number };
+  expect(opts.quality).toBeUndefined();
+});
+
 test("an image that already fits is sent untouched", async () => {
   // Re-encoding a clean PNG screenshot as JPEG for no reason would soften the text a reviewer
   // needs to read, so nothing is shrunk unless it has to be.

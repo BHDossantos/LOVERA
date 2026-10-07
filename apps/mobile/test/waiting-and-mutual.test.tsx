@@ -72,6 +72,33 @@ test("the mutual screen opens the conversation it was told about", async () => {
   expect(mockPush).toHaveBeenCalledWith("/messages/conv_9");
 });
 
+test("a stale not-yet-mutual state can be resolved without leaving the screen", async () => {
+  // The screen shares its cache key with the introduction screen and the client's default
+  // staleTime is 15s, so a member who had just seen awaiting_other_member could tap "you both
+  // said yes" and be told "Not mutual yet". The query refetches on mount; this covers the
+  // other half — that there is something to press if the answer is still stale.
+  const ONE_SIDED = {
+    id: "intro_1",
+    status: "awaiting_other_member",
+    version: 2,
+    conversation_id: null,
+    expires_at: null,
+    actions: { can_accept: false, can_decline: false, can_extend: false },
+    profile: { display_name: "Ben", age: 38, city: "Rome", verified: true, media: [], prompts: [], bio: null },
+    explanation: null,
+  };
+  let answer: unknown = ONE_SIDED;
+  mockGet.mockImplementation(() => Promise.resolve(answer));
+
+  const s = await renderScreen(<Mutual />);
+  expect(s.hasText("Not mutual yet")).toBe(true);
+
+  answer = { ...ONE_SIDED, status: "mutual", conversation_id: "conv_9", version: 3 };
+  await s.press("Check again");
+  await s.settle();
+  expect(s.joined()).toContain("You and Ben both said yes");
+});
+
 test("a one-sided yes is not dressed up as mutual", async () => {
   // The deep link can be opened before the other person has decided. Showing a celebration
   // then would leak the fact that only one of them has answered.

@@ -25,6 +25,13 @@ export default function Mutual() {
     queryKey: ["introduction", id],
     queryFn: () => get<Introduction>(`/introductions/${id}`),
     enabled: !!me && !!id,
+    // This screen is opened from the "you both said yes" notification, and it shares a cache
+    // key with the introduction screen. The client's default staleTime is 15s, so a member who
+    // had just looked at the introduction while it still said awaiting_other_member would get
+    // that cached answer back and be told "Not mutual yet" — by the very screen the server
+    // sent them to because it had become mutual. Same pattern as the verification screen.
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
   if (q.isLoading)
@@ -47,7 +54,12 @@ export default function Mutual() {
             title="Not mutual yet"
             body="This opens once you have both said yes. Nothing about anyone's one-sided decision is ever shown."
           />
-          <Button variant="secondary" onPress={() => router.replace(`/introductions/${intro.id}` as never)}>
+          {/* And something to do about it, rather than a dead end: a refetch is the one action
+              that can resolve this state, so it should not need a trip back and in again. */}
+          <Button variant="secondary" loading={q.isFetching} onPress={() => void q.refetch()}>
+            Check again
+          </Button>
+          <Button variant="ghost" onPress={() => router.replace(`/introductions/${intro.id}` as never)}>
             Back to the introduction
           </Button>
         </>

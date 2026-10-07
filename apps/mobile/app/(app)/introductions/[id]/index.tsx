@@ -41,6 +41,11 @@ export default function IntroductionDetail() {
     queryKey: ["introduction", id],
     queryFn: () => get<Introduction>(`/introductions/${id}`),
     enabled: !!me && !!id,
+    // Same hazard as the mutual screen, through the same cache key: this is reached from a
+    // notification and from Today, and what it shows is a decision on a clock. A 15-second-old
+    // cached status is enough to offer Accept on an introduction the server has since expired.
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
   const [choice, setChoice] = useState<"accept" | "decline" | null>(null);
