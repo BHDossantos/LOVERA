@@ -18,7 +18,6 @@ from app.core.security import create_access_token, hash_secret, new_opaque_token
 from app.core.timeutil import iso, utcnow
 from app.models.account import AuthChallenge, ConsentRecord, Member
 from app.models.account import Session as MemberSession
-from app.models.account import SessionRotation
 from app.models.availability import AvailabilityVersion
 from app.models.blueprint import BlueprintVersion
 from app.models.profile import Profile
@@ -142,33 +141,9 @@ def create_session(db: Session, member: Member, device_id: str | None) -> tuple[
     return session, refresh
 
 
-# How long a just-rotated refresh token still answers, for the client that never received its
-# replacement. Long enough to cover a navigation or a reload that cancelled the response in flight,
-# short enough that a token taken from storage is useless by the time anybody could use it.
-ROTATION_GRACE_SECONDS = 60
-
-
 def rotate_session(db: Session, refresh_token: str) -> tuple[Member, MemberSession, str, str]:
-    """Exchange a refresh token for the next one, surviving a response the client never received.
-
-    Single-use rotation is the point: once the member's own client has refreshed, a copy of the old
-    token is worthless. It also has a failure mode that is nobody's fault, and it signs people out.
-    The server commits the rotation before the client can store the result, so a navigation or a
-    reload in that window leaves the client holding a token the server has already revoked — and the
-    web client treats a failed refresh as "signed out" (api.ts), because the alternative is a loop.
-    Proven rather than assumed: calling `/auth/refresh` twice with one token returns AUTH_REQUIRED.
-
-    So a replay inside `ROTATION_GRACE_SECONDS` is answered from the replacement session instead,
-    and only while that replacement is still the live one. A token replayed later, or after the chain
-    has moved on, still fails — that is what makes single-use worth having, and it is the case a
-    stolen token falls into.
-    """
     session = db.execute(select(MemberSession).where(MemberSession.refresh_token_hash == hash_secret(refresh_token))).scalar_one_or_none()
-    if session is None:
-        raise ApiError("AUTH_REQUIRED", "Session expired. Sign in again.")
-    if session.revoked_at is not None:
-        session = _session_within_rotation_grace(db, session)
-    if session.revoked_at is not None or session.expires_at <= utcnow():
+    if session is None or session.revoked_at is not None or session.expires_at <= utcnow():
         raise ApiError("AUTH_REQUIRED", "Session expired. Sign in again.")
     member = db.get(Member, session.member_id)
     if member is None or member.status == "deleted":
@@ -176,37 +151,8 @@ def rotate_session(db: Session, refresh_token: str) -> tuple[Member, MemberSessi
     session.revoked_at = utcnow()
     new_session, refresh = create_session(db, member, None)
     new_session.device_id_hash = session.device_id_hash
-    db.add(SessionRotation(old_session_id=session.id, new_session_id=new_session.id))
     access = create_access_token(member.id, new_session.id, list(member.roles or ["member"]))
     return member, new_session, access, refresh
-
-
-def _session_within_rotation_grace(db: Session, revoked: MemberSession) -> MemberSession:
-    """The live session a just-revoked one was rotated into, or the revoked one unchanged.
-
-    Returning the revoked session unchanged leaves the caller's own check to refuse it, so there is
-    one place that decides. A session revoked by signing out has no rotation row at all and lands
-    there, which is right: logging out has to mean logged out.
-    """
-    rotation = db.execute(select(SessionRotation).where(SessionRotation.old_session_id == revoked.id)).scalar_one_or_none()
-    if rotation is None or (revoked.revoked_at and utcnow() - revoked.revoked_at > timedelta(seconds=ROTATION_GRACE_SECONDS)):
-        return revoked
-    replacement = db.get(MemberSession, rotation.new_session_id)
-    if replacement is None or replacement.revoked_at is not None:
-        # The chain has moved on, so this is not an interrupted response — it is an old token being
-        # presented after the client has carried on without it.
-        return revoked
-    audit(
-        db,
-        actor_type="member",
-        actor_id=replacement.member_id,
-        action="auth.refresh_replayed",
-        resource_type="session",
-        resource_id=replacement.id,
-        purpose="session_continuity",
-        metadata={"rotated_from": revoked.id},
-    )
-    return replacement
 
 
 def revoke_session(db: Session, session_id: str) -> None:

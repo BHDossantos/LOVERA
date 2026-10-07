@@ -75,33 +75,6 @@ class Session(Base):
     created_at: Mapped[datetime] = created_at_column()
 
 
-class SessionRotation(Base):
-    """Which session replaced which, so a refresh interrupted mid-flight is recoverable.
-
-    A refresh token is single-use: `rotate_session` revokes the session it was issued for and hands
-    back a new one. That is right — it is what makes a stolen token useless after the member's own
-    client has refreshed once — and it has one failure mode that is nobody's fault. If the client
-    navigates or reloads after the server has committed the rotation but before the response is
-    stored, the token in localStorage is already dead, the next request fails, and the web client
-    clears the session: the member is signed out for tapping a link at the wrong moment.
-
-    This records the link between the two sessions so that replaying a just-rotated token inside a
-    short window can be answered with live tokens instead of "sign in again". Outside the window, or
-    once the replacement has itself been rotated or revoked, the replay still fails — which is the
-    part that keeps the single-use guarantee worth having.
-
-    A table rather than a column on `sessions`, because the schema is created by
-    `Base.metadata.create_all`, which creates missing tables and does not alter existing ones.
-    """
-
-    __tablename__ = "session_rotations"
-
-    id: Mapped[str] = id_column()
-    old_session_id: Mapped[str] = mapped_column(ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False, unique=True)
-    new_session_id: Mapped[str] = mapped_column(ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False, index=True)
-    created_at: Mapped[datetime] = created_at_column()
-
-
 class AuthChallenge(Base):
     __tablename__ = "auth_challenges"
 
