@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Linking, Text, View } from "react-native";
 import { ApiError, get, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
+import { telUri } from "@/components/safety";
 import type { DatePlan } from "@/api/types";
 import { Badge, Button, Card, Divider, ErrorState, Loading, PageTitle, Screen, StatusBanner } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
@@ -124,7 +125,7 @@ export default function DateDetail() {
               </Text>
             ))}
             <Divider />
-            <Button variant="danger" onPress={() => void Linking.openURL(`tel:${d.safety.emergency}`)}>
+            <Button variant="danger" onPress={() => void Linking.openURL(telUri(d.safety.emergency))}>
               {`Emergency: ${d.safety.emergency}`}
             </Button>
             <Button

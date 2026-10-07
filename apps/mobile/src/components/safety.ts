@@ -24,9 +24,35 @@ export const URGENCY = [
 ];
 
 export type SafetyCase = { id: string; category: string; state: string; opened_at: string; acknowledgement_due_at?: string | null };
+
+/**
+ * GET /safety, as the API actually answers it.
+ *
+ * This type previously claimed `cases` and `blocks` were arrays and `emergency` a string.
+ * None of that was true: the endpoint returns counts, no case list at all, and an
+ * `{ number, note }` object. `get<SafetyCenter>()` is an unchecked assertion, so nothing
+ * complained — the screen read `cases.map` on undefined and dialled `tel:[object Object]`.
+ * The lists come from /safety/cases and /blocks, which is also how the web app does it.
+ */
 export type SafetyCenter = {
+  emergency: { number: string; note: string };
+  disclaimer: string;
+  actions: { key: string; label: string; path: string }[];
+  education: string[];
   categories: { key: string; severity: string }[];
-  cases: SafetyCase[];
-  blocks: { id: string; display_name: string }[];
-  emergency: string;
+  open_cases: number;
+  blocks: number;
 };
+export type Block = { member_id: string; display_name: string; created_at: string };
+
+/**
+ * A `tel:` URI needs digits, and the API's emergency fields are written for people:
+ * the date plan sends "112 (EU)" and the safety centre an { number, note } object. Dialling
+ * either verbatim produces a URI the platform cannot act on, which is a bad way to find out
+ * that a button meant for an emergency does nothing.
+ */
+export function telUri(emergency: string | { number: string } | null | undefined, fallback = "112") {
+  const raw = typeof emergency === "string" ? emergency : emergency?.number;
+  const digits = (raw ?? fallback).replace(/[^0-9+]/g, "");
+  return `tel:${digits || fallback}`;
+}
