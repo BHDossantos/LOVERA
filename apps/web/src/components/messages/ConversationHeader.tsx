@@ -50,6 +50,10 @@ export function ConversationHeader({ conversation, active }: { conversation: Con
         qc.invalidateQueries({ queryKey: ["conversations"] }),
         qc.invalidateQueries({ queryKey: ["conversation", conversation.id] }),
         qc.invalidateQueries({ queryKey: ["blocks"] }),
+        // The safety centre counts blocks ("3 blocked") off `GET /safety`, and both the report
+        // page and the blocks page already invalidate it. This path did not, so blocking from a
+        // conversation left that count one short of the list directly beneath it.
+        qc.invalidateQueries({ queryKey: ["safety"] }),
         qc.invalidateQueries({ queryKey: ["today"] }),
         // create_block cancels every open date plan on the conversation and closes any open
         // introduction between the two, so neither may keep showing them as live. The detail

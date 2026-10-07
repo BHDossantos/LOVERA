@@ -167,6 +167,11 @@ export default function Conversation() {
                 await Promise.all([
                   qc.invalidateQueries({ queryKey: ["conversations"] }),
                   qc.invalidateQueries({ queryKey: ["blocks"] }),
+                  // And the safety centre's own payload, which carries the block count. The
+                  // Safety screen does not render that number today — the web one does — but it
+                  // holds the same query, and its unblock path already refetches it, so this is
+                  // the half of the pair that was missing rather than a choice.
+                  qc.invalidateQueries({ queryKey: ["safety"] }),
                   qc.invalidateQueries({ queryKey: ["today"] }),
                   qc.invalidateQueries({ queryKey: ["date-plans"] }),
                   qc.invalidateQueries({ queryKey: ["introductions"] }),
