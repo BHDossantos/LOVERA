@@ -1,0 +1,14 @@
+name: Dating Production Builds
+jobs:
+  android:
+    name: Build Android
+    type: build
+    params:
+      platform: android
+      profile: production
+  ios:
+    name: Build iOS
+    type: build
+    params:
+      platform: ios
+      profile: production
