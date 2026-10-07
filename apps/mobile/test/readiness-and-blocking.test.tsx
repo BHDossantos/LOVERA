@@ -13,9 +13,10 @@ import { renderScreen, routeGet } from "./render";
  */
 const AVAILABILITY = {
   timezone: "Europe/Rome",
-  recurring_windows: [{ day: "sat", part: "evening" }],
+  recurring_windows: [{ weekday: 5, start: "18:00", end: "22:00" }],
   date_styles: ["coffee"],
   date_ready: false,
+  updated_at: "2026-10-01T10:00:00Z",
   policy: "Coarse windows only.",
 };
 const CONVERSATION = {
@@ -321,4 +322,39 @@ test("a preference write refreshes the Blueprint, which embeds the same list", a
 
   expect(mockDel).toHaveBeenCalledWith("/preferences/smoking");
   expect(s.client.getQueryState(["blueprint"])?.isInvalidated).toBe(true);
+});
+
+test("an empty stored style list is shown as empty, not silently filled in", async () => {
+  // GET /availability returns date_styles: [] both for a member who never saved and for one whose
+  // list is empty, so seeding "coffee" off `length` pre-selected a style on their behalf and the
+  // next save of anything else wrote it back as theirs. `updated_at` is the only thing that tells
+  // the two apart. Here it is set, so nothing is chosen for them — and because a style is required
+  // to save, the screen asks rather than guesses.
+  mockGet.mockImplementation(routeGet({ "/availability": { ...AVAILABILITY, date_styles: [], date_ready: true } }));
+  const s = await renderScreen(<YouAvailability />);
+
+  await expect(s.press("Save my availability")).rejects.toThrow(/disabled/);
+  expect(mockPost.mock.calls.filter(([p]) => p === "/availability")).toHaveLength(0);
+
+  // Choosing one is all it takes, and only the chosen one is sent.
+  await s.press("Drinks");
+  await s.press("Save my availability");
+  await s.settle();
+  const [, body] = mockPost.mock.calls.find(([p]) => p === "/availability")!;
+  expect((body as { date_styles: string[] }).date_styles).toEqual(["drinks"]);
+});
+
+test("a member who has never saved availability still gets a sensible starting point", async () => {
+  // The default is for onboarding, where there is nothing stored and an empty form is unhelpful.
+  mockGet.mockImplementation(
+    routeGet({ "/availability": { ...AVAILABILITY, recurring_windows: [], date_styles: [], updated_at: null } }),
+  );
+  const s = await renderScreen(<YouAvailability />);
+
+  await s.press("Save my availability");
+  await s.settle();
+
+  const [, body] = mockPost.mock.calls.find(([p]) => p === "/availability")!;
+  expect((body as { date_styles: string[] }).date_styles).toEqual(["coffee"]);
+  expect((body as { recurring_windows: unknown[] }).recurring_windows.length).toBeGreaterThan(0);
 });

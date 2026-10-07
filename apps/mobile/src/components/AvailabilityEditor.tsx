@@ -11,6 +11,7 @@ type Availability = {
   recurring_windows: Window[];
   date_styles: string[];
   date_ready: boolean;
+  updated_at: string | null;
   policy: string;
 };
 
@@ -35,17 +36,23 @@ export function AvailabilityEditor({ onSaved, cta = "Save availability" }: { onS
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
 
+  // `updated_at` is the only thing that tells "never saved" from "saved as empty": GET /availability
+  // returns date_styles: [] for both, so seeding a default off `length` re-added a style the member
+  // had deliberately removed, every visit, on the next save of anything else. date_styles gates and
+  // scores nothing — it is only carried in the feature snapshot — so an empty list is a choice to
+  // respect, not a gap to fill.
   useEffect(() => {
     if (q.data && !loaded) {
+      const first = q.data.updated_at === null;
       setWindows(
-        q.data.recurring_windows.length
-          ? q.data.recurring_windows
-          : [
+        first
+          ? [
               { weekday: 3, start: "18:00", end: "22:00" },
               { weekday: 5, start: "11:00", end: "17:00" },
-            ],
+            ]
+          : q.data.recurring_windows,
       );
-      setStyles(q.data.date_styles.length ? q.data.date_styles : ["coffee"]);
+      setStyles(first ? ["coffee"] : q.data.date_styles);
       setReady(q.data.date_ready);
       setLoaded(true);
     }
