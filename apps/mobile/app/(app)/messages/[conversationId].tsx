@@ -128,6 +128,25 @@ export default function Conversation() {
         </View>
       )}
 
+      {/* The only route into the planner: a date belongs to a conversation, and the API
+          creates at most one plan per conversation, so this either opens the existing plan
+          or starts the first one. Hidden while a safety hold or an ending is in force. */}
+      {!onHold && !ended && (
+        <View style={{ paddingHorizontal: space.lg, paddingBottom: space.sm }}>
+          {summary.data?.date ? (
+            <Button variant="secondary" onPress={() => router.push(`/dates/${summary.data?.date?.date_plan_id}` as never)}>
+              {summary.data.date.starts_at
+                ? `Your date · ${new Date(summary.data.date.starts_at).toLocaleDateString()}`
+                : "See the date you're planning"}
+            </Button>
+          ) : (
+            <Button variant="secondary" onPress={() => router.push(`/dates/new?conversation=${id}` as never)}>
+              Plan a date
+            </Button>
+          )}
+        </View>
+      )}
+
       <FlatList
         ref={listRef}
         data={items}

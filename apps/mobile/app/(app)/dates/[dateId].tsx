@@ -113,6 +113,11 @@ export default function DateDetail() {
                 share your live location with your date.
               </Text>
             )}
+            {(d.status === "confirmed" || !!d.check_in) && (
+              <Button variant="secondary" onPress={() => router.push(`/dates/${d.id}/check-in` as never)}>
+                {d.check_in ? "Check in, or change it" : "Set up a check-in"}
+              </Button>
+            )}
             {d.safety.guidance.map((g) => (
               <Text key={g} style={s.guidance}>
                 • {g}
@@ -154,6 +159,15 @@ export default function DateDetail() {
             </Card>
           )}
 
+          {!["cancelled", "completed", "no_show", "disputed"].includes(d.status) && (
+            <Button
+              variant="ghost"
+              loading={busy === "cancel"}
+              onPress={() => run("cancel", () => post(`/date-plans/${d.id}/cancel`, { reason: "other" }))}
+            >
+              Cancel this date
+            </Button>
+          )}
           <Text style={s.fine}>{d.cancellation_rules}</Text>
         </>
       )}
