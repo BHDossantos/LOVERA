@@ -199,6 +199,37 @@ test("reading on after a pause reports the sections that pause missed", async ()
   }
 });
 
+test("a set seen while the previous report is in flight is still sent", async () => {
+  // The idle report for the reasons goes out, and the member reaches the bottom before it lands.
+  // Dropping the newly seen set there lost friction and unknown for good: the timer had been
+  // cleared, and with no further scroll or layout event nothing would ask again.
+  jest.useFakeTimers();
+  try {
+    let settle: ((v: unknown) => void) | undefined;
+    mockPost.mockImplementation((path: string) =>
+      path.endsWith("/explanation-viewed") ? new Promise((res) => { settle = res; }) : Promise.resolve({}),
+    );
+    const s = await renderScreen(<IntroductionDetail />);
+    await layOut(s, 0, { reasons: 0, friction: 5000, unknown: 5200 });
+    await act(async () => {
+      jest.advanceTimersByTime(2_500);
+    });
+    expect(posted("/introductions/intro_1/explanation-viewed")).toHaveLength(1);
+
+    // Still open. The member scrolls to the bottom, which clears the timer and reports at once.
+    await s.scroll(5000);
+    expect(posted("/introductions/intro_1/explanation-viewed")).toHaveLength(1);
+
+    settle?.({});
+    await s.settle();
+    const calls = posted("/introductions/intro_1/explanation-viewed");
+    expect(calls).toHaveLength(2);
+    expect(calls[1][1]).toEqual({ sections: ["friction", "reasons", "unknown"] });
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 test("nothing is reported for an explanation never scrolled to", async () => {
   // Reporting on mount would make this a second name for introduction_opened.
   const s = await renderScreen(<IntroductionDetail />);

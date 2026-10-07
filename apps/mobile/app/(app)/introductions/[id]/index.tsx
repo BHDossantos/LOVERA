@@ -82,6 +82,8 @@ export default function IntroductionDetail() {
   // exactly the two sections this per-section tracking was added to measure.
   const reported = useRef<string[]>([]);
   const inflight = useRef(false);
+  /** A set seen while a request was open, to send once it settles. */
+  const pending = useRef<string[] | null>(null);
   const idle = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const seenSections = useCallback(() => {
@@ -96,11 +98,20 @@ export default function IntroductionDetail() {
    * Sends the cumulative set, and only when it has grown. Each section therefore costs at most
    * one request — three for the whole card — and the last one the API receives is the complete
    * truth about what the member read, whether or not they ever reached the bottom.
+   *
+   * A set that arrives while the previous request is still open is held rather than dropped.
+   * Dropping it lost the common case: the reasons-only idle report is in flight, the member
+   * scrolls to the bottom, that clears the timer and calls this — and with no further scroll or
+   * layout event nothing would ever ask again, so friction and unknown were omitted for good.
    */
   const send = useCallback(
     (sections: string[]) => {
-      if (inflight.current || !intro || !sections.length) return;
+      if (!intro || !sections.length) return;
       if (sections.every((name) => reported.current.includes(name))) return;
+      if (inflight.current) {
+        pending.current = sections;
+        return;
+      }
       const previous = reported.current;
       reported.current = sections;
       inflight.current = true;
@@ -110,6 +121,9 @@ export default function IntroductionDetail() {
         })
         .finally(() => {
           inflight.current = false;
+          const held = pending.current;
+          pending.current = null;
+          if (held) send(held);
         });
     },
     [intro],

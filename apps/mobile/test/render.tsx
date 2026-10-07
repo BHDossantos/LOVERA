@@ -30,6 +30,13 @@ export async function renderScreen(ui: ReactElement) {
   const r = tree as ReactTestRenderer;
   return {
     tree: r,
+    /**
+     * The screen's own cache, so a test can seed an entry another screen would be holding and
+     * then assert what an action did to it. Whether a mutation invalidates or *removes* is not
+     * a detail: invalidate marks an entry stale and leaves the data in place, so a screen left
+     * mounted keeps painting it.
+     */
+    client,
     /** Every string rendered anywhere in the tree. */
     texts: () => collect(r.root),
     /** True when some single rendered string contains `needle`. */
@@ -111,6 +118,23 @@ export async function renderScreen(ui: ReactElement) {
       if (!nodes.length) throw new Error("nothing on this screen handles onScroll");
       await act(async () => {
         (nodes[0].props as { onScroll: (e: unknown) => void }).onScroll({ nativeEvent: { contentOffset: { x: 0, y } } });
+      });
+      await flush();
+    },
+    /**
+     * Flip a Switch by its accessibility label. A Switch has `onValueChange` rather than
+     * `onPress`, so `press` cannot see it — and a consent screen is nothing but switches.
+     */
+    toggle: async (label: string, to?: boolean) => {
+      const nodes = r.root.findAll(
+        (n) =>
+          typeof (n.props as { onValueChange?: unknown }).onValueChange === "function" &&
+          (n.props as { accessibilityLabel?: string }).accessibilityLabel === label,
+      );
+      if (!nodes.length) throw new Error(`no switch labelled ${JSON.stringify(label)}`);
+      const props = nodes[0].props as { onValueChange: (v: boolean) => void; value: boolean };
+      await act(async () => {
+        props.onValueChange(to ?? !props.value);
       });
       await flush();
     },

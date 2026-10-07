@@ -93,6 +93,23 @@ test("submitting feedback drops the cached second-date outcome", () => {
   expect(src).toContain('queryKey: ["date-plan", dateId, "outcome"]');
 });
 
+test("a destination withholds the cached answer rather than rendering it", () => {
+  // `awaitingServer` has to *gate* the data, not sit beside it as an extra spinner. On the screens
+  // that render several branches off `q.data` instead of returning early, that means a derived
+  // value that is null while waiting; on the conversation screen it means the early return, because
+  // a null summary there made `onHold` and `ended` both false — the permissive reading of "I do not
+  // know yet", which left the composer and End usable on a thread the server had closed or held and
+  // turned every send into a CONFLICT.
+  for (const rel of ["app/account/review.tsx", "app/(app)/introductions/index.tsx", "app/(app)/messages/index.tsx"]) {
+    const src = readFileSync(join(__dirname, "..", rel), "utf8");
+    expect(src).toContain("awaitingServer(q) ? null : q.data");
+  }
+  const conv = readFileSync(join(__dirname, "..", "app/(app)/messages/[conversationId].tsx"), "utf8");
+  expect(conv).toContain("if (awaitingServer(summary)");
+  // The old gate, which is false whenever anything is cached, must not be the one deciding this.
+  expect(conv).not.toContain("if (summary.isLoading");
+});
+
 test("no notification destination is missing from the list above", () => {
   // Derived from the API source rather than remembered. A screen-state path the API hands out and
   // this list does not name is a destination still on the 15-second cache — which is how

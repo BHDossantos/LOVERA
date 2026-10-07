@@ -271,7 +271,13 @@ def upsert_preference(db: Session, member: Member, key: str, tier: str, value: d
     if pdef.target in SIGNALS and SIGNALS[pdef.target].special_category:
         from app.modules.account.service import has_consent
 
-        if not has_consent(db, member.id, "special_category") and tier != "open":
+        # At every tier, Open included. The `tier != "open"` exemption let a member with no
+        # consent save a faith preference that build_snapshot then dropped and the payload then
+        # reported inactive — so the only thing the save accomplished was to record, about
+        # somebody who had declined to let us hold it, that faith is a criterion for them.
+        # That is the collection the consent exists to govern, and Open is not a lesser kind of
+        # it: it is still processing special-category data to rank and to explain.
+        if not has_consent(db, member.id, "special_category"):
             raise ApiError("FORBIDDEN", "Using faith for matching needs your explicit sensitive-data consent.", extra={"consent_required": "special_category"})
     pref = db.execute(select(Preference).where(Preference.member_id == member.id, Preference.key == key)).scalar_one_or_none()
     if pref is None:
@@ -371,7 +377,13 @@ def preferences_payload(db: Session, member: Member) -> dict[str, Any]:
             }
         )
     known = {p["key"] for p in out}
-    catalog = [{"key": k, "label": d.label, "description": d.description, "default_tier": d.default_tier, "operator": d.operator, "options": [{"value": v, "label": l} for v, l in SIGNALS[d.target].options.items()] if d.target in SIGNALS else None} for k, d in PREFERENCES.items() if k not in known]
+    # And nothing offered that upsert_preference will refuse: a control whose one outcome is a
+    # 403 is its own kind of wrong, the same reasoning as `unanswered` on the Blueprint payload.
+    catalog = [
+        {"key": k, "label": d.label, "description": d.description, "default_tier": d.default_tier, "operator": d.operator, "options": [{"value": v, "label": l} for v, l in SIGNALS[d.target].options.items()] if d.target in SIGNALS else None}
+        for k, d in PREFERENCES.items()
+        if k not in known and (sensitive_ok or not is_sensitive_preference(k))
+    ]
     return {"preferences": out, "available": catalog, "tier_meaning": {"must": "Hard gate. Never relaxed without you.", "prefer": "Weighted in ranking.", "open": "Used lightly; mostly for explanations."}}
 
 
@@ -391,9 +403,9 @@ def impact_preview(db: Session, member: Member, key: str, tier: str, value: dict
     def enforced(pref: Preference) -> bool:
         return sensitive_ok or not is_sensitive_preference(pref.key)
 
-    # upsert_preference refuses this save outright, so previewing a number for it would be a
-    # preview of a 403.
-    if tier != "open" and not sensitive_ok and is_sensitive_preference(key):
+    # upsert_preference refuses this save outright at every tier, so previewing a number for it
+    # would be a preview of a 403.
+    if not sensitive_ok and is_sensitive_preference(key):
         raise ApiError(
             "FORBIDDEN",
             "Using faith for matching needs your explicit sensitive-data consent.",

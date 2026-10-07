@@ -101,18 +101,21 @@ export default function Conversation() {
     void send(text, newIdempotencyKey());
   };
 
-  if (summary.isLoading || (history.isLoading && !history.data))
+  // The whole screen is the summary: the header, the banners, the safety row, the assistant, date
+  // planning and the composer all read it. So it waits for the server rather than deriving a null
+  // conversation and carrying on — a null one made `onHold` and `ended` both false, which is the
+  // *permissive* reading of "I don't know yet": the composer, End and date planning stayed usable
+  // on a conversation the server had closed or put on hold, and every message then came back
+  // CONFLICT or SAFETY_HOLD. `summary.isLoading` is not the question either; it is false whenever
+  // anything is cached, which is the whole point of this policy.
+  if (awaitingServer(summary) || (history.isLoading && !history.data))
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: color.canvas }}>
         <Loading label="Loading conversation" />
       </SafeAreaView>
     );
 
-  // Null while the summary is still the answer from before the member got here. The header, the
-  // banners and the safety row all read it, and a stale one can say "active" on a conversation the
-  // server has closed, or offer Block to somebody already blocked. `summary.isLoading` was not
-  // enough: it is false whenever anything is cached, which is the whole point of this policy.
-  const conversation = awaitingServer(summary) ? null : summary.data;
+  const conversation = summary.data ?? null;
   const onHold = !!conversation?.safety_hold;
   const ended = conversation?.status === "ended" || conversation?.status === "closed";
 

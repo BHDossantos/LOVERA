@@ -48,6 +48,13 @@ export default function PrivacyPage() {
     try {
       await fn();
       await qc.invalidateQueries({ queryKey: ["privacy"] });
+      // Consent is the lawful basis for a sensitive criterion, so withdrawing or restoring it
+      // changes the preferences and blueprint payloads too — both cached, and reachable without
+      // a remount from the You hub.
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["preferences"] }),
+        qc.invalidateQueries({ queryKey: ["blueprint"] }),
+      ]);
       await refresh();
     } catch (e) {
       setError(e as ApiError);

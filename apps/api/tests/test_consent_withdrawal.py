@@ -11,6 +11,12 @@ from __future__ import annotations
 
 from tests.conftest import Actor, onboard, unique_email
 
+# Barcelona, not Rome: these members would otherwise join the pool every journey test's batch
+# allocates from, and an extra candidate there changes who gets paired with whom. The tests here
+# are about consent and about corrections, not about allocation, so they get their own market.
+CITY = "barcelona"
+ZONE = "barcelona:eixample"
+
 
 def _sensitive_preference_key() -> tuple[str, str]:
     from app.catalog.signals import PREFERENCES, SIGNALS
@@ -22,7 +28,7 @@ def _sensitive_preference_key() -> tuple[str, str]:
 def test_a_withdrawn_sensitive_preference_is_reported_as_not_in_use(client):
     key, value = _sensitive_preference_key()
     a = Actor(client, unique_email("ana-inactive"))
-    onboard(a, gender="woman", seeking=["man"], name="Ana", zone="rome:prati", faith_consent=True)
+    onboard(a, gender="woman", seeking=["man"], name="Ana", city=CITY, zone=ZONE, faith_consent=True)
     assert a.patch(f"/preferences/{key}", json={"tier": "must", "value": {"in": [value]}}).status_code == 200
 
     row = next(p for p in a.get("/preferences").json()["preferences"] if p["key"] == key)
@@ -45,7 +51,7 @@ def test_a_withdrawn_sensitive_preference_is_reported_as_not_in_use(client):
 def test_the_impact_preview_refuses_a_preference_the_save_would_refuse(client):
     key, value = _sensitive_preference_key()
     a = Actor(client, unique_email("ana-preview"))
-    onboard(a, gender="woman", seeking=["man"], name="Ana", zone="rome:prati", faith_consent=True)
+    onboard(a, gender="woman", seeking=["man"], name="Ana", city=CITY, zone=ZONE, faith_consent=True)
     ok = a.post("/preferences/impact-preview", json={"key": key, "tier": "must", "value": {"in": [value]}})
     assert ok.status_code == 200, ok.text
 
@@ -55,27 +61,24 @@ def test_the_impact_preview_refuses_a_preference_the_save_would_refuse(client):
     assert r.status_code == 403, r.text
     assert r.json()["error"]["consent_required"] == "special_category"
 
-    # Open is still previewable, because upsert_preference still accepts that save. It is not a
-    # gate, so the number does not move — and the preference it saves is reported inactive, since
-    # build_snapshot drops a sensitive preference at every tier.
-    preview = a.post("/preferences/impact-preview", json={"key": key, "tier": "open", "value": {"in": [value]}})
-    assert preview.status_code == 200, preview.text
-    assert a.patch(f"/preferences/{key}", json={"tier": "open", "value": {"in": [value]}}).status_code == 200
-    row = next(p for p in a.get("/preferences").json()["preferences"] if p["key"] == key)
-    assert row["active"] is False, "Open is processing too, and consent is its lawful basis as much as Must's"
+    # Open is refused too, and so is its preview: build_snapshot drops a sensitive preference at
+    # every tier, so Open is processing special-category data as much as Must is.
+    assert a.post("/preferences/impact-preview", json={"key": key, "tier": "open", "value": {"in": [value]}}).status_code == 403
 
 
 def test_a_correction_with_no_replacement_reaches_a_reviewer(client):
     """The member is told "noted for a reviewer", which was true of the row and false of the
     product: `IntroCorrection` was written here and read by nothing, so no reviewer could ever
     see what they said. This is the endpoint that makes the promise keepable."""
-    from tests.test_journey import run_batch
+    from tests.conftest import staff
 
     a = Actor(client, unique_email("ana-corr"))
     b = Actor(client, unique_email("bruno-corr"))
-    onboard(a, gender="woman", seeking=["man"], name="Ana", zone="rome:prati")
-    onboard(b, gender="man", seeking=["woman"], name="Bruno", zone="rome:prati")
-    concierge, _ = run_batch(client)
+    onboard(a, gender="woman", seeking=["man"], name="Ana", city=CITY, zone=ZONE)
+    onboard(b, gender="man", seeking=["woman"], name="Bruno", city=CITY, zone=ZONE)
+    concierge = staff(client, "concierge@example.test")
+    r = concierge.post("/admin/matching/runs", json={"market_id": CITY, "auto_publish": True})
+    assert r.status_code == 201, r.text
     # Whichever of the two the batch served: other tests in this module leave members in the
     # same market, so who gets paired with whom is not ours to fix, and this test is about the
     # correction rather than the allocation.
@@ -94,3 +97,30 @@ def test_a_correction_with_no_replacement_reaches_a_reviewer(client):
     assert mine[0]["note"] == "Not even close."
     assert mine[0]["applied"] is False
     assert mine[0]["signal_label"], "a reviewer reads labels, not catalog keys"
+
+
+def test_a_sensitive_preference_cannot_be_saved_at_any_tier_without_consent(client):
+    """Open is not a lesser kind of processing.
+
+    `build_snapshot` drops a sensitive preference at every tier, so an Open one saved without
+    consent accomplished exactly one thing: it recorded, about somebody who had declined to let
+    us hold it, that faith is a criterion for them. That is the collection the consent governs.
+    """
+    key, value = _sensitive_preference_key()
+    a = Actor(client, unique_email("ana-open"))
+    onboard(a, gender="woman", seeking=["man"], name="Ana", city=CITY, zone=ZONE)
+
+    for tier in ("must", "prefer", "open"):
+        r = a.patch(f"/preferences/{key}", json={"tier": tier, "value": {"in": [value]}})
+        assert r.status_code == 403, f"{tier}: {r.text}"
+        assert r.json()["error"]["consent_required"] == "special_category"
+
+    # And it is not offered, because a control whose one outcome is a 403 is its own kind of wrong.
+    payload = a.get("/preferences").json()
+    assert key not in {p["key"] for p in payload["available"]}
+    assert key not in {p["key"] for p in payload["preferences"]}
+
+    # With consent it is offered and accepted, at every tier.
+    a.put("/consents/special_category", json={"status": "granted", "policy_version": "2026-01-01"})
+    assert key in {p["key"] for p in a.get("/preferences").json()["available"]}
+    assert a.patch(f"/preferences/{key}", json={"tier": "open", "value": {"in": [value]}}).status_code == 200

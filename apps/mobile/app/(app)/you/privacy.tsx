@@ -58,7 +58,16 @@ export default function YouPrivacy() {
     setError(null);
     try {
       await put(`/consents/${purpose}`, { status: granted ? "granted" : "revoked" });
-      await qc.invalidateQueries({ queryKey: ["consents"] });
+      // Withdrawing special-category consent changes two other payloads: `preferences` gains an
+      // inactive row and loses faith from `available`, and `blueprint` marks that signal
+      // uncorrectable. Both are cached and either may be mounted in the stack behind this screen,
+      // so invalidating only `consents` left them contradicting the server — an active Must and a
+      // live Change control on a criterion the matcher had just stopped applying.
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["consents"] }),
+        qc.invalidateQueries({ queryKey: ["preferences"] }),
+        qc.invalidateQueries({ queryKey: ["blueprint"] }),
+      ]);
     } catch (e) {
       setError(e as ApiError);
     } finally {
