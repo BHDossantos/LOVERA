@@ -129,9 +129,16 @@ def send_message(db: Session, conv_id: str, sender: Member, client_message_id: s
 def mark_read(db: Session, conv: Conversation, member_id: str, sequence: int) -> None:
     cursor = db.execute(select(ReadCursor).where(ReadCursor.conversation_id == conv.id, ReadCursor.member_id == member_id)).scalar_one_or_none()
     if cursor is None:
-        cursor = ReadCursor(conversation_id=conv.id, member_id=member_id)
+        # `last_read_sequence=0` explicitly, not left to the column default: that default is applied
+        # by the INSERT, so on a row that has only been added to the session the attribute is still
+        # None and the `max` below raises. The 500 rolled the transaction back, so the row was never
+        # written and the next call added a fresh one and raised again — which made it permanent
+        # rather than a first-time glitch. `read_cursors` stayed empty, `unread_count` fell back to
+        # "nothing has been read", and messages a member had read went on being counted as unread.
+        cursor = ReadCursor(conversation_id=conv.id, member_id=member_id, last_read_sequence=0)
         db.add(cursor)
-    cursor.last_read_sequence = max(cursor.last_read_sequence, sequence)
+    # `max`, because a read of an older message arriving late must not rewind what is already read.
+    cursor.last_read_sequence = max(cursor.last_read_sequence or 0, sequence)
     cursor.updated_at = utcnow()
 
 

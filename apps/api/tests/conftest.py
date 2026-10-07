@@ -169,3 +169,33 @@ def staff(client: TestClient, email: str) -> Actor:
         a.sign_in()
         _staff_cache[key] = a
     return _staff_cache[key]
+
+
+def mutual_pair(client: TestClient, prefix: str = "pair") -> tuple[Actor, Actor, str]:
+    """Two onboarded members, matched and both accepting: the state a conversation needs.
+
+    Shared because more than one suite needs to get to a real conversation, and reaching one through
+    the public API is a dozen steps that are easy to get subtly wrong — a pair that is introduced but
+    not mutual has no conversation at all, and a test built on that asserts nothing.
+    """
+    a = Actor(client, unique_email(f"{prefix}-a"))
+    b = Actor(client, unique_email(f"{prefix}-b"))
+    onboard(a, gender="woman", seeking=["man"], name="Ada", zone="rome:prati")
+    onboard(b, gender="man", seeking=["woman"], name="Bo", zone="rome:centro", birth_year=1990)
+    subscribe(a)
+    subscribe(b)
+    concierge = staff(client, "concierge@example.test")
+    r = concierge.post("/admin/matching/runs", json={"market_id": "rome", "auto_publish": True})
+    assert r.status_code == 201, r.text
+
+    intro = next(
+        (i for i in a.get("/introductions").json()["current"] if i["profile"] and i["profile"]["member_id"] == b.id),
+        None,
+    )
+    assert intro, "the pair has to be introduced before there is anything to read"
+    for who in (a, b):
+        r = who.post(f"/introductions/{intro['id']}/decision", json={"decision": "accept"}, headers={"Idempotency-Key": str(uuid.uuid4())})
+        assert r.status_code == 202, r.text
+    conv_id = r.json()["conversation_id"]
+    assert conv_id, "both accepting is what opens the conversation"
+    return a, b, conv_id

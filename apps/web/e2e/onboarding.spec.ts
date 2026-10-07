@@ -68,6 +68,15 @@ export async function completeOnboarding(page: Page, opts: { name: string; gende
   // allow-list into a 90-second timeout here.
   await page.getByLabel("Add a photo").setInputFiles({ name: "me.png", mimeType: "image/png", buffer: png });
   await expect(page.getByText("Live")).toBeVisible();
+  // The voice note closes the one link in the upload chain no static check can see. The picker's
+  // `accept` list, the kind its `upload(file, kind)` call sends, and the branch of `complete_media`
+  // that kind selects are all compared by tools/check_upload_types.py — but not the request payload
+  // in between, which could hard-code or invert `type` with every one of those still agreeing. Then
+  // the server would validate this MP3 against the image allow-list and refuse it, and the photo
+  // above against the audio list. Uploading one of each is what proves the kind survives the trip.
+  const mp3 = Buffer.from("SUQzAwAAAAAAFlRTU0UAAAAMAAADTGF2ZjYwLjMuMTAA", "base64");
+  await page.getByLabel("Add a voice note").setInputFiles({ name: "me.mp3", mimeType: "audio/mpeg", buffer: mp3 });
+  await expect(page.getByText("Voice note added")).toBeVisible();
   await page.getByRole("button", { name: /Save my profile|Saved/ }).click();
   await expect(page).toHaveURL(/onboarding\/availability/, { timeout: 20_000 });
   await page.getByRole("button", { name: "Declare my availability" }).click();
