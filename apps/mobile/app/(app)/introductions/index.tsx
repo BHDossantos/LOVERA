@@ -6,7 +6,7 @@ import { useRequireMember } from "@/lib/auth";
 import { serverDriven, useAwaitingServer } from "@/lib/query";
 import type { Introduction } from "@/api/types";
 import { INTRO_STATUS_LABEL, type IntroductionList } from "@/components/intro";
-import { Badge, Card, Empty, ErrorState, Loading, PageTitle, Screen } from "@/components/ui";
+import { AwaitingServer, Badge, Card, Empty, ErrorState, PageTitle, Screen } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
 
 function IntroRow({ intro, onPress }: { intro: Introduction; onPress: () => void }) {
@@ -67,8 +67,17 @@ export default function IntroductionsScreen() {
         title="Who the matchmaker chose, and why"
         lede="A few explained, reciprocal introductions at a time. No stack, no likes, no rankings."
       />
-      {awaiting && !q.isError && <Loading label="Loading introductions" />}
-      <ErrorState error={(q.error as ApiError) ?? null} retry={() => q.refetch()} />
+      {/* Two different situations, so two renderings. Gated means there is nothing on screen, and
+          `AwaitingServer` owns that: a spinner while it is working, then the error with a retry that
+          is always offered. `ErrorState`'s own retry appears only for an error the API marked
+          retryable — which an unexpected 500 is not — so leaving the gated case to it left a member
+          with a sentence and nothing to press. Not gated means the list is up and a background poll
+          failed, which is reported beside the data rather than in place of it. */}
+      {awaiting ? (
+        <AwaitingServer label="Loading introductions" query={q} />
+      ) : (
+        <ErrorState error={(q.error as ApiError) ?? null} retry={() => q.refetch()} />
+      )}
             {!!data && (
         <>
           {data.current.length > 0 ? (

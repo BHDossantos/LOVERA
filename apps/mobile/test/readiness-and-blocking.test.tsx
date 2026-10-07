@@ -108,6 +108,7 @@ jest.mock("expo-router", () => ({
 }));
 
 import Conversation from "../app/(app)/messages/[conversationId]";
+import Messages from "../app/(app)/messages/index";
 import Preferences from "../app/(app)/you/preferences";
 import YouAvailability from "../app/(app)/you/availability";
 
@@ -292,6 +293,24 @@ test("availability that will not load offers the failure and a retry, not a spin
   await s.press("Try again");
   // The retry goes back to the server rather than giving up on the screen.
   expect(mockGet).toHaveBeenCalledWith("/availability");
+  expect(mockGet.mock.calls.length).toBeGreaterThan(1);
+});
+
+test("a gated list whose load failed unretryably still offers a retry", async () => {
+  // `ErrorState` shows its retry only for an error the API marked retryable, and almost nothing is:
+  // `retryable=True` appears four times in the whole API. So an unexpected 500 on a gated screen —
+  // nothing rendered, because the gate withholds the data — left a member with one sentence and
+  // nothing to press. `AwaitingServer` offers the retry unconditionally, which is the only sensible
+  // answer when its gate is the whole screen.
+  const failure = Object.assign(new Error("Something went wrong on our side."), {
+    status: 500,
+    body: { code: "INTERNAL", message: "Something went wrong on our side.", retryable: false },
+  });
+  mockGet.mockImplementation(() => Promise.reject(failure));
+  const s = await renderScreen(<Messages />);
+
+  expect(s.hasText("Something went wrong on our side.")).toBe(true);
+  await s.press("Try again");
   expect(mockGet.mock.calls.length).toBeGreaterThan(1);
 });
 

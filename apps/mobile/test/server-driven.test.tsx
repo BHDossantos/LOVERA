@@ -117,7 +117,11 @@ test("a screen gated on a first load that failed shows the failure, not a spinne
   // And the three screens that gate in place rather than returning early.
   for (const rel of ["app/account/review.tsx", "app/(app)/introductions/index.tsx", "app/(app)/messages/index.tsx"]) {
     const inPlace = readFileSync(join(__dirname, "..", rel), "utf8");
-    expect(inPlace).toContain("awaiting && !q.isError && <Loading");
+    // `AwaitingServer` owns the gated case on these screens too, so there is one component that
+    // decides between "still working" and "failed, here is the way out" — and its retry is always
+    // offered, where `ErrorState`'s appears only for an error the API called retryable.
+    expect(inPlace).toContain("awaiting ? (");
+    expect(inPlace).toContain("<AwaitingServer label=");
     expect(inPlace).not.toContain("!q.isRefetchError && <Loading");
   }
 });
@@ -189,11 +193,14 @@ test("a gated screen that cannot refetch says so, and offers a way out", () => {
     expect(gate.slice(0, 400)).not.toContain("<Loading");
   }
 
-  // The three that render in place already show an ErrorState with a retry, so there the spinner
-  // only has to stop competing with it — on a first load that failed as much as on a refetch.
+  // The three that render in place use it for the gated case and keep an ErrorState for the other
+  // one: gated means nothing is on screen and the member needs a way out, while a failed background
+  // poll over data that is still fresh is reported beside the data rather than in place of it.
   for (const rel of ["app/account/review.tsx", "app/(app)/introductions/index.tsx", "app/(app)/messages/index.tsx"]) {
     const src = readFileSync(join(__dirname, "..", rel), "utf8");
-    expect(src).toContain("awaiting && !q.isError && <Loading");
+    expect(src).toContain("awaiting ? (");
+    expect(src).toContain("<AwaitingServer label=");
+    expect(src).toContain("retry={() => q.refetch()}");
   }
 });
 

@@ -5,7 +5,7 @@ import { Text } from "react-native";
 import { ApiError, get, post } from "@/api/client";
 import { useAuth, useRequireMember } from "@/lib/auth";
 import { serverDriven, useAwaitingServer } from "@/lib/query";
-import { Badge, Button, Card, Divider, ErrorState, Field, Loading, PageTitle, Screen, StatusBanner, TextInput } from "@/components/ui";
+import { AwaitingServer, Badge, Button, Card, Divider, ErrorState, Field, PageTitle, Screen, StatusBanner, TextInput } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
 
 /**
@@ -87,8 +87,16 @@ export default function AccountReview() {
         title="Introductions are paused while a person looks at this"
         body="You can still reach the safety centre and your own data."
       />
-      <ErrorState error={error ?? ((q.error as ApiError) ?? null)} retry={() => q.refetch()} />
-      {awaiting && !q.isError && <Loading label="Loading the decision" />}
+      {/* Two different errors, so two places. This one is the appeal submission's: it belongs beside
+          the form whatever the fetch is doing. The fetch's own error belongs to the gate below,
+          which always offers a retry — `ErrorState` only offers one for an error the API marked
+          retryable, and an unexpected 500 is not, which left a gated screen with nothing to press. */}
+      <ErrorState error={error} />
+      {awaiting ? (
+        <AwaitingServer label="Loading the decision" query={q} />
+      ) : (
+        <ErrorState error={(q.error as ApiError) ?? null} retry={() => q.refetch()} />
+      )}
 
       {data?.actions.length === 0 && (
         <Card>
