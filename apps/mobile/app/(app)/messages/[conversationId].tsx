@@ -111,6 +111,16 @@ export default function Conversation() {
           {summary.data?.other.display_name ?? "Conversation"}
         </Text>
         {!!summary.data?.other.verified && <Badge label="Verified" tone="success" />}
+        {!ended && (
+          <Pressable
+            onPress={() => router.push(`/messages/${id}/close` as never)}
+            accessibilityRole="button"
+            accessibilityLabel="End this conversation"
+            hitSlop={12}
+          >
+            <Text style={s.headerAction}>End</Text>
+          </Pressable>
+        )}
       </View>
 
       {onHold && (
@@ -125,6 +135,25 @@ export default function Conversation() {
       {ended && !onHold && (
         <View style={{ paddingHorizontal: space.lg }}>
           <StatusBanner tone="context" title={summary.data?.public_reason ?? "This conversation has ended."} />
+        </View>
+      )}
+
+      {/* Writing help, translation and leaving. Drafting is a paid capability and the
+          assistant screen says so itself rather than this one guessing; translation is
+          useful in a two-language city whichever plan you are on, so both are offered and
+          the paywall is stated once, where it applies. */}
+      {!onHold && !ended && (
+        <View style={{ flexDirection: "row", gap: space.sm, paddingHorizontal: space.lg, paddingBottom: space.sm }}>
+          <View style={{ flex: 1 }}>
+            <Button variant="secondary" onPress={() => router.push(`/messages/${id}/assistant` as never)}>
+              Help me write
+            </Button>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Button variant="secondary" onPress={() => router.push(`/messages/${id}/translate` as never)}>
+              Translate
+            </Button>
+          </View>
         </View>
       )}
 
@@ -209,6 +238,7 @@ export default function Conversation() {
 }
 
 const s = {
+  headerAction: { ...typo.small, color: color.action, fontWeight: "600" as const, paddingLeft: space.sm },
   header: {
     flexDirection: "row",
     alignItems: "center",
