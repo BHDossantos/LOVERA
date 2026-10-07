@@ -32,17 +32,45 @@ export async function renderScreen(ui: ReactElement) {
     tree: r,
     /** Every string rendered anywhere in the tree. */
     texts: () => collect(r.root),
-    /** True when some rendered string contains `needle`. */
+    /** True when some single rendered string contains `needle`. */
     hasText: (needle: string) => collect(r.root).some((t) => t.includes(needle)),
-    /** Press the first pressable whose subtree renders `label`. */
+    /**
+     * Every rendered string joined, for a sentence React split across nodes — a line like
+     * `{a.type} · decided by {source}` arrives as several children, so `hasText` cannot see
+     * it whole. Prefer `hasText` where the string is one node; this is for the other case.
+     */
+    joined: () => collect(r.root).join(""),
+    /**
+     * Press the first pressable whose subtree renders `label`.
+     *
+     * A disabled control is skipped rather than fired, because calling onPress directly
+     * would let a test "press" a button a member cannot — and then assert behaviour the
+     * real app does not have.
+     */
     press: async (label: string) => {
-      const target = r.root.findAll((n) => {
-        const press = (n.props as { onPress?: unknown }).onPress;
-        return typeof press === "function" && collect(n).some((t) => t.includes(label));
+      const matches = r.root.findAll((n) => {
+        const props = n.props as { onPress?: unknown; disabled?: boolean; accessibilityState?: { disabled?: boolean } };
+        if (typeof props.onPress !== "function") return false;
+        if (props.disabled || props.accessibilityState?.disabled) return false;
+        return collect(n).some((t) => t.includes(label));
       });
-      if (!target.length) throw new Error(`nothing pressable renders ${JSON.stringify(label)}`);
+      if (!matches.length) {
+        const disabled = r.root.findAll((n) => {
+          const props = n.props as { onPress?: unknown; disabled?: boolean; accessibilityState?: { disabled?: boolean } };
+          return (
+            typeof props.onPress === "function" &&
+            Boolean(props.disabled || props.accessibilityState?.disabled) &&
+            collect(n).some((t) => t.includes(label))
+          );
+        });
+        throw new Error(
+          disabled.length
+            ? `${JSON.stringify(label)} is rendered but disabled, so a member could not press it`
+            : `nothing pressable renders ${JSON.stringify(label)}`,
+        );
+      }
       // The innermost match is the actual control rather than a wrapper around it.
-      const node = target[target.length - 1];
+      const node = matches[matches.length - 1];
       await act(async () => {
         (node.props as { onPress: () => void }).onPress();
       });

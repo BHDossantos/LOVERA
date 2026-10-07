@@ -113,6 +113,9 @@ export default function YouScreen() {
         <Button variant="secondary" onPress={() => router.push("/you/preferences" as never)}>
           Preferences and dealbreakers
         </Button>
+        <Button variant="secondary" onPress={() => router.push("/you/blueprint" as never)}>
+          What we think we know about you
+        </Button>
       </Card>
 
       <Card>

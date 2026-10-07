@@ -64,7 +64,7 @@ export default function DateFeedback() {
         learning_consent: false,
       });
       await Promise.all([q.refetch(), qc.invalidateQueries({ queryKey: ["date-plans"] })]);
-      router.replace(`/dates/${dateId}` as never);
+      router.replace(`/dates/${dateId}/outcome` as never);
     } catch (e) {
       setError(e as ApiError);
     } finally {

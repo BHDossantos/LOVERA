@@ -154,7 +154,10 @@ export default function DateDetail() {
               <Text style={s.meta}>
                 If you both said yes to a second date, you will both hear. Nobody is told about a no.
               </Text>
-              <Button variant="secondary" onPress={() => router.push(`/dates/${d.id}/feedback` as never)}>
+              <Button variant="secondary" onPress={() => router.push(`/dates/${d.id}/outcome` as never)}>
+                See if it was mutual
+              </Button>
+              <Button variant="ghost" onPress={() => router.push(`/dates/${d.id}/feedback` as never)}>
                 Change my answers
               </Button>
             </Card>
