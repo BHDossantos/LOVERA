@@ -87,6 +87,11 @@ jobs:
         env:
           EXPO_NO_TELEMETRY: "1"
       - run: python3 scripts/check-native-config.py
+      # Every router.push in this app casts its target, which silences the one check that
+      # would catch a typo — so a tap that navigates nowhere compiles, bundles and ships.
+      # The route list comes from expo-router's own getRoutes, not from guessing at the
+      # filesystem, so (group) segments and [param] matching behave as they will at runtime.
+      - run: node scripts/check-routes.js
       # A build for anything but a developer's laptop must name a reachable API origin.
       # Expo inlines it at bundle time, so getting this wrong ships a binary that installs,
       # launches, and then fails every request — which no test on the JS side can see.

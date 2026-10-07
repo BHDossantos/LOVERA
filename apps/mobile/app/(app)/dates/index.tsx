@@ -34,7 +34,10 @@ export default function DatesScreen() {
       {q.isLoading && <Loading label="Loading dates" />}
       <ErrorState error={(q.error as ApiError) ?? null} retry={() => q.refetch()} />
       {!!q.data && q.data.items.length === 0 && (
-        <Empty title="No dates planned" body="Once a conversation is ready, either of you can propose a public venue and a window." />
+        <Empty
+          title="No dates planned"
+          body="Open a conversation and tap Plan a date. You'll only see windows you both marked free, and only public places."
+        />
       )}
       {q.data?.items.map((d) => (
         <Pressable key={d.id} onPress={() => router.push(`/dates/${d.id}` as never)} accessibilityRole="button">
