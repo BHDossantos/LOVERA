@@ -106,6 +106,13 @@ export type ConversationSummary = {
   date: { date_plan_id: string; status: string; starts_at: string | null } | null;
   opened_at: string;
   safety_hold: boolean;
+  /**
+   * The block and report target, carried separately from `other` because `other` is neutralised
+   * once the conversation closes (no name, no photo, no id) — which also took away the only thing
+   * the safety actions had to act on. Reading it off `other.member_id` meant an ended thread could
+   * neither block nor report the person, and reporting afterwards is the ordinary case.
+   */
+  safety: { subject_id: string | null; blocked_by_you: boolean };
 };
 
 export type Message = {

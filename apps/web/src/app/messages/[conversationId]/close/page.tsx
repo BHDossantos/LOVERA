@@ -30,7 +30,10 @@ export default function ClosePage({ params }: { params: Promise<{ conversationId
   const [error, setError] = useState<ApiError | null>(null);
   const [done, setDone] = useState<CloseResult | null>(null);
 
-  const reportHref = conv?.other.member_id ? `/safety/report?subject=${conv.other.member_id}&conversation=${id}` : `/safety/report?conversation=${id}`;
+  // The safety target rather than the profile id: `summary()` nulls `other.member_id` once the
+  // conversation closes, which is exactly when most reports get written.
+  const subjectId = conv?.safety.subject_id ?? null;
+  const reportHref = subjectId ? `/safety/report?subject=${subjectId}&conversation=${id}` : `/safety/report?conversation=${id}`;
   const alreadyEnded = !!conv && conv.status !== "active";
 
   const submit = async () => {

@@ -39,6 +39,13 @@ jobs:
         run: |
           python -c "import json; from app.main import app; json.dump(app.openapi(), open('openapi.json','w'))"
           python ../../tools/check_api_contract.py openapi.json ../../apps/mobile ../../apps/web/src
+      # `other` is emptied on a closed conversation, so a client reading `other.member_id` for a
+      # report's subject names nobody and leaves Block nothing to act on — on exactly the threads
+      # where most reports are written. Neither typecheck nor the contract check can see it: the
+      # field is real, it is just the wrong one. This happened on mobile, was fixed, then happened
+      # on the web.
+      - name: Safety actions take their subject from the safety target
+        run: python ../../tools/check_safety_target.py ../../apps/mobile ../../apps/web/src
         env:
           MM_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/matchmaker_test
           MM_ENV: test
