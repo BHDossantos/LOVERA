@@ -11,7 +11,9 @@ type Profile = { display_name: string | null; pronouns: string | null; occupatio
 
 
 /**
- * Exactly what `POST /profile/media/{id}/complete` accepts; keep in step with app/core/datauri.py.
+ * Exactly what `POST /profile/media/{id}/complete` accepts — `PHOTO_TYPES` and `VOICE_TYPES` in
+ * app/core/datauri.py, the two lists `complete_media` passes to `decode_data_url`, compared with
+ * these by `tools/check_upload_types.py` in CI.
  *
  * `image/*` would invite a file the server then refuses — and would have to include SVG, which is
  * markup an `<img>` renders, so neither side can be a wildcard.

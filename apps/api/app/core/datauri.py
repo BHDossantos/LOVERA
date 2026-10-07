@@ -32,6 +32,15 @@ VIDEO_TYPES = ("video/mp4", "video/quicktime", "video/webm", "video/x-matroska",
 # which is why these are enumerated rather than matched as `image/*`.
 DOCUMENT_TYPES = ("application/pdf", "text/plain")
 
+# What each upload endpoint accepts, named here rather than assembled at the call site. The client
+# that chooses the file declares the same set as an `accept` attribute, and the two have drifted in
+# both directions; `tools/check_upload_types.py` compares them, and it can only do that against a
+# list it can import. A call to `decode_data_url` whose allow-list is not one of these is refused by
+# that check, so a narrowed endpoint cannot slip past it either.
+EVIDENCE_TYPES = IMAGE_TYPES + VIDEO_TYPES + AUDIO_TYPES + DOCUMENT_TYPES
+PHOTO_TYPES = IMAGE_TYPES
+VOICE_TYPES = AUDIO_TYPES
+
 # What a file of each type begins with. An allow-listed media type is not enough on its own: a
 # document whose bytes are HTML, served to a reviewer as `image/png`, is a different kind of
 # problem, and the first few bytes settle it for every format we accept here. Audio containers vary

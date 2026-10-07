@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.analytics import track
 from app.core.audit import audit
-from app.core.datauri import AUDIO_TYPES, DOCUMENT_TYPES, IMAGE_TYPES, VIDEO_TYPES, decode_data_url
+from app.core.datauri import EVIDENCE_TYPES, decode_data_url
 from app.core.errors import ApiError
 from app.core.timeutil import iso, utcnow
 from app.models.account import Member
@@ -132,7 +132,7 @@ def add_evidence(db: Session, reporter: Member, report_id: str, content_type: st
         # Everything the pickers offer. A recording of a call and a saved chat log are evidence as
         # much as a screenshot is, and narrowing the server behind the client meant the member
         # attached a file, was told the report was filed, and the reviewer got nothing.
-        decode_data_url(data_url, content_type, IMAGE_TYPES + VIDEO_TYPES + AUDIO_TYPES + DOCUMENT_TYPES)
+        decode_data_url(data_url, content_type, EVIDENCE_TYPES)
     key = f"evidence/{report.id}/{secrets.token_hex(8)}"
     ev = SafetyEvidence(report_id=report.id, storage_key=key, content_type=content_type, size_bytes=size_bytes, checksum=checksum, description=(description or "")[:300] or None)
     db.add(ev)

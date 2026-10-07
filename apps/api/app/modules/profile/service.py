@@ -10,7 +10,7 @@ from app.catalog.cities import CITIES, ZONES, distance_band, zone_distance_km
 from app.catalog.prompts import PROFILE_PROMPTS
 from app.core.analytics import track
 from app.core.audit import audit
-from app.core.datauri import AUDIO_TYPES, IMAGE_TYPES, decode_data_url
+from app.core.datauri import PHOTO_TYPES, VOICE_TYPES, decode_data_url
 from app.core.errors import ApiError
 from app.core.timeutil import iso, utcnow
 from app.models.account import Member
@@ -175,7 +175,7 @@ def complete_media(db: Session, member: Member, media_id: str, checksum: str | N
     # media is served to other members as an image or audio source, so an unchecked string here is
     # a URL one member can make another member's browser fetch — see app/core/datauri.py.
     if data_url:
-        decode_data_url(data_url, media.content_type, AUDIO_TYPES if media.type == "voice" else IMAGE_TYPES)
+        decode_data_url(data_url, media.content_type, VOICE_TYPES if media.type == "voice" else PHOTO_TYPES)
     media.upload_state = "complete"
     # Pilot storage: small data URLs are kept in the local object store adapter; a real deployment uses signed bucket uploads.
     from app.modules.profile.storage import put_object

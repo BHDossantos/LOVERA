@@ -199,9 +199,9 @@ function toDataUrl(file: File) {
 }
 
 /**
- * Exactly what `POST /safety/reports/{id}/evidence` accepts — `IMAGE_TYPES + VIDEO_TYPES +
- * AUDIO_TYPES + DOCUMENT_TYPES` in app/core/datauri.py, which `tools/check_upload_types.py`
- * compares this list against in CI.
+ * Exactly what `POST /safety/reports/{id}/evidence` accepts — `EVIDENCE_TYPES` in
+ * app/core/datauri.py, which is the list `add_evidence` passes to `decode_data_url` and which
+ * `tools/check_upload_types.py` compares this one against in CI.
  *
  * It is enumerated rather than `image/*,video/*,audio/*` because the server refuses SVG and
  * text/html deliberately: both are markup that renders in a reviewer's session. The first
