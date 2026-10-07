@@ -46,6 +46,13 @@ jobs:
       # on the web.
       - name: Safety actions take their subject from the safety target
         run: python ../../tools/check_safety_target.py ../../apps/mobile ../../apps/web/src
+      # React Query matches cache keys by prefix and says nothing when nothing matches, so
+      # invalidating a key no query uses is a silent no-op — the mutation looks like it refreshes
+      # the screen and does not. `["dates"]` beside a list keyed `["date-plans"]` shipped three
+      # times in one file family, leaving a cancelled date on the Dates list with Confirm still on
+      # it.
+      - name: Every cache key a mutation touches is one a query uses
+        run: python ../../tools/check_query_keys.py ../../apps/mobile ../../apps/web/src
         env:
           MM_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/matchmaker_test
           MM_ENV: test

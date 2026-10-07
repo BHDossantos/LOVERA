@@ -45,7 +45,10 @@ export default function ClosePage({ params }: { params: Promise<{ conversationId
       qc.invalidateQueries({ queryKey: ["conversations"] });
       qc.invalidateQueries({ queryKey: ["conversation", id] });
       qc.invalidateQueries({ queryKey: ["today"] });
-      qc.invalidateQueries({ queryKey: ["dates"] });
+      // `close()` cancels every open plan on the conversation, and the Dates list is keyed
+      // ["date-plans"] — ["dates"] matched nothing, so the cancelled date stayed on it.
+      qc.removeQueries({ queryKey: ["date-plan"] });
+      qc.invalidateQueries({ queryKey: ["date-plans"] });
     } catch (e) {
       setError(e as ApiError);
     } finally {

@@ -44,14 +44,18 @@ export function ConversationHeader({ conversation, active }: { conversation: Con
     setBlockError(null);
     try {
       await post("/blocks", { member_id: subjectId });
+      qc.removeQueries({ queryKey: ["date-plan"] });
+      qc.removeQueries({ queryKey: ["introduction"] });
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["conversations"] }),
         qc.invalidateQueries({ queryKey: ["conversation", conversation.id] }),
         qc.invalidateQueries({ queryKey: ["blocks"] }),
         qc.invalidateQueries({ queryKey: ["today"] }),
         // create_block cancels every open date plan on the conversation and closes any open
-        // introduction between the two, so neither list may keep showing them as live.
-        qc.invalidateQueries({ queryKey: ["dates"] }),
+        // introduction between the two, so neither may keep showing them as live. The detail
+        // queries are removed rather than invalidated: invalidate leaves the data in place, and a
+        // cancelled date rendering with Confirm still on it is the failure this is for.
+        qc.invalidateQueries({ queryKey: ["date-plans"] }),
         qc.invalidateQueries({ queryKey: ["introductions"] }),
       ]);
       setConfirmBlock(false);
