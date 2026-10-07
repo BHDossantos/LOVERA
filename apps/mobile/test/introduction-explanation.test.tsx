@@ -230,6 +230,52 @@ test("a set seen while the previous report is in flight is still sent", async ()
   }
 });
 
+test("scrolling back up does not unread a section", async () => {
+  // The exact sequence a review found, and it needs all four steps: a reasons-only report is in
+  // flight, the member reaches the bottom (queuing all three), scrolls back to where friction is
+  // visible but unknown is not, and *stops* — so the idle timer fires while the first request is
+  // still open and queues the smaller set. Taking "currently above the fold" let that replace the
+  // larger queued set, and since the settled request had already marked reasons reported, only
+  // friction went out and `unknown` was lost despite having been read.
+  //
+  // My first attempt at this test scrolled somewhere friction was *also* hidden, so the smaller set
+  // was a subset of what was already reported, `send` returned early, and nothing was replaced —
+  // it passed against the bug. The gap between the two tops is wide here so the middle band is
+  // unambiguous whatever the harness reports as the window height.
+  jest.useFakeTimers();
+  try {
+    let settle: ((v: unknown) => void) | undefined;
+    mockPost.mockImplementation((path: string) =>
+      path.endsWith("/explanation-viewed") ? new Promise((res) => { settle = res; }) : Promise.resolve({}),
+    );
+    const s = await renderScreen(<IntroductionDetail />);
+    await layOut(s, 0, { reasons: 0, friction: 5_000, unknown: 20_000 });
+    await act(async () => {
+      jest.advanceTimersByTime(2_500);
+    });
+    expect(posted("/introductions/intro_1/explanation-viewed")[0][1]).toEqual({ sections: ["reasons"] });
+
+    await s.scroll(20_000); // the bottom: all three have now been read
+    await s.scroll(5_100); // back up: friction still on screen, unknown no longer
+    await act(async () => {
+      jest.advanceTimersByTime(2_500); // and they stop, so the idle timer queues the smaller set
+    });
+
+    settle?.({});
+    await s.settle();
+    await act(async () => {
+      jest.advanceTimersByTime(2_500);
+    });
+
+    const calls = posted("/introductions/intro_1/explanation-viewed");
+    const last = calls[calls.length - 1][1] as { sections: string[] };
+    expect(last.sections).toContain("unknown");
+    expect(last.sections).toEqual(["friction", "reasons", "unknown"]);
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 test("nothing is reported for an explanation never scrolled to", async () => {
   // Reporting on mount would make this a second name for introduction_opened.
   const s = await renderScreen(<IntroductionDetail />);

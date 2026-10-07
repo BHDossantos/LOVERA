@@ -86,12 +86,24 @@ export default function IntroductionDetail() {
   const pending = useRef<string[] | null>(null);
   const idle = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  /** Every section whose top has *ever* been above the fold, not the ones there right now. */
+  const seen = useRef<Set<string>>(new Set());
+
+  /**
+   * Accumulates rather than recomputing, because scrolling past something does not unread it.
+   *
+   * Returning only what is currently above the fold let the set shrink, and a shrinking set is how
+   * a report could lose a section it had already counted: with a reasons-only request in flight, a
+   * member who reached the bottom (queuing all three) and then scrolled back up queued a smaller
+   * set over the larger one, and `unknown` was never sent. Making this monotonic removes that
+   * whole class rather than the one path through it.
+   */
   const seenSections = useCallback(() => {
     const fold = scrollY.current + height * 0.85;
-    return Object.entries(sectionTops.current)
-      .filter(([, y]) => cardTop.current + y <= fold)
-      .map(([name]) => name)
-      .sort();
+    for (const [name, y] of Object.entries(sectionTops.current)) {
+      if (cardTop.current + y <= fold) seen.current.add(name);
+    }
+    return [...seen.current].sort();
   }, [height]);
 
   /**
@@ -109,7 +121,10 @@ export default function IntroductionDetail() {
       if (!intro || !sections.length) return;
       if (sections.every((name) => reported.current.includes(name))) return;
       if (inflight.current) {
-        pending.current = sections;
+        // Merged, not replaced. `seenSections` is monotonic now so this cannot shrink anyway, but
+        // the queue is the place where losing a section would be silent, so it does not rely on
+        // that: whatever is held is the union of everything queued while the request was open.
+        pending.current = [...new Set([...(pending.current ?? []), ...sections])].sort();
         return;
       }
       const previous = reported.current;
