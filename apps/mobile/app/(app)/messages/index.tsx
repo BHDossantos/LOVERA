@@ -35,7 +35,7 @@ export default function MessagesScreen() {
         title="Conversations"
         lede="Only with people who also said yes. There is no inbox of strangers here."
       />
-      {awaitingServer(q) && !q.isRefetchError && <Loading label="Loading conversations" />}
+      {awaitingServer(q) && !q.isError && <Loading label="Loading conversations" />}
       <ErrorState error={(q.error as ApiError) ?? null} retry={() => q.refetch()} />
       {!!data && data.items.length === 0 && (
         <Empty title="No conversations yet" body="A conversation opens the moment an introduction is mutual." />

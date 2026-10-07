@@ -75,20 +75,46 @@ test("the policy is what it claims to be, and all three parts are load-bearing",
   // `isLoading` is false whenever there is cached data. gcTime drops the entry when the screen
   // closes; awaitingServer withholds an answer fetched before the member arrived.
   expect(serverDriven).toEqual({ staleTime: 0, gcTime: 0, refetchOnMount: "always" });
-  expect(awaitingServer({ isLoading: false, isFetchedAfterMount: false, isRefetchError: false })).toBe(true);
-  expect(awaitingServer({ isLoading: false, isFetchedAfterMount: true, isRefetchError: false })).toBe(false);
-  expect(awaitingServer({ isLoading: true, isFetchedAfterMount: true, isRefetchError: false })).toBe(true);
+  expect(awaitingServer({ isSuccess: false, isFetchedAfterMount: false })).toBe(true);
+  expect(awaitingServer({ isSuccess: true, isFetchedAfterMount: true })).toBe(false);
+  // Success from the cache, with no fetch since the screen opened: the answer may predate the
+  // member's arrival, which is the case the whole policy exists for.
+  expect(awaitingServer({ isSuccess: true, isFetchedAfterMount: false })).toBe(true);
 });
 
-test("a refetch that failed is not freshness", () => {
+test("a fetch that failed is not freshness, whether or not anything was cached", () => {
   // query-core computes isFetchedAfterMount as
   //   dataUpdateCount > initial.dataUpdateCount || errorUpdateCount > initial.errorUpdateCount
-  // so a *failed* refetch satisfies it. Without excluding that, a destination holding cached data
-  // whose refetch fails would be ungated: the stale answer and its actionable controls rendered
-  // underneath an error banner, which is worse than the bug this policy exists for.
-  expect(awaitingServer({ isLoading: false, isFetchedAfterMount: true, isRefetchError: true })).toBe(true);
-  // And it recovers: a later retry that succeeds clears isRefetchError.
-  expect(awaitingServer({ isLoading: false, isFetchedAfterMount: true, isRefetchError: false })).toBe(false);
+  // so a *failed* fetch satisfies it. Both error cases therefore have isFetchedAfterMount true and
+  // are told apart only by whether there is data, which is exactly what `isSuccess` answers.
+  //
+  // A failed refetch over cached data: the stale answer and its actionable controls would otherwise
+  // render under an error banner, which is worse than the bug this policy exists for.
+  expect(awaitingServer({ isSuccess: false, isFetchedAfterMount: true })).toBe(true);
+  // A failed *first* load, with nothing cached. This is the one the first version got wrong: it
+  // tested `isRefetchError`, which is `isError && hasData` and so false here, and declared the
+  // screen fresh. On the conversation screen that meant rendering with a null summary — `onHold`
+  // and `ended` both false, the composer, End and date planning live on a thread whose state was
+  // unknown, Block hidden because there was no subject id, and Report opening with no subject.
+  // Nothing on that screen renders the summary's error either, so it looked loaded and was not.
+  expect(awaitingServer({ isSuccess: false, isFetchedAfterMount: true })).toBe(true);
+  // And it recovers: a retry that succeeds is fresh.
+  expect(awaitingServer({ isSuccess: true, isFetchedAfterMount: true })).toBe(false);
+});
+
+test("a screen gated on a first load that failed shows the failure, not a spinner", () => {
+  // `AwaitingServer` tested `isRefetchError`, which is false when there is no data, so a first-load
+  // failure sat behind "Loading…" for ever with no error and no retry — on the nine screens that
+  // return it early. `isError` covers both, and is still false during the retry so the spinner
+  // comes back while it is in flight.
+  const src = readFileSync(join(__dirname, "..", "src/components/ui.tsx"), "utf8");
+  expect(src).toContain("if (!query.isError || query.isFetching) return <Loading label={label} />;");
+  // And the three screens that gate in place rather than returning early.
+  for (const rel of ["app/account/review.tsx", "app/(app)/introductions/index.tsx", "app/(app)/messages/index.tsx"]) {
+    const inPlace = readFileSync(join(__dirname, "..", rel), "utf8");
+    expect(inPlace).toContain("!q.isError && <Loading");
+    expect(inPlace).not.toContain("!q.isRefetchError && <Loading");
+  }
 });
 
 test.each(NOTIFICATION_SCREENS)("%s refetches what the server sent the member to see", (rel) => {
@@ -157,10 +183,10 @@ test("a gated screen that cannot refetch says so, and offers a way out", () => {
   }
 
   // The three that render in place already show an ErrorState with a retry, so there the spinner
-  // only has to stop competing with it.
+  // only has to stop competing with it — on a first load that failed as much as on a refetch.
   for (const rel of ["app/account/review.tsx", "app/(app)/introductions/index.tsx", "app/(app)/messages/index.tsx"]) {
     const src = readFileSync(join(__dirname, "..", rel), "utf8");
-    expect(src).toContain("awaitingServer(q) && !q.isRefetchError && <Loading");
+    expect(src).toContain("awaitingServer(q) && !q.isError && <Loading");
   }
 });
 

@@ -24,29 +24,32 @@ export const serverDriven = { staleTime: 0, gcTime: 0, refetchOnMount: "always" 
 /**
  * Whether this query's data was fetched *successfully* since the screen opened.
  *
- * `isFetchedAfterMount` alone is not that question, which is the second thing I got wrong here.
- * query-core computes it as
+ * `isFetchedAfterMount` alone is not that question. query-core computes it as
  *
  *     dataUpdateCount > initial.dataUpdateCount || errorUpdateCount > initial.errorUpdateCount
  *
- * (queryObserver.js), so a refetch that *failed* satisfies it. A notification destination holding
- * cached data whose refetch then fails would have been declared fresh and ungated — rendering the
- * stale answer, with its actionable controls, underneath an error banner. That is worse than the
- * bug this policy was written for, because now the screen looks wrong and acts live.
+ * (queryObserver.js), so a fetch that *failed* satisfies it. Both halves of the question therefore
+ * have to be asked, and `isSuccess` is the one that asks the second: status is `success` only when
+ * what we hold came back from a request that worked.
  *
- * `isRefetchError` is exactly `isError && hasData`: the refetch failed and what we hold is from
- * before. Excluding it leaves the four cases right — fresh data arrived (fresh), refetch failed
- * over cached data (not fresh, keep gating), first load failed with no data at all (nothing to
- * gate; the screen shows its error state), and a later retry succeeding (fresh again).
+ * It took two goes to get this right, and the first wrong answer is worth keeping written down.
+ * `isRefetchError` is exactly `isError && hasData`, so excluding *it* covered a failed refetch over
+ * cached data and missed a failed first load entirely: nothing cached, `isRefetchError` false,
+ * declared fresh. On the conversation screen that meant rendering with a null summary, where
+ * `onHold` and `ended` are both false — the permissive reading of "I do not know" — so the
+ * composer, End and date planning were live on a thread whose state was unknown, Block was hidden
+ * for want of a subject id, and Report opened with no subject on it.
  *
- * Checking staleness instead would spin on every later background refetch, and checking
- * `isLoading` trusts whatever was in the cache.
+ * `isSuccess && isFetchedAfterMount` answers all four cases without a special case: fresh data
+ * arrived (fresh), a refetch failed over cached data (not fresh), a first load failed with nothing
+ * cached (not fresh), and a retry succeeded (fresh again). A later background refetch keeps status
+ * at `success`, so this does not flicker on every poll.
  */
-export function isFresh(q: { isFetchedAfterMount: boolean; isRefetchError: boolean }) {
-  return q.isFetchedAfterMount && !q.isRefetchError;
+export function isFresh(q: { isSuccess: boolean; isFetchedAfterMount: boolean }) {
+  return q.isSuccess && q.isFetchedAfterMount;
 }
 
 /** True while a server-driven screen has nothing it is entitled to show yet. */
-export function awaitingServer(q: { isLoading: boolean; isFetchedAfterMount: boolean; isRefetchError: boolean }) {
-  return q.isLoading || !isFresh(q);
+export function awaitingServer(q: { isSuccess: boolean; isFetchedAfterMount: boolean }) {
+  return !isFresh(q);
 }

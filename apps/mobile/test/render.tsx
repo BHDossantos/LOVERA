@@ -233,6 +233,16 @@ export function routeGet(routes: Record<string, unknown>) {
       .sort((a, b) => b.length - a.length) // longest prefix first: /safety/cases before /safety
       .find((r) => path === r || path.startsWith(r));
     if (!key) return Promise.reject(new Error(`test did not stub GET ${path}`));
-    return Promise.resolve(routes[key]);
+    // An Error as the stub means that route fails. A screen whose request fails is a state worth
+    // asserting on and there was no way to ask for it: every stub resolved, so the only failure a
+    // test could produce was a route nobody had stubbed, which is a different thing.
+    const value = routes[key];
+    if (value instanceof Error) return Promise.reject(value);
+    return Promise.resolve(value);
   };
+}
+
+/** An error shaped like the one `api()` throws, so `ErrorState` renders the server's sentence. */
+export function apiFailure(message: string, retryable = true) {
+  return Object.assign(new Error(message), { status: 503, body: { code: "UNAVAILABLE", message, retryable } });
 }

@@ -1,5 +1,5 @@
 import { Alert } from "react-native";
-import { renderScreen, routeGet } from "./render";
+import { apiFailure, renderScreen, routeGet } from "./render";
 
 /**
  * Three endpoints neither app called, each of which left a member unable to do something the
@@ -129,6 +129,37 @@ test("a conversation offers block and report, with the context a reviewer needs"
   await s.press("Report");
   // Both the person and the conversation ride along, so the report is not a bare narrative.
   expect(mockPush).toHaveBeenCalledWith("/safety/report?conversation=conv_1&subject=mem_them");
+});
+
+test("a conversation whose summary will not load acts on nothing", async () => {
+  /**
+   * The whole screen reads the summary, so a failed *first* load of it is the one case the
+   * freshness gate used to let through: `isFetchedAfterMount` is true for a fetch that errored, and
+   * `isRefetchError` — which the gate tested — is `isError && hasData`, so with nothing cached it
+   * was false and the screen was declared fresh. The history request is independent and succeeds,
+   * so it rendered: a null summary makes `onHold` and `ended` both false, which is the permissive
+   * reading of "I do not know". The composer, End and date planning were live on a thread the
+   * server may have closed or put on hold, Block was hidden for want of a subject id, and Report
+   * would have opened with no subject on it — on the screen somebody uses to get away from
+   * somebody. Nothing here renders the summary's error either, so it looked loaded.
+   */
+  mockGet.mockImplementation(
+    routeGet({
+      "/conversations/conv_1/messages": { items: [], next_cursor: null, has_more: false },
+      "/conversations/conv_1": apiFailure("We could not load this conversation."),
+    }),
+  );
+  const s = await renderScreen(<Conversation />);
+
+  // What a member sees instead: the server's own sentence, and a way to try again.
+  expect(s.hasText("We could not load this conversation.")).toBe(true);
+  expect(s.hasText("Try again")).toBe(true);
+  // And none of the controls that depend on the summary. Report is the sharpest of these: it was
+  // reachable, and would have reached a reviewer with nobody named on it.
+  for (const label of ["Report", "Block", "End", "Plan a date", "Send"]) {
+    await expect(s.press(label)).rejects.toThrow(/nothing pressable/);
+  }
+  expect(mockPush).not.toHaveBeenCalled();
 });
 
 test("blocking from the conversation sends POST /blocks and leaves the thread", async () => {

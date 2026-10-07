@@ -205,6 +205,11 @@ export function StatusBanner({ tone = "context", title, body }: { tone?: "contex
  * said why and there was no way out. Waiting and having failed are different states, and only one
  * of them resolves on its own.
  *
+ * `isError`, not `isRefetchError`: the latter is `isError && hasData`, so a *first* load that
+ * failed — nothing cached, which is the commonest failure of all, a cold open with no network —
+ * fell through to the spinner and stayed there with no error and no retry. Still false while the
+ * retry is in flight, so the spinner comes back for as long as it is working.
+ *
  * The retry is unconditional here, unlike `ErrorState`'s, which appears only for an error the API
  * marked retryable. While this gate is shut the member has no other way forward, so the button has
  * to be there whatever the error says about itself.
@@ -214,9 +219,9 @@ export function AwaitingServer({
   query,
 }: {
   label: string;
-  query: { isRefetchError: boolean; isFetching: boolean; error: unknown; refetch: () => unknown };
+  query: { isError: boolean; isFetching: boolean; error: unknown; refetch: () => unknown };
 }) {
-  if (!query.isRefetchError || query.isFetching) return <Loading label={label} />;
+  if (!query.isError || query.isFetching) return <Loading label={label} />;
   return (
     <View>
       <ErrorState error={(query.error as ApiError) ?? null} />
