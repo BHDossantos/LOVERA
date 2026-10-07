@@ -3,8 +3,21 @@
 Audited against the code on `main`, not from memory. Every claim below names the file or
 endpoint it came from, so you can check any line of it.
 
-**Verdict: not ready.** Two things stop the product working at all in production, and the
-mobile app reaches 45 of the 92 member-facing API endpoints the web app reaches 83 of.
+**Verdict: not ready**, and the reasons are now entirely in section A. Three things stop the
+product working at all in production and every one of them needs an account or a decision
+only you can supply. The mobile app reaches 78 of the 92 member-facing API endpoints; the web
+app reaches 82.
+
+Section B was the mobile feature gap. Most of it is closed; what is left is listed with the
+reason it is still open, and section B4 separates what is deferred by a decision you have not
+made yet from what is simply unfinished.
+
+Run the numbers yourself rather than trusting this line:
+
+```
+cd apps/api && python -c "import json; from app.main import app; json.dump(app.openapi(), open('openapi.json','w'))"
+python ../../tools/endpoint_coverage.py openapi.json ../../apps/web/src ../../apps/mobile
+```
 
 ---
 
@@ -56,78 +69,64 @@ No origin means no mobile build — the build guards refuse a placeholder, by de
 
 ---
 
-## B. The mobile app is missing features the web app has
+## B. The mobile app, against the web app
 
-Measured by comparing `@router` declarations in `apps/api/app/modules/*/router.py`
-against every path literal in `apps/web/src` and `apps/mobile`:
+Counted by `tools/endpoint_coverage.py`, which reads the generated schema and every call site
+in both apps:
 
 | | member endpoints reached |
 |---|---|
-| Web | 83 / 92 |
-| Mobile | 45 / 92 |
+| Web | 82 / 92 |
+| Mobile | 78 / 92 |
 
-### B1. Getting to an actual date — the point of the product
+Closed since the first audit: date proposal, response, cancellation, overlaps and venues; the
+safety check-in; AI drafts and translation; the notifications inbox; conversation close;
+profile editing and photo removal; preferences and blueprint editing; consent withdrawal;
+account review and appeals; export download; unblock; the second-date reveal; introduction
+extension; case evidence; the introduction correction; and `explanation-viewed`.
 
-Missing: `POST /date-plans/{id}/proposals`, `/respond`, `/cancel`, `GET /overlaps`,
-`GET /venues`. Mobile can *view* a date and confirm one, but cannot propose one. The
-dates screen's own empty state promises otherwise:
+### B1. Readiness cannot be turned back on — and Today tells members to do it
 
-> "Once a conversation is ready, either of you can propose a public venue and a window."
-> — `apps/mobile/app/(app)/dates/index.tsx:37`
+`PATCH /me` is never called from mobile. `app/(app)/you/index.tsx:100` *shows* `date_ready` as
+a badge with no control beside it, and Today emits a task that sends members to a screen that
+cannot act on it:
 
-### B2. Date safety check-in
+```
+# apps/api/app/modules/today/router.py
+"title": "You're marked as not ready to date", "path": "/you/profile", "cta": "Update readiness"
+```
 
-Missing: `POST /date-plans/{id}/check-in`, `/check-in/now`. This is the "are you safe"
-flow for someone meeting a stranger. Of everything on this list it is the one I would
-least want absent from a dating app at launch.
+Pause and resume are a different thing (`POST /me/pause`, `/me/resume`) and both work. Locale
+and timezone are also only settable through `PATCH /me`, so neither can be changed either.
 
-### B3. The AI features the product is named after
+### B2. Blocking somebody without reporting them
 
-Missing: `POST /conversations/{id}/ai-drafts`, `/translations`. Present on web.
+`POST /blocks` is not called from either app. Blocking exists inside the report flow
+(`block_now`, default on), which is what satisfies Apple's guideline 1.2, and unblocking works
+from `/safety` and `/safety/blocks`. But a member who wants to cut contact without filing a
+report has to file one.
 
-### B4. Membership — and nothing to buy with
+### B3. Smaller, and real
 
-Missing: `GET /plans`, `GET /subscriptions/current`, `POST /subscriptions/checkout`,
-`POST /subscriptions/cancel`. There is also no in-app purchase code anywhere in the repo.
+- `DELETE /preferences/{key}` — a preference can be set and changed but not cleared back to unset. Not called from either app.
+- `POST /safety/cases/{report_id}/appeal` — the spec's "appeal the action attached to this case" path. Mobile appeals through `/account/review/{action_id}/appeal`, which covers the same ground, so this is a redundancy rather than a gap.
+- `GET /blueprint/sessions/{session_id}` — the interview's own POST responses already carry the session state, so nothing needs it.
+- `GET /media/{media_id}` — media arrive as URLs in their parent payloads.
 
-Two separate pieces of work: the screens, and StoreKit/Play Billing. Apple requires IAP
-for digital subscriptions (guideline 3.1.1) — a web checkout link inside the app is a
-rejection. As it stands the app sells nothing, which is *compliant* but means the paid
-intro caps (`weekly_intro_cap_paid`) are unreachable on mobile.
+### B4. Deferred by decision, not unfinished
 
-### B5. Profile editing after onboarding
-
-`ProfileEditor` is used in exactly one place — `app/onboarding/profile.tsx`. Once a member
-is active they cannot change their photos, bio or prompts from the app, and
-`DELETE /profile/media/{id}` is never called, so a photo cannot be removed. Basic
-expectation of any dating app.
-
-### B6. Preferences and blueprint
-
-Missing: `GET/PATCH/DELETE /preferences`, `POST /preferences/impact-preview`,
-`GET /blueprint/current`, `POST /blueprint/signals/{key}`. A member cannot adjust what
-they are matched on after onboarding.
-
-### B7. Consent cannot be withdrawn — a compliance gap, not just a feature gap
-
-Missing: `PUT /consents/{purpose}`. Mobile onboarding collects special-category consent
-(sexual orientation, and optionally faith) and offers no way to withdraw it. GDPR Art.
-7(3) requires withdrawal to be as easy as giving it.
-
-### B8. Smaller but real
-
-- `GET /notifications`, `POST /notifications/read` — push tokens are registered, but there is no in-app notifications list.
-- `POST /conversations/{id}/close` — a conversation cannot be ended from the app.
-- `DELETE /blocks/{member_id}` — blocks are listed with no action, so nobody can be unblocked. Blocking itself only exists *inside* the report flow (`block_now`, default on), so Apple's guideline 1.2 block requirement is met; standalone `POST /blocks` is not reachable.
-- `GET /account/review` + `/appeal` — a restricted member cannot appeal from the app.
-- `GET /me/export/{request_id}` — an export can be requested but not downloaded.
-- `GET /introductions/waiting`, `POST /{id}/extend`, `/correction`, `/explanation-viewed`.
+- **Membership**: `GET /plans`, `GET /subscriptions/current`, `POST /subscriptions/checkout`, `/cancel`. Apple requires in-app purchase for digital subscriptions (guideline 3.1.1), so a web checkout link inside the app is a rejection, and there is no StoreKit or Play Billing code in the repo. Until you decide whether to charge on mobile at launch, the app sells nothing — compliant, but the paid intro caps (`weekly_intro_cap_paid`) are unreachable from it.
+- **`GET /realtime/token`**: mobile polls every 8s instead of holding a WebSocket. Works, slower, heavier on battery.
+- **Voice and video**: `POST /conversations/{id}/voice-sessions`, `/video-tokens`. The API returns pilot stubs, so there is nothing to show yet.
+- **`POST /calendar/connect`**: not reached by either app.
 
 ---
 
 ## C. Quality gaps
 
-- **No mobile tests.** The API has 45 passing tests and the web app has Playwright e2e. `apps/mobile` has none: CI typechecks it and bundles it, which proves it compiles, not that any screen works.
+- **Mobile test coverage is thin but no longer absent.** 44 tests over the screens where a wrong assumption about a payload is invisible until a member hits it. The API has 48 and the web app has Playwright e2e.
+- **The whole class of bug these guards exist for was real.** `get<T>()` is an unchecked assertion, and client paths are strings on one side and file names on the other, so three guards now run in CI: `tools/check_api_contract.py` (every call hits a route that accepts it), `apps/mobile/scripts/check-routes.js` (every navigation target *and* every path the API hands the app resolves to a screen), and `apps/mobile/scripts/check-native-config.py`. Each was written after a bug it would have caught shipped.
+- **A failing e2e run is currently diagnosed blind.** CI logs live on blob storage the API client will not follow, the check-run output comes back empty, and the Playwright artifact is unreachable. Emitting failures as `::error::` workflow annotations would fix this, because annotations *are* reachable.
 - **Messages poll instead of streaming.** Mobile refetches every 8s (`messages/[conversationId].tsx:42`); web uses `GET /realtime/token` and a WebSocket. Functional, slower, heavier on battery.
 - **No over-the-air updates.** `expo-updates` is not installed, so every fix after launch is a full store review.
 - **Legal pages carry 21 `TODO` markers** across terms (8), privacy (11) and community (2), and have had no legal review.
@@ -137,10 +136,11 @@ Missing: `PUT /consents/{purpose}`. Mobile onboarding collects special-category 
 
 ## D. What is done, and solid
 
-- **Backend**: 92 member endpoints, 45 tests green. Schema creation race fixed with a Postgres advisory lock. Email transport with a production boot guard. Sandbox payment and verification endpoints correctly 404 in production.
+- **Backend**: 92 member endpoints, 48 tests green. Schema creation race fixed with a Postgres advisory lock. Email transport with a production boot guard. Sandbox payment and verification endpoints correctly 404 in production.
 - **Web app**: complete — 60 routes, Playwright e2e, legal pages.
-- **Mobile**: onboarding end to end, Today, introductions with explanation and decision, messaging, dates view and confirm, safety report with block, data export, pause, delete, push registration.
+- **Mobile**: 42 screens and 78 of 92 member endpoints. Onboarding end to end; Today; introductions with explanation, correction, extension and private decision; the mutual screen; messaging with AI drafts and translation; date proposal, response, venues, confirmation, check-in, feedback and the second-date reveal; the safety centre with report, evidence, case tracking, blocks and unblock; account review and appeals; profile, preferences and blueprint editing; consent withdrawal; export, pause and delete; notifications inbox; push registration.
 - **Build pipeline**: native config generated and asserted (20 checks), placeholder API origins and missing EAS project ids refused before a build starts, EAS build workflow.
+- **Guards that would have caught what shipped**: the API contract check, the route check (including every path the API hands a client), and the native config check, all in CI. Each was verified by breaking the thing it checks and confirming it fails.
 
 ---
 
@@ -148,11 +148,9 @@ Missing: `PUT /consents/{purpose}`. Mobile onboarding collects special-category 
 
 1. A real identity vendor, or an explicit decision to run manual review for the pilot. Nothing else matters while nobody can finish signing up.
 2. SMTP provider plus SPF/DKIM/DMARC. Deploy the API.
-3. Mobile: date proposal and response, then date check-in. This is the product's purpose and its most important safety feature.
-4. Mobile: profile editing, preferences, consent withdrawal, unblock. The first is expected, the last two are compliance.
-5. Mobile: AI drafts and translation, notifications inbox, conversation close.
-6. Mobile tests covering the journeys that now have none.
-7. IAP, if you intend to charge on mobile at launch. Otherwise ship free and add it later — but then the paid tiers do not exist on mobile.
-8. Legal review of the three documents, and store screenshots.
+3. Mobile: the readiness toggle (B1), standalone block (B2), clearing a preference (B3). Small, and the first one is a task Today actively asks members to do.
+4. IAP, if you intend to charge on mobile at launch. Otherwise ship free and add it later — but then the paid tiers do not exist on mobile.
+5. Legal review of the three documents, and store screenshots.
+6. Make e2e failures readable through the API (`::error::` annotations), so a red run can be diagnosed without guessing.
 
-Items 1, 2, 7 and 8 need decisions or accounts only you can supply. The rest is code.
+Items 1, 2, 4 and 5 need decisions or accounts only you can supply. 3 and 6 are code.
