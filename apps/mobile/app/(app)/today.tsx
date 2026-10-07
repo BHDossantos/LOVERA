@@ -51,6 +51,14 @@ export default function TodayScreen() {
         lede="One task at a time, ranked by what moves you toward a real date. Less time in the app is fine."
       />
       <ErrorState error={(q.error as ApiError) ?? null} retry={() => q.refetch()} />
+
+      {/* The count was already in this payload and had nowhere to go: the app registered push
+          tokens but had no inbox, so a notification swiped off the lock screen was gone. */}
+      <Button variant="secondary" onPress={() => router.push("/notifications" as never)}>
+        {q.data?.unread_notifications
+          ? `Notifications (${q.data.unread_notifications} new)`
+          : "Notifications"}
+      </Button>
       {q.isLoading && <Loading label="Loading today" />}
       {!!q.data && (
         <>
