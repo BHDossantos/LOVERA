@@ -42,6 +42,15 @@ jobs:
         env:
           MM_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/matchmaker_test
           MM_ENV: test
+      # The accepted media types are declared twice — the allow-list `decode_data_url` enforces,
+      # and the `accept` on the input that chooses the file — and they have now disagreed in both
+      # directions. A member whose file the picker hides thinks the product cannot take it; a
+      # member whose file the server refuses is told so only after choosing it.
+      - name: Every upload picker offers exactly what the API accepts
+        run: python ../../tools/check_upload_types.py ../../apps/web/src
+        env:
+          MM_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/matchmaker_test
+          MM_ENV: test
   web:
     runs-on: ubuntu-latest
     defaults:

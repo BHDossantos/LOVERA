@@ -198,7 +198,16 @@ function toDataUrl(file: File) {
   });
 }
 
-/** Exactly what `POST /safety/reports/{id}/evidence` accepts; keep in step with app/core/datauri.py. */
+/**
+ * Exactly what `POST /safety/reports/{id}/evidence` accepts — `IMAGE_TYPES + VIDEO_TYPES +
+ * AUDIO_TYPES + DOCUMENT_TYPES` in app/core/datauri.py, which `tools/check_upload_types.py`
+ * compares this list against in CI.
+ *
+ * It is enumerated rather than `image/*,video/*,audio/*` because the server refuses SVG and
+ * text/html deliberately: both are markup that renders in a reviewer's session. The first
+ * version of this list left out `audio/webm` and `audio/x-m4a` — a browser recording and an
+ * iPhone voice memo — so a reporter holding a recording of the call could not attach it.
+ */
 const EVIDENCE_ACCEPT = [
   "image/png",
   "image/jpeg",
@@ -209,11 +218,16 @@ const EVIDENCE_ACCEPT = [
   "video/mp4",
   "video/quicktime",
   "video/webm",
+  "video/x-matroska",
+  "video/3gpp",
+  "video/mpeg",
   "audio/mpeg",
   "audio/mp4",
   "audio/aac",
   "audio/ogg",
+  "audio/webm",
   "audio/wav",
+  "audio/x-m4a",
   "application/pdf",
   "text/plain",
 ].join(",");
