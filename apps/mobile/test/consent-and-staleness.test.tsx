@@ -1,3 +1,5 @@
+import { act } from "react-test-renderer";
+import { AppState } from "react-native";
 import { apiFailure, refocus, renderScreen, routeGet } from "./render";
 
 /**
@@ -126,4 +128,39 @@ test("coming back to a tab refetches, because the screen was never unmounted", a
   expect(mockGet.mock.calls.length).toBeGreaterThan(callsBefore);
   expect(s.hasText("Chiara")).toBe(true);
   expect(s.hasText("Bruno")).toBe(false);
+});
+
+
+test("coming back to the app refetches, because focus never changed", async () => {
+  /**
+   * Navigation focus does not fire when the app itself comes back. A member who backgrounds the app
+   * on a server-driven tab and returns to that same tab never loses or regains focus, so the clock
+   * and the data stayed where they were — indefinitely for Introductions, which has nothing else
+   * that refetches it. Returning via a notification is the commonest way back, which makes it the
+   * case this policy exists for rather than an edge of it.
+   */
+  const listeners: ((state: string) => void)[] = [];
+  const spy = jest
+    .spyOn(AppState, "addEventListener")
+    .mockImplementation(((_type: string, cb: (state: string) => void) => {
+      listeners.push(cb);
+      return { remove: () => undefined };
+    }) as never);
+  try {
+    mockGet.mockImplementation(routeGet({ "/conversations": { items: [CONV_BEFORE] } }));
+    const s = await renderScreen(<Messages />);
+    expect(s.hasText("Bruno")).toBe(true);
+    expect(listeners.length).toBeGreaterThan(0);
+
+    mockGet.mockImplementation(routeGet({ "/conversations": { items: [CONV_AFTER] } }));
+    await act(async () => {
+      for (const cb of listeners) cb("active");
+    });
+    await s.settle();
+
+    expect(s.hasText("Chiara")).toBe(true);
+    expect(s.hasText("Bruno")).toBe(false);
+  } finally {
+    spy.mockRestore();
+  }
 });

@@ -1,4 +1,5 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AppState } from "react-native";
 import { useFocusEffect } from "expo-router";
 
 /**
@@ -87,10 +88,15 @@ export function freshSince(q: { dataUpdatedAt: number }, mountedAt: number) {
  */
 export function useAwaitingServer(q: { dataUpdatedAt: number; refetch: () => unknown }) {
   const [openedAt, setOpenedAt] = useState(() => Date.now());
-  // Held in a ref so the focus callback can stay identity-stable: react-query's `refetch` is bound
-  // per observer, and a dependency on it would re-run the effect rather than only re-run on focus.
+  // Held in a ref so the callbacks can stay identity-stable: react-query's `refetch` is bound
+  // per observer, and a dependency on it would re-run the effects rather than only re-run on arrival.
   const refetch = useRef(q.refetch);
   refetch.current = q.refetch;
+  const reopen = useCallback(() => {
+    setOpenedAt(Date.now());
+    void refetch.current();
+  }, []);
+
   const mounting = useRef(true);
   useFocusEffect(
     useCallback(() => {
@@ -98,9 +104,21 @@ export function useAwaitingServer(q: { dataUpdatedAt: number; refetch: () => unk
         mounting.current = false;
         return;
       }
-      setOpenedAt(Date.now());
-      void refetch.current();
-    }, []),
+      reopen();
+    }, [reopen]),
   );
+
+  // Coming back to the app is arriving at the screen too, and navigation focus does not fire for it:
+  // a member who backgrounds the app on Introductions and returns to that same tab never loses or
+  // regains focus, so without this the clock and the data stayed where they were — indefinitely for
+  // Introductions, which has nothing else that refetches it. A notification is the commonest way to
+  // return, which makes it exactly the case this policy exists for.
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") reopen();
+    });
+    return () => sub.remove();
+  }, [reopen]);
+
   return !freshSince(q, openedAt);
 }
