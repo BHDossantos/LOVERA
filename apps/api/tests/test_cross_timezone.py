@@ -135,6 +135,47 @@ def _mutual_conversation(client) -> tuple[Actor, Actor, str]:
     return a, b, conv_id
 
 
+def _next_weekday(from_date: date, weekday: int) -> date:
+    ahead = (weekday - from_date.weekday()) % 7 or 7
+    return from_date + timedelta(days=ahead)
+
+
+def test_a_slot_spanning_midnight_respects_an_exception_on_either_day(client):
+    """The regression the merge introduced: a slot can now cross midnight, so one date is not enough.
+
+    Contiguous windows either side of midnight are merged into the stretch they are, which is right —
+    but the planner checked dated exceptions only against the date the slot *starts* on. A member who
+    had marked the Saturday unavailable would have been offered a Friday-into-Saturday evening.
+    """
+    a, b, conv_id = _mutual_conversation(client)
+    overnight = [{"weekday": 4, "start": "22:00", "end": "24:00"}, {"weekday": 5, "start": "00:00", "end": "02:00"}]
+    for who in (a, b):
+        r = who.put("/availability", json={"recurring_windows": overnight, "date_styles": ["drinks"], "timezone": "Europe/Rome"})
+        assert r.status_code in (200, 201), r.text
+
+    plan_id = a.post("/date-plans", json={"conversation_id": conv_id}).json()["id"]
+    offers = a.get(f"/date-plans/{plan_id}/overlaps").json()["items"]
+    spanning = [o for o in offers if o["start"] >= "22:00"]
+    assert spanning, "the overnight stretch has to be offered before its absence means anything"
+
+    # Now B is away on the Saturday that the first such slot runs into.
+    first = datetime.fromisoformat(spanning[0]["starts_at"].replace("Z", "+00:00"))
+    saturday = (first.astimezone(ZoneInfo("Europe/Rome")) + timedelta(days=1)).date().isoformat()
+    r = b.put(
+        "/availability",
+        json={"recurring_windows": overnight, "date_styles": ["drinks"], "timezone": "Europe/Rome", "dated_exceptions": [{"date": saturday, "available": False}]},
+    )
+    assert r.status_code in (200, 201), r.text
+
+    offers = a.get(f"/date-plans/{plan_id}/overlaps").json()["items"]
+    for offer in offers:
+        touched = {
+            (datetime.fromisoformat(offer["starts_at"].replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/Rome"))).date().isoformat(),
+            (datetime.fromisoformat(offer["ends_at"].replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/Rome")) - timedelta(microseconds=1)).date().isoformat(),
+        }
+        assert saturday not in touched, f"{offer['starts_at']}–{offer['ends_at']} runs into a day B said they are away"
+
+
 def test_the_planner_offers_only_slots_inside_both_members_own_evenings(client):
     """The endpoint, not the arithmetic: one member moves to Lisbon and the offers stay honest."""
     a, b, conv_id = _mutual_conversation(client)

@@ -33,6 +33,23 @@ def _availability(db: Session, member_id: str) -> AvailabilityVersion | None:
     return db.execute(select(AvailabilityVersion).where(AvailabilityVersion.member_id == member_id).order_by(AvailabilityVersion.created_at.desc())).scalars().first()
 
 
+def _dates_touched(start: datetime, end: datetime, zone: ZoneInfo) -> list[str]:
+    """The local calendar dates a slot actually occupies, in `zone`.
+
+    The end is pulled back by a microsecond so a slot finishing exactly at midnight does not count
+    the day it never reaches — otherwise an evening ending at 00:00 would be refused by somebody who
+    is away the following day, which is not what they said.
+    """
+    first = start.astimezone(zone).date()
+    last = (end - timedelta(microseconds=1)).astimezone(zone).date()
+    out: list[str] = []
+    day = first
+    while day <= last:
+        out.append(day.isoformat())
+        day += timedelta(days=1)
+    return out
+
+
 def _timezone_of(db: Session, member_id: str) -> str:
     member = db.get(Member, member_id)
     return (member.timezone if member else None) or get_settings().market_timezone
@@ -83,9 +100,13 @@ def overlaps(db: Session, a_id: str, b_id: str, tz: str, horizon_days: int = 14)
         local, local_end = starts_at.astimezone(zone), ends_at.astimezone(zone)
         if not (earliest <= local.date() <= latest):
             continue
-        if starts_at.astimezone(a_zone).date().isoformat() in away_a:
+        # Every local date the slot touches, for each member, not just the one it starts on. A slot
+        # can now span midnight — contiguous windows either side of it are merged into the stretch
+        # they are — so checking only `starts_at` would offer a Friday-into-Saturday evening to
+        # somebody who has marked that Saturday unavailable.
+        if any(d in away_a for d in _dates_touched(starts_at, ends_at, a_zone)):
             continue
-        if starts_at.astimezone(b_zone).date().isoformat() in away_b:
+        if any(d in away_b for d in _dates_touched(starts_at, ends_at, b_zone)):
             continue
         out.append(
             {
