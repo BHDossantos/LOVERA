@@ -80,6 +80,36 @@ def test_a_window_that_crosses_the_week_once_converted_is_counted_once():
     assert labels == [{"weekday": 0, "start": "02:00", "end": "04:00"}]
 
 
+def test_an_overlap_that_straddles_the_week_boundary_is_not_thrown_away_in_halves():
+    """Far enough east, an ordinary afternoon is two pieces of the UTC week.
+
+    Kiritimati is UTC+14, so Monday 13:00–15:00 there is 23:00 Sunday to 01:00 Monday in UTC. Both
+    pieces are an hour long, and discarding each for being under the ninety-minute minimum before
+    recombining them threw away a real two-hour overlap — costing the pair practical score they had
+    earned. The minimum belongs after the merge, and the week is a circle.
+    """
+    afternoon = [{"weekday": 0, "start": "13:00", "end": "15:00"}]
+    total, labels = weekly_overlaps(afternoon, "Pacific/Kiritimati", afternoon, "Pacific/Kiritimati", AT)
+    assert total == 120
+    assert labels == [{"weekday": 0, "start": "13:00", "end": "15:00"}], "and it reads as the afternoon it is"
+
+
+def test_an_evening_running_into_the_small_hours_is_one_stretch_not_two_short_ones():
+    """A window cannot cross midnight, so such an evening is stored as two windows.
+
+    The planner had the same fault as the scorer: it applied the minimum to each pairwise
+    intersection, so two contiguous hours either side of midnight were dropped as two one-hour
+    pieces rather than offered as the two-hour slot they are.
+    """
+    evening = [{"weekday": 4, "start": "23:00", "end": "24:00"}, {"weekday": 5, "start": "00:00", "end": "01:00"}]
+    days = [FRIDAY, FRIDAY + timedelta(days=1)]
+    both = intersect(day_intervals(evening, "UTC", days), day_intervals(evening, "UTC", days))
+    assert len(both) == 1
+    start, end = both[0]
+    assert end - start == timedelta(hours=2)
+    assert start.hour == 23 and start.date() == FRIDAY
+
+
 def _mutual_conversation(client) -> tuple[Actor, Actor, str]:
     """Two members through onboarding, matched, both accepting: the state a date needs."""
     a = Actor(client, unique_email("tz-a"))

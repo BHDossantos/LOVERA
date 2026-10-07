@@ -72,19 +72,24 @@ def day_intervals(windows: list[dict[str, Any]], tz: str, days: list[date]) -> l
 def intersect(a: list[Interval], b: list[Interval], minimum_minutes: int = 90) -> list[Interval]:
     """The intervals both sides are free for, long enough to be worth offering, merged and sorted.
 
-    Merging matters: a window that wraps midnight in one zone arrives as two intervals, and summing
-    the pairwise intersections of those would count the same minutes twice.
+    Merging comes *before* the minimum, not after. A window cannot cross midnight, so an evening that
+    runs into the small hours is stored as two windows — and in another zone an ordinary evening
+    becomes two. Applying the minimum to each piece first discards a genuine two-hour overlap that
+    happens to arrive as two contiguous hours. Merging also stops the same minutes being counted
+    twice when a window arrives split.
     """
     found: list[Interval] = []
     for a_start, a_end in a:
         for b_start, b_end in b:
             start, end = max(a_start, b_start), min(a_end, b_end)
-            if (end - start) >= timedelta(minutes=minimum_minutes):
+            if end > start:
                 found.append((start, end))
-    return merge(found)
+    return [(start, end) for start, end in merge(found) if (end - start) >= timedelta(minutes=minimum_minutes)]
 
 
 def merge(intervals: list[Interval]) -> list[Interval]:
+    """Touching or overlapping intervals joined into one. Contiguous counts as joined: two windows
+    either side of midnight are one stretch of an evening, not two."""
     out: list[Interval] = []
     for start, end in sorted(intervals):
         if out and start <= out[-1][1]:
@@ -139,14 +144,28 @@ def weekly_overlaps(
     for a_start, a_end in a_week:
         for b_start, b_end in b_week:
             start, end = max(a_start, b_start), min(a_end, b_end)
-            if end - start >= minimum_minutes:
+            if end > start:
                 found.append((start, end))
+
     merged: list[tuple[int, int]] = []
     for start, end in sorted(found):
         if merged and start <= merged[-1][1]:
             merged[-1] = (merged[-1][0], max(merged[-1][1], end))
         else:
             merged.append((start, end))
+
+    # The week is a circle, so a piece ending at Monday 00:00 UTC and one starting there are the same
+    # stretch. Far enough east, an ordinary Monday afternoon is split that way — Kiritimati is
+    # UTC+14, so 13:00–15:00 Monday is 23:00 Sunday to 01:00 Monday in UTC — and applying the minimum
+    # to each half discarded a real two-hour overlap as two one-hour ones. The join carries an end
+    # past the week's length to mark the wrap; the label below reads it modulo the day.
+    if len(merged) > 1 and merged[0][0] == 0 and merged[-1][1] == WEEK_MINUTES:
+        first_start, first_end = merged.pop(0)
+        last_start, _ = merged.pop()
+        merged.append((last_start, WEEK_MINUTES + first_end))
+        merged.sort()
+
+    merged = [(start, end) for start, end in merged if end - start >= minimum_minutes]
 
     offset = int((ZoneInfo(label_tz or a_tz).utcoffset(at) or timedelta()).total_seconds() // 60)
     labelled = []
