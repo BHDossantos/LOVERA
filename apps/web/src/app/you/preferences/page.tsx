@@ -77,7 +77,14 @@ export default function PreferencesPage() {
     setError(null);
     try {
       await del(`/preferences/${key}`);
-      await qc.invalidateQueries({ queryKey: ["preferences"] });
+      // `/blueprint/current` embeds the preference list (`current_payload` in
+      // blueprint/service.py), so a preference write has to refresh that query too — otherwise a
+      // Blueprint screen left mounted behind this one keeps showing the criterion that was just
+      // changed or deleted. The web save already did this; nothing else did.
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["preferences"] }),
+        qc.invalidateQueries({ queryKey: ["blueprint"] }),
+      ]);
       setEditing(null);
       setImpact(null);
     } catch (e) {

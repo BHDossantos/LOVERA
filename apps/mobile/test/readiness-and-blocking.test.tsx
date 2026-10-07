@@ -300,3 +300,25 @@ test("an inactive eligibility criterion offers no delete, because the API refuse
   expect(s.joined()).toContain("Age range");
   expect(s.texts()).not.toContain("Delete this preference");
 });
+
+test("a preference write refreshes the Blueprint, which embeds the same list", async () => {
+  // `/blueprint/current` carries the preference list (`current_payload`), so a Blueprint screen
+  // left mounted behind this one went on showing a criterion that had just been deleted or
+  // retiered. Invalidating only `["preferences"]` reached the list the member was looking at and
+  // not the copy on the screen they would go back to.
+  const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+  mockGet.mockImplementation(routeGet({ "/preferences": PREFS }));
+  const s = await renderScreen(<Preferences />);
+  // Only the Blueprint: this screen observes `["preferences"]`, so seeding that one would replace
+  // the data it is rendering from.
+  s.client.setQueryDefaults(["blueprint"], { gcTime: Infinity });
+  s.client.setQueryData(["blueprint"], { signals: [], preferences: [{ key: "smoking" }] });
+
+  await s.press("Change", 0);
+  await s.press("Stop using this preference");
+  (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Stop using it")?.onPress?.();
+  await s.settle();
+
+  expect(mockDel).toHaveBeenCalledWith("/preferences/smoking");
+  expect(s.client.getQueryState(["blueprint"])?.isInvalidated).toBe(true);
+});
