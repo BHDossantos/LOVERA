@@ -23,9 +23,14 @@ import re
 
 from app.core.errors import ApiError
 
-IMAGE_TYPES = ("image/png", "image/jpeg", "image/webp", "image/gif")
+IMAGE_TYPES = ("image/png", "image/jpeg", "image/webp", "image/gif", "image/heic", "image/heif")
 AUDIO_TYPES = ("audio/mpeg", "audio/mp4", "audio/aac", "audio/ogg", "audio/webm", "audio/wav", "audio/x-m4a")
-DOCUMENT_TYPES = ("application/pdf",)
+VIDEO_TYPES = ("video/mp4", "video/quicktime", "video/webm", "video/x-matroska", "video/3gpp", "video/mpeg")
+# `text/plain` only, never `text/html`: a reviewer is shown this as text, and the difference between
+# those two types is the difference between evidence and markup running in their session. The same
+# reasoning keeps `image/svg+xml` out of IMAGE_TYPES — an SVG is markup that an `<img>` will render —
+# which is why these are enumerated rather than matched as `image/*`.
+DOCUMENT_TYPES = ("application/pdf", "text/plain")
 
 # What a file of each type begins with. An allow-listed media type is not enough on its own: a
 # document whose bytes are HTML, served to a reviewer as `image/png`, is a different kind of
@@ -37,6 +42,8 @@ SIGNATURES: dict[str, tuple[bytes, ...]] = {
     "image/jpeg": (b"\xff\xd8\xff",),
     "image/gif": (b"GIF87a", b"GIF89a"),
     "application/pdf": (b"%PDF-",),
+    "video/webm": (b"\x1aE\xdf\xa3",),
+    "video/x-matroska": (b"\x1aE\xdf\xa3",),
 }
 
 HEADER = re.compile(r"^data:([a-zA-Z0-9][a-zA-Z0-9!#$&^_.+-]*/[a-zA-Z0-9][a-zA-Z0-9!#$&^_.+-]*)((?:;[^,;]*)*);base64,(.*)$", re.S)
@@ -46,8 +53,9 @@ def decode_data_url(data_url: str, declared_content_type: str, allowed: tuple[st
     """The bytes a data URL carries, or a validation error naming what is wrong with it.
 
     `allowed` is the caller's list, because the answer differs: a profile photo is an image or a
-    voice note, a piece of safety evidence is an image or a PDF. Neither is ever a URL somebody
-    else's browser has to go and fetch.
+    voice note, while safety evidence is whatever the member had to hand — a screenshot, a photo, a
+    recording of a call, a PDF, a saved chat log. Neither is ever a URL somebody else's browser has
+    to go and fetch, which is the whole of what this refuses.
     """
 
     def refuse(message: str) -> ApiError:
@@ -80,4 +88,10 @@ def decode_data_url(data_url: str, declared_content_type: str, allowed: tuple[st
         raise refuse(f"That file does not look like {media_type} inside. Send the original file rather than a renamed one.")
     if media_type == "image/webp" and not (raw[:4] == b"RIFF" and raw[8:12] == b"WEBP"):
         raise refuse("That file does not look like image/webp inside. Send the original file rather than a renamed one.")
+    # MP4, QuickTime and HEIC are all ISO base media files: a four-byte size, then `ftyp`. Checked
+    # here rather than in SIGNATURES because the marker is at an offset, not the start. HEIC is in
+    # the list because it is what an iPhone photo is before anything re-encodes it, and a member
+    # attaching one from a browser should not be told their own camera's format is not a file.
+    if media_type in ("video/mp4", "video/quicktime", "image/heic", "image/heif") and raw[4:8] != b"ftyp":
+        raise refuse(f"That file does not look like {media_type} inside. Send the original file rather than a renamed one.")
     return raw

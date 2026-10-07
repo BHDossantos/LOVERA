@@ -41,6 +41,19 @@ const ACTION_TYPES = [
 ];
 const REASON_CODES = ["harassment", "scam_or_fraud", "impersonation", "threats", "hate_or_discrimination", "coercion", "stalking", "misleading_profile", "no_show", "no_violation", "other"];
 
+
+/** The types this page can show in place; everything else is offered as a download. */
+const PREVIEWABLE = ["image/png", "image/jpeg", "image/webp", "image/gif", "video/", "audio/", "text/plain"];
+
+/** The text inside a `data:text/plain;base64,…` attachment, for the one type shown as text. */
+function decodeDataUrlText(dataUrl: string) {
+  try {
+    return atob(dataUrl.slice(dataUrl.indexOf(",") + 1));
+  } catch {
+    return "This attachment could not be decoded. Download it instead.";
+  }
+}
+
 /** Safety case detail. A declared purpose is required before anything loads; every open is audited. */
 function CaseInner({ caseId }: { caseId: string }) {
   const { me } = useAuth();
@@ -173,14 +186,29 @@ function CaseInner({ caseId }: { caseId: string }) {
                       {file && file.data_url.startsWith("data:") && (
                         <div className="mt-2">
                           {/* An attachment is whatever the reporter had to hand, so the type decides
-                              what can be shown. An image is rendered; anything else gets the
-                              download, because guessing wrong here means a reviewer concluding
-                              there is nothing to see. */}
-                          {file.content_type.startsWith("image/") ? (
+                              what can be shown. The reporter can attach a recording of a call or a
+                              saved chat log as well as a screenshot, and a reviewer who is shown
+                              "cannot be previewed" for a video concludes there is nothing to see —
+                              so each kind gets the control that plays or shows it, and anything
+                              left over gets the download rather than a guess.
+
+                              HEIC is the exception worth naming: browsers will not render it, so it
+                              falls through to the download deliberately. */}
+                          {file.content_type.startsWith("image/") && !["image/heic", "image/heif"].includes(file.content_type) && (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img src={file.data_url} alt={file.description ?? "Evidence attached by the reporter"} className="max-h-[32rem] w-auto rounded-[var(--radius-md)] border border-border" />
-                          ) : (
-                            <p className="text-sm text-ink-secondary">{file.content_type} cannot be previewed here. Download it below.</p>
+                          )}
+                          {file.content_type.startsWith("video/") && (
+                            <video src={file.data_url} controls className="max-h-[32rem] w-full rounded-[var(--radius-md)] border border-border" />
+                          )}
+                          {file.content_type.startsWith("audio/") && <audio src={file.data_url} controls className="w-full" />}
+                          {file.content_type === "text/plain" && (
+                            // Rendered as text, never as markup: React escapes the content, which is
+                            // the whole reason `text/html` is not an accepted type.
+                            <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-[var(--radius-md)] border border-border bg-surface-muted p-2 text-xs text-ink">{decodeDataUrlText(file.data_url)}</pre>
+                          )}
+                          {!PREVIEWABLE.some((prefix) => file.content_type.startsWith(prefix)) && (
+                            <p className="text-sm text-ink-secondary">{file.content_type} cannot be shown in the browser. Download it below.</p>
                           )}
                           <a href={file.data_url} download={`evidence-${file.id}`} className="mt-1 inline-flex min-h-11 items-center text-sm font-semibold text-action">
                             Download ({Math.max(1, Math.round(file.size_bytes / 1024))} KB)

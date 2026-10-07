@@ -43,6 +43,10 @@ def test_a_reviewer_can_open_the_evidence_a_reporter_attached(client):
     assert case.status_code == 200, case.text
     listed = next(e for e in case.json()["evidence"] if e["id"] == evidence_id)
     before = listed["access_count"]
+    # Opening the case lists the attachment; it does not open it. Counting both made one open read
+    # as two, against a single `admin.evidence_opened` event, so the number and the trail disagreed.
+    assert before == 0, "listing an attachment is not an access"
+    assert reviewer.get(f"/admin/safety/cases/{report_id}?purpose=case_review").json()["evidence"][0]["access_count"] == 0
 
     r = reviewer.get(f"/admin/safety/evidence/{evidence_id}?purpose=case_review")
     assert r.status_code == 200, r.text
@@ -115,6 +119,15 @@ def test_evidence_has_to_be_the_file_and_not_a_link_to_one(client):
     assert upload(data_url="data:image/png;base64,not base64 at all!").status_code == 422
     # And the real thing still goes through.
     assert upload(data_url=PNG).status_code == 201
+    # So does everything else the pickers offer. Narrowing the server behind the client meant a
+    # member attached a recording or a chat log, was told the report was filed, and the reviewer got
+    # nothing — the picker and this list are enumerated from each other for that reason.
+    assert upload(content_type="text/plain", data_url="data:text/plain;base64,aGUgc2FpZCBpdCB0d2ljZQ==").status_code == 201
+    assert upload(content_type="audio/mpeg", data_url="data:audio/mpeg;base64,SUQzAwAA").status_code == 201
+    assert upload(content_type="video/webm", data_url="data:video/webm;base64,GkXfowEAAAA=").status_code == 201
+    # But not markup dressed as an image, which is why neither side is a wildcard: `image/*` would
+    # admit SVG, and an `<img>` renders that.
+    assert upload(content_type="image/svg+xml", data_url="data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=").status_code == 422
 
 
 def test_profile_media_has_the_same_check(client):

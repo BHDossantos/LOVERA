@@ -381,8 +381,11 @@ def safety_case(report_id: str, principal: Principal = Depends(require_roles("sa
         raise ApiError("NOT_FOUND")
     audit(db, actor_type="staff", actor_id=principal.id, action="admin.case_opened", resource_type="safety_report", resource_id=r.id, purpose=purpose)
     evidence = db.execute(select(SafetyEvidence).where(SafetyEvidence.report_id == r.id)).scalars().all()
-    for e in evidence:
-        e.access_count += 1
+    # Not counted here. Listing an attachment's type and description is not opening it, and now that
+    # `GET /admin/safety/evidence/{id}` exists and counts the actual read, counting here as well made
+    # one open read as two — and read as two next to a single `admin.evidence_opened` audit event, so
+    # the number on the page and the trail behind it disagreed. The count means what it says: how
+    # many times somebody has looked at the file.
     notes = db.execute(select(CaseNote).where(CaseNote.report_id == r.id).order_by(CaseNote.created_at)).scalars().all()
     actions = db.execute(select(SafetyAction).where(SafetyAction.report_id == r.id)).scalars().all()
     context = []
