@@ -115,7 +115,7 @@ export default function DateDetail() {
               </Text>
             )}
             {(d.status === "confirmed" || !!d.check_in) && (
-              <Button variant="secondary" onPress={() => router.push(`/dates/${d.id}/check-in` as never)}>
+              <Button variant="secondary" onPress={() => router.push(`/dates/${d.id}/safety` as never)}>
                 {d.check_in ? "Check in, or change it" : "Set up a check-in"}
               </Button>
             )}
@@ -154,7 +154,7 @@ export default function DateDetail() {
               <Text style={s.meta}>
                 If you both said yes to a second date, you will both hear. Nobody is told about a no.
               </Text>
-              <Button variant="secondary" onPress={() => router.push(`/dates/${d.id}/outcome` as never)}>
+              <Button variant="secondary" onPress={() => router.push(`/dates/${d.id}/mutual-second-date` as never)}>
                 See if it was mutual
               </Button>
               <Button variant="ghost" onPress={() => router.push(`/dates/${d.id}/feedback` as never)}>

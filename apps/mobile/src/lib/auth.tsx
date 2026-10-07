@@ -131,15 +131,15 @@ export const ONBOARDING_PATHS: Record<string, string> = {
   account: "/onboarding/account",
   verification: "/onboarding/verification",
   intent: "/onboarding/intent",
-  blueprint: "/onboarding/blueprint",
-  blueprint_review: "/onboarding/blueprint",
+  blueprint: "/onboarding/blueprint/interview",
+  blueprint_review: "/onboarding/blueprint/interview",
   profile: "/onboarding/profile",
   availability: "/onboarding/availability",
   done: "/today",
 };
 
 export function nextOnboardingPath(me: Me) {
-  if (me.status === "restricted") return "/account-review";
+  if (me.status === "restricted") return "/account/review";
   return ONBOARDING_PATHS[me.onboarding_step] ?? "/today";
 }
 
@@ -155,7 +155,7 @@ export function useRequireMember(opts: { allowOnboarding?: boolean; allowRestric
       return;
     }
     if (me.status === "restricted" && !allowRestricted) {
-      router.replace("/account-review");
+      router.replace("/account/review");
       return;
     }
     const onboarding = ["pending_consent", "pending_verification", "onboarding"].includes(me.status);

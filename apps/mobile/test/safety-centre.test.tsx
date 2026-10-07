@@ -19,8 +19,25 @@ const SAFETY = {
   open_cases: 1,
   blocks: 2,
 };
+/** GET /safety/cases -> {"items": [case_payload(...)]}. Every field here is one the API sends. */
 const CASES = {
-  items: [{ id: "case_1", category: "harassment", state: "triaged", opened_at: "2026-10-01T10:00:00Z" }],
+  items: [
+    {
+      id: "case_1",
+      receipt_code: "SR-7Q2F",
+      category: "harassment",
+      severity: "P2",
+      status: "triaged",
+      submitted_at: "2026-10-01T10:00:00Z",
+      updated_at: "2026-10-02T10:00:00Z",
+      protection_applied: ["contact_separated"],
+      response_target: "Same-day review during staffed hours",
+      evidence_count: 0,
+      updates: [],
+      resolution_code: null,
+      support: { emergency: { number: "112", note: "Italy: 112." }, note: "We never contact the reported member with your identity." },
+    },
+  ],
 };
 const BLOCKS = {
   items: [
@@ -75,6 +92,11 @@ test("the emergency button dials a usable tel: URI, not the emergency object", a
 test("lists cases from /safety/cases and blocks from /blocks", async () => {
   const s = await renderScreen(<SafetyCentre />);
   expect(s.hasText("Harassment or unwanted contact")).toBe(true);
+  // The list read `state` and `opened_at`, which case_payload() does not return, so it showed
+  // an empty badge and the literal text "Invalid Date".
+  expect(s.hasText("Received and triaged")).toBe(true);
+  expect(s.joined()).toContain("SR-7Q2F");
+  expect(s.joined()).not.toContain("Invalid Date");
   expect(s.hasText("Ana")).toBe(true);
   expect(s.hasText("Ben")).toBe(true);
   expect(s.texts().filter((t) => t === "Unblock")).toHaveLength(2);

@@ -5,6 +5,7 @@ import { Text, View } from "react-native";
 import { ApiError, get, newIdempotencyKey, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
 import { CATEGORY_LABEL, URGENCY, type SafetyCase, type SafetyCenter } from "@/components/safety";
+import { EvidenceAttach } from "@/components/EvidenceAttach";
 import {
   Button,
   Card,
@@ -75,21 +76,20 @@ export default function Report() {
     return (
       <Screen>
         <PageTitle eyebrow="Reported" title="Thank you. It's on record." />
-        <StatusBanner
-          tone="success"
-          title="We have your report"
-          body={
-            receipt.acknowledgement_due_at
-              ? `A human acknowledges this by ${new Date(receipt.acknowledgement_due_at).toLocaleString()}.`
-              : "A human reviews this and will acknowledge it."
-          }
-        />
+        {/* The receipt code is the member's handle on this if they ever need to refer to it,
+            and response_target is the API's own promise about when a person looks at it. The
+            previous version read acknowledgement_due_at, which case_payload() never returns,
+            so it always fell through to the vaguer sentence. */}
+        <StatusBanner tone="success" title={`Receipt ${receipt.receipt_code}`} body={`${receipt.response_target}.`} />
         <Card>
           <Text style={s.note}>
             The person you reported is never told that you reported them, or what you said. If you blocked them,
             that took effect immediately.
           </Text>
         </Card>
+        {/* Right here, while the screenshot is still the thing they were looking at. Asking
+            them to come back for it later means most of them never do. */}
+        <EvidenceAttach reportId={receipt.id} />
         <Button onPress={() => router.replace(`/safety/cases/${receipt.id}` as never)}>See the case</Button>
         <Button variant="ghost" onPress={() => router.replace("/safety" as never)}>
           Back to the safety centre

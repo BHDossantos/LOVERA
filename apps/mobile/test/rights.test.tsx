@@ -69,9 +69,9 @@ jest.mock("expo-router", () => ({
   useLocalSearchParams: () => ({ dateId: "dp_1" }),
 }));
 
-import AccountReview from "../app/account-review";
+import AccountReview from "../app/account/review";
 import YouBlueprint from "../app/(app)/you/blueprint";
-import DateOutcome from "../app/(app)/dates/[dateId]/outcome";
+import DateOutcome from "../app/(app)/dates/[dateId]/mutual-second-date";
 
 beforeEach(() => {
   mockGet.mockReset();

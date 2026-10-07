@@ -73,7 +73,7 @@ export default function Verification() {
       // the member can see the address they are trusting with a passport photo. The
       // sandbox hands back one of our own routes, which we render natively.
       if (/^https?:\/\//i.test(url)) await WebBrowser.openBrowserAsync(url);
-      else router.push({ pathname: "/onboarding/verification-vendor", params: { ref: url.split("ref=")[1] ?? "" } } as never);
+      else router.push({ pathname: "/onboarding/verification/vendor", params: { ref: url.split("ref=")[1] ?? "" } } as never);
     } catch (err) {
       setError(err as ApiError);
     } finally {

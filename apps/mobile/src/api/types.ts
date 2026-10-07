@@ -159,3 +159,29 @@ export type DatePlan = {
 export type TodayTask = { key: string; priority: number; title: string; body: string; path: string; cta: string; deadline?: string };
 
 export type Notification = { id: string; type: string; group: string; title: string; body: string; deep_link: string | null; read_at: string | null; created_at: string };
+
+/** GET /blueprint/current */
+export type BlueprintSignal = {
+  key: string;
+  category: string;
+  label: string;
+  value: string | null;
+  value_label: string;
+  confidence: string;
+  evidence: string | null;
+  member_corrected: boolean;
+  freshness_at: string | null;
+  special_category: boolean;
+  options: { value: string; label: string }[];
+};
+
+export type Blueprint = {
+  version: { id: string; version_no: number; confirmed_at: string | null; model_version: string } | null;
+  signals: BlueprintSignal[];
+  coverage: Record<string, number>;
+  freshness: { age_days: number | null; stale: boolean; refresh_after_days: number };
+  data_use: string;
+};
+
+/** POST /introductions/{id}/correction */
+export type CorrectionResult = { recorded: boolean; message: string };

@@ -8,6 +8,9 @@ import {
   Text,
   TextInput as RNTextInput,
   View,
+  type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   type TextInputProps,
   type ViewStyle,
 } from "react-native";
@@ -15,7 +18,16 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { color, radius, space, type as typo } from "@/theme";
 import { ApiError } from "@/api/client";
 
-export function Screen({ children, scroll = true }: { children: ReactNode; scroll?: boolean }) {
+export function Screen({
+  children,
+  scroll = true,
+  onScroll,
+}: {
+  children: ReactNode;
+  scroll?: boolean;
+  /** Forwarded to the ScrollView. Used where a screen has to know what the member has actually reached. */
+  onScroll?: (e: NativeSyntheticEvent<NativeScrollEvent>) => void;
+}) {
   const inner = <View style={s.screenInner}>{children}</View>;
   return (
     <SafeAreaView style={s.screen} edges={["top", "left", "right"]}>
@@ -24,6 +36,8 @@ export function Screen({ children, scroll = true }: { children: ReactNode; scrol
           contentContainerStyle={s.scroll}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
+          onScroll={onScroll}
+          scrollEventThrottle={onScroll ? 200 : undefined}
         >
           {inner}
         </ScrollView>
@@ -46,8 +60,20 @@ export function PageTitle({ eyebrow, title, lede }: { eyebrow?: string; title: s
   );
 }
 
-export function Card({ children, style }: { children: ReactNode; style?: ViewStyle }) {
-  return <View style={[s.card, style]}>{children}</View>;
+export function Card({
+  children,
+  style,
+  onLayout,
+}: {
+  children: ReactNode;
+  style?: ViewStyle;
+  onLayout?: (e: LayoutChangeEvent) => void;
+}) {
+  return (
+    <View style={[s.card, style]} onLayout={onLayout}>
+      {children}
+    </View>
+  );
 }
 
 export function Button({

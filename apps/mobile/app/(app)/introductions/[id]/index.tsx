@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Image, Text, View } from "react-native";
+import { Image, Text, View, useWindowDimensions, type LayoutChangeEvent } from "react-native";
 import { ApiError, get, newIdempotencyKey, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
 import type { Introduction, Strength } from "@/api/types";
 import { DECLINE_REASONS, INTRO_STATUS_LABEL, PROMPT_LABEL, type DecisionResult } from "@/components/intro";
+import { CorrectionForm } from "@/components/CorrectionForm";
 import {
   Badge,
   Button,
@@ -52,6 +53,42 @@ export default function IntroductionDetail() {
 
   const intro = q.data;
 
+  /**
+   * The API wants to know whether the member actually reached the explanation, not whether
+   * the screen that contains it was opened — that is the whole point of the signal, and
+   * firing it on mount would make it a synonym for introduction_opened. So we report it once
+   * the explanation has been scrolled into the viewport, which on a tall phone is often
+   * immediately and on a short one is not.
+   *
+   * It is fire-and-forget: a member is never shown an error, and never blocked, because our
+   * analytics request failed.
+   */
+  const { height } = useWindowDimensions();
+  const explanationTop = useRef<number | null>(null);
+  const scrollY = useRef(0);
+  const reported = useRef(false);
+
+  const reportViewed = useCallback(() => {
+    const top = explanationTop.current;
+    if (reported.current || top === null || !intro?.explanation) return;
+    if (top > scrollY.current + height * 0.85) return;
+    reported.current = true;
+    const ex = intro.explanation;
+    const sections = [
+      ex.reasons.length ? "reasons" : null,
+      ex.friction?.text ? "friction" : null,
+      ex.unknown?.text ? "unknown" : null,
+    ].filter((x): x is string => !!x);
+    void post(`/introductions/${intro.id}/explanation-viewed`, { sections }).catch(() => {
+      reported.current = false;
+    });
+  }, [height, intro]);
+
+  const onExplanationLayout = (e: LayoutChangeEvent) => {
+    explanationTop.current = e.nativeEvent.layout.y;
+    reportViewed();
+  };
+
   const submit = async () => {
     if (!intro || !choice) return;
     setBusy(true);
@@ -93,7 +130,12 @@ export default function IntroductionDetail() {
   const photo = p?.media?.find((m) => m.type === "photo" && m.url)?.url ?? null;
 
   return (
-    <Screen>
+    <Screen
+      onScroll={(e) => {
+        scrollY.current = e.nativeEvent.contentOffset.y;
+        reportViewed();
+      }}
+    >
       <ErrorState error={error ?? ((q.error as ApiError) ?? null)} retry={() => q.refetch()} />
       {!!intro && (
         <>
@@ -145,7 +187,7 @@ export default function IntroductionDetail() {
           )}
 
           {!!ex && (
-            <Card style={{ marginTop: space.md }}>
+            <Card style={{ marginTop: space.md }} onLayout={onExplanationLayout}>
               <Text style={s.h2}>Why the matchmaker chose this</Text>
               {ex.reasons.map((r) => (
                 <View key={r.label} style={{ marginBottom: space.md }}>
@@ -167,6 +209,8 @@ export default function IntroductionDetail() {
               </Text>
             </Card>
           )}
+
+          {!!ex && <CorrectionForm introId={intro.id} suggestedKeys={ex.unknown?.missing_signal_keys ?? []} />}
 
           {!!p?.bio && (
             <Card>

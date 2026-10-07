@@ -71,6 +71,48 @@ export async function renderScreen(ui: ReactElement) {
         (node.props as { onPress: () => void }).onPress();
       });
     },
+    /**
+     * Type into the nth text input, by calling the handler the real component calls.
+     *
+     * Buttons on these screens are disabled until there is something to send, and `press`
+     * refuses a disabled control, so a test that never types can only ever assert the
+     * disabled half of the behaviour.
+     */
+    type: async (text: string, index = 0) => {
+      const inputs = r.root.findAll((n) => typeof (n.props as { onChangeText?: unknown }).onChangeText === "function");
+      const node = at(inputs, index);
+      if (!node) throw new Error(`no text input at index ${index} (found ${inputs.length})`);
+      await act(async () => {
+        (node.props as { onChangeText: (t: string) => void }).onChangeText(text);
+      });
+    },
+    /**
+     * Fire the nth onLayout with a measured position, as the native side would.
+     *
+     * A screen that reports what the member has reached has to learn where things are from
+     * layout. Nothing measures in a test renderer, so without this the measurement never
+     * arrives and such a screen can only be tested in its "I don't know yet" state.
+     */
+    layout: async (index: number, y: number, height = 400) => {
+      const nodes = r.root.findAll((n) => typeof (n.props as { onLayout?: unknown }).onLayout === "function");
+      const node = at(nodes, index);
+      if (!node) throw new Error(`no onLayout at index ${index} (found ${nodes.length})`);
+      await act(async () => {
+        (node.props as { onLayout: (e: unknown) => void }).onLayout({
+          nativeEvent: { layout: { x: 0, y, width: 360, height } },
+        });
+      });
+      await flush();
+    },
+    /** Fire the scroll view's onScroll at an offset, as a member dragging the page would. */
+    scroll: async (y: number) => {
+      const nodes = r.root.findAll((n) => typeof (n.props as { onScroll?: unknown }).onScroll === "function");
+      if (!nodes.length) throw new Error("nothing on this screen handles onScroll");
+      await act(async () => {
+        (nodes[0].props as { onScroll: (e: unknown) => void }).onScroll({ nativeEvent: { contentOffset: { x: 0, y } } });
+      });
+      await flush();
+    },
     settle: flush,
   };
 }

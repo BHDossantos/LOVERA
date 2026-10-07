@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.core.client_paths import onboarding_path
 from app.core.db import get_db
 from app.core.deps import Principal, current_principal
 from app.core.timeutil import iso, utcnow
@@ -28,7 +29,7 @@ def today(principal: Principal = Depends(current_principal), db: Session = Depen
     tasks: list[dict[str, Any]] = []
     me = me_payload(db, m)
     if m.status in ("pending_consent", "pending_verification", "onboarding"):
-        tasks.append({"key": "onboarding", "priority": 100, "title": "Finish setting up", "body": "Your matchmaker needs a confirmed Blueprint before the first introduction.", "path": f"/onboarding/{m.onboarding_step if m.onboarding_step != 'blueprint' else 'blueprint/interview'}", "cta": "Continue setup"})
+        tasks.append({"key": "onboarding", "priority": 100, "title": "Finish setting up", "body": "Your matchmaker needs a confirmed Blueprint before the first introduction.", "path": onboarding_path(m.onboarding_step), "cta": "Continue setup"})
     if m.status == "restricted":
         tasks.append({"key": "review", "priority": 100, "title": "Your account is under review", "body": "You can read the decision, add context and appeal.", "path": "/account/review", "cta": "Open account review"})
     now = utcnow()
