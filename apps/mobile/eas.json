@@ -1,45 +1,5 @@
 {
-  "cli": {
-    "version": ">= 5.0.0",
-    "appVersionSource": "remote"
-  },
-  "build": {
-    "development": {
-      "developmentClient": true,
-      "distribution": "internal",
-      "env": {
-        "EXPO_PUBLIC_API_ORIGIN": "http://127.0.0.1:8000"
-      }
-    },
-    "preview": {
-      "distribution": "internal",
-      "android": {
-        "buildType": "apk"
-      },
-      "env": {
-        "EXPO_PUBLIC_API_ORIGIN": "https://REPLACE-ME.example.com",
-        "EXPO_PUBLIC_EAS_PROJECT_ID": "REPLACE-ME-run-eas-init"
-      }
-    },
-    "production": {
-      "autoIncrement": true,
-      "env": {
-        "EXPO_PUBLIC_API_ORIGIN": "https://REPLACE-ME.example.com",
-        "EXPO_PUBLIC_EAS_PROJECT_ID": "REPLACE-ME-run-eas-init"
-      }
-    }
-  },
-  "submit": {
-    "production": {
-      "ios": {
-        "appleId": "REPLACE_ME_APPLE_ID_EMAIL",
-        "ascAppId": "REPLACE_ME_APP_STORE_CONNECT_APP_ID",
-        "appleTeamId": "REPLACE_ME_APPLE_TEAM_ID"
-      },
-      "android": {
-        "serviceAccountKeyPath": "./play-service-account.json",
-        "track": "internal"
-      }
-    }
-  }
+  "cli": {"version": ">= 16.0.0"},
+  "build": {"development":{"developmentClient":true,"distribution":"internal"},"preview":{"distribution":"internal"},"production":{"autoIncrement":true}},
+  "submit":{"production":{"android":{"track":"internal","releaseStatus":"completed"},"ios":{}}}
 }
