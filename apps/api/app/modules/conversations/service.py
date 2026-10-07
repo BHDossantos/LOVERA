@@ -49,9 +49,25 @@ def date_status(db: Session, conv: Conversation) -> dict[str, Any] | None:
 
 
 def summary(db: Session, conv: Conversation, viewer: Member) -> dict[str, Any]:
+    from app.models.safety import Block
+
     other = db.get(Member, conv.other(viewer.id))
     last = db.execute(select(Message).where(Message.conversation_id == conv.id, Message.deleted_at.is_(None)).order_by(Message.sequence.desc()).limit(1)).scalar_one_or_none()
     closed_neutral = conv.status in ("closed", "blocked")
+    # The neutral snapshot on a closed conversation is a privacy decision: no name, no photo,
+    # no age once it is over. But it also took away the only id the client had, so an ended
+    # thread could neither block nor report the person — and reporting afterwards is the
+    # ordinary case, not the edge one. A report with no subject reaches a reviewer who cannot
+    # act on anybody.
+    #
+    # So the safety target is carried separately from the profile. It is not a new disclosure:
+    # the viewer was handed this id for the whole time the conversation was open.
+    blocked_by_viewer = other is not None and (
+        db.execute(
+            select(Block.id).where(Block.blocker_id == viewer.id, Block.blocked_id == other.id, Block.removed_at.is_(None))
+        ).first()
+        is not None
+    )
     return {
         "id": conv.id,
         "introduction_id": conv.introduction_id,
@@ -63,6 +79,7 @@ def summary(db: Session, conv: Conversation, viewer: Member) -> dict[str, Any]:
         "date": date_status(db, conv),
         "opened_at": iso(conv.opened_at),
         "safety_hold": conv.safety_hold,
+        "safety": {"subject_id": other.id if other else None, "blocked_by_you": blocked_by_viewer},
     }
 
 
@@ -149,11 +166,22 @@ def mark_read(db: Session, conv: Conversation, member_id: str, sequence: int) ->
     raised again — so `read_cursors` stayed empty and nobody's unread count ever cleared.
     """
     now = utcnow()
+    # Clamped to the conversation's head, read inside the same statement.
+    #
+    # Nothing stopped a client sending a sequence higher than any message that exists, and
+    # `GREATEST` below then made it permanent: `unread_count` counts messages *above* the cursor, so
+    # a cursor past the end marks every real message read and every future one too, until the
+    # conversation catches up with whatever number was sent. A client bug would be enough, and the
+    # member has no way to undo it — their unread badge simply never comes back.
+    #
+    # One clamp, applied to the inserted value, so the conflict path below inherits it through
+    # `excluded` rather than repeating the bound and having to agree with it.
+    head = select(Conversation.message_seq).where(Conversation.id == conv.id).scalar_subquery()
     insert = pg_insert(ReadCursor).values(
         id=new_id(),
         conversation_id=conv.id,
         member_id=member_id,
-        last_read_sequence=sequence,
+        last_read_sequence=func.least(sequence, head),
         updated_at=now,
     )
     db.execute(
