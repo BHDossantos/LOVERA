@@ -1,7 +1,7 @@
 """Date plans: coarse availability intersection, safe public venues, proposal/response with reconfirmation, check-in, feedback."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -15,6 +15,7 @@ from app.core.config import get_settings
 from app.core.errors import ApiError
 from app.core.events import publish
 from app.core.timeutil import iso, utcnow
+from app.core.windows import WEEKDAYS, day_intervals, intersect
 from app.models.account import Member
 from app.models.availability import AvailabilityVersion
 from app.models.conversations import Conversation
@@ -25,7 +26,6 @@ from app.modules.conversations.realtime import hub
 from app.modules.dates.venues import venue_payload
 from app.modules.notifications.service import notify
 
-WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 CANCEL_REASONS = ("schedule", "not_feeling_it", "illness", "safety", "other")
 
 
@@ -33,33 +33,70 @@ def _availability(db: Session, member_id: str) -> AvailabilityVersion | None:
     return db.execute(select(AvailabilityVersion).where(AvailabilityVersion.member_id == member_id).order_by(AvailabilityVersion.created_at.desc())).scalars().first()
 
 
-def _minutes(t: str) -> int:
-    h, m = t.split(":")
-    return int(h) * 60 + int(m)
+def _timezone_of(db: Session, member_id: str) -> str:
+    member = db.get(Member, member_id)
+    return (member.timezone if member else None) or get_settings().market_timezone
 
 
 def overlaps(db: Session, a_id: str, b_id: str, tz: str, horizon_days: int = 14) -> list[dict[str, Any]]:
+    """Slots both members are free for, as instants, expressed in `tz` for display.
+
+    Each member's windows are read in *their own* zone. The previous version applied the single `tz`
+    it was given — the proposing member's, or the plan's — to both members' windows, so two members
+    an hour apart were offered a slot an hour outside one of their stated evenings, and the date they
+    confirmed was not the date one of them thought they had agreed to. `tz` is now only the zone the
+    result is written in, which is what the caller actually wanted it for.
+
+    Days are built per member in their own zone, so a window's offset is the one in force on its own
+    date rather than one offset applied to a fortnight — correct across a DST change.
+    """
     av_a, av_b = _availability(db, a_id), _availability(db, b_id)
     if not av_a or not av_b:
         return []
+    a_tz, b_tz = _timezone_of(db, a_id), _timezone_of(db, b_id)
     zone = ZoneInfo(tz)
-    today = datetime.now(zone).date()
+    now = utcnow()
+    # One day either side of the horizon, because a window late in the evening of one member's local
+    # day can be early the next day in the other's.
+    span = horizon_days + 2
+
+    def local_days(name: str) -> list[date]:
+        first = now.astimezone(ZoneInfo(name)).date() - timedelta(days=1)
+        return [first + timedelta(days=i) for i in range(span)]
+
+    away_a = {e.get("date") for e in av_a.dated_exceptions if e.get("available") is False}
+    away_b = {e.get("date") for e in av_b.dated_exceptions if e.get("available") is False}
+    # A member's "I am away that day" is a date in their calendar, not in whoever is looking.
+    a_zone, b_zone = ZoneInfo(a_tz), ZoneInfo(b_tz)
+
+    # Not today: a first date is arranged, not sprung. This is the horizon the old version walked.
+    earliest = now.astimezone(zone).date() + timedelta(days=1)
+    latest = now.astimezone(zone).date() + timedelta(days=horizon_days)
+
     out: list[dict[str, Any]] = []
-    for offset in range(1, horizon_days + 1):
-        day = today + timedelta(days=offset)
-        excluded = {e.get("date") for e in (av_a.dated_exceptions + av_b.dated_exceptions) if e.get("available") is False}
-        if day.isoformat() in excluded:
+    for starts_at, ends_at in intersect(
+        day_intervals(av_a.recurring_windows, a_tz, local_days(a_tz)),
+        day_intervals(av_b.recurring_windows, b_tz, local_days(b_tz)),
+    ):
+        if starts_at <= now:
             continue
-        for wa in av_a.recurring_windows:
-            for wb in av_b.recurring_windows:
-                if wa["weekday"] != wb["weekday"] or wa["weekday"] != day.weekday():
-                    continue
-                start = max(_minutes(wa["start"]), _minutes(wb["start"]))
-                end = min(_minutes(wa["end"]), _minutes(wb["end"]))
-                if end - start >= 90:
-                    starts_at = datetime.combine(day, datetime.min.time(), tzinfo=zone) + timedelta(minutes=start)
-                    ends_at = datetime.combine(day, datetime.min.time(), tzinfo=zone) + timedelta(minutes=end)
-                    out.append({"date": day.isoformat(), "weekday": WEEKDAYS[day.weekday()], "start": f"{start // 60:02d}:{start % 60:02d}", "end": f"{end // 60:02d}:{end % 60:02d}", "starts_at": iso(starts_at), "ends_at": iso(ends_at)})
+        local, local_end = starts_at.astimezone(zone), ends_at.astimezone(zone)
+        if not (earliest <= local.date() <= latest):
+            continue
+        if starts_at.astimezone(a_zone).date().isoformat() in away_a:
+            continue
+        if starts_at.astimezone(b_zone).date().isoformat() in away_b:
+            continue
+        out.append(
+            {
+                "date": local.date().isoformat(),
+                "weekday": WEEKDAYS[local.weekday()],
+                "start": local.strftime("%H:%M"),
+                "end": local_end.strftime("%H:%M"),
+                "starts_at": iso(starts_at),
+                "ends_at": iso(ends_at),
+            }
+        )
     return out[:12]
 
 
