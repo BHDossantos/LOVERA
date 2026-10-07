@@ -7,7 +7,7 @@ import { ApiError, get, newIdempotencyKey, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
 import { awaitingServer, serverDriven } from "@/lib/query";
 import type { ConversationSummary, Message } from "@/api/types";
-import { Badge, Button, ErrorState, Loading, StatusBanner, TextInput } from "@/components/ui";
+import { AwaitingServer, Badge, Button, ErrorState, StatusBanner, TextInput } from "@/components/ui";
 import { color, radius, space, type as typo } from "@/theme";
 
 type History = { items: Message[]; next_cursor: string | null; has_more: boolean };
@@ -111,7 +111,7 @@ export default function Conversation() {
   if (awaitingServer(summary) || (history.isLoading && !history.data))
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: color.canvas }}>
-        <Loading label="Loading conversation" />
+        <AwaitingServer label="Loading conversation" query={summary} />
       </SafeAreaView>
     );
 

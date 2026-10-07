@@ -121,6 +121,43 @@ test("a destination withholds the cached answer rather than rendering it", () =>
   expect(conv).not.toContain("if (summary.isLoading");
 });
 
+test("a gated screen that cannot refetch says so, and offers a way out", () => {
+  // Excluding a failed refetch from freshness is right — the cached answer is from before the
+  // member arrived — but it also means the gate never opens on its own. Gating on `awaitingServer`
+  // and rendering only a spinner therefore turned a network failure into a permanent spinner with
+  // no explanation and nothing to press. Every gated screen goes through `AwaitingServer`, which
+  // shows the error and an unconditional retry instead.
+  const ui = readFileSync(join(__dirname, "..", "src/components/ui.tsx"), "utf8");
+  expect(ui).toContain("export function AwaitingServer");
+  // Unconditional, unlike ErrorState's own button, which only appears for a retryable error.
+  expect(ui).toMatch(/AwaitingServer[\s\S]*?query\.refetch\(\)/);
+
+  for (const rel of [
+    "app/safety/cases/[caseId].tsx",
+    "app/(app)/introductions/[id]/mutual.tsx",
+    "app/(app)/introductions/[id]/index.tsx",
+    "app/(app)/introductions/waiting.tsx",
+    "app/(app)/dates/[dateId].tsx",
+    "app/(app)/dates/[dateId]/mutual-second-date.tsx",
+    "app/(app)/dates/[dateId]/safety.tsx",
+    "app/(app)/dates/[dateId]/feedback.tsx",
+    "app/(app)/messages/[conversationId].tsx",
+  ]) {
+    const src = readFileSync(join(__dirname, "..", rel), "utf8");
+    expect(src).toContain("<AwaitingServer");
+    // The spinner must not be what a gated screen falls back to on its own any more.
+    const gate = src.slice(src.indexOf("if (awaitingServer("));
+    expect(gate.slice(0, 400)).not.toContain("<Loading");
+  }
+
+  // The three that render in place already show an ErrorState with a retry, so there the spinner
+  // only has to stop competing with it.
+  for (const rel of ["app/account/review.tsx", "app/(app)/introductions/index.tsx", "app/(app)/messages/index.tsx"]) {
+    const src = readFileSync(join(__dirname, "..", rel), "utf8");
+    expect(src).toContain("awaitingServer(q) && !q.isRefetchError && <Loading");
+  }
+});
+
 test("no notification destination is missing from the list above", () => {
   // Derived from the API source rather than remembered. A screen-state path the API hands out and
   // this list does not name is a destination still on the 15-second cache — which is how

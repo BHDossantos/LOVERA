@@ -66,7 +66,7 @@ export default function IntroductionsScreen() {
         title="Who the matchmaker chose, and why"
         lede="A few explained, reciprocal introductions at a time. No stack, no likes, no rankings."
       />
-      {awaitingServer(q) && <Loading label="Loading introductions" />}
+      {awaitingServer(q) && !q.isRefetchError && <Loading label="Loading introductions" />}
       <ErrorState error={(q.error as ApiError) ?? null} retry={() => q.refetch()} />
             {!!data && (
         <>

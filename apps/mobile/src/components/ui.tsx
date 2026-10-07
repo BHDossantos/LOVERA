@@ -197,6 +197,36 @@ export function StatusBanner({ tone = "context", title, body }: { tone?: "contex
  * Errors carry a machine code from the API. We show the server's sentence, which is
  * already written for members, and only add a retry when the server says it is retryable.
  */
+/**
+ * What a server-driven screen shows while it is withholding an answer.
+ *
+ * Gating on `awaitingServer` alone made a failed forced refetch a permanent spinner: the gate
+ * stays shut, which is right — the cached answer is from before the member arrived — but nothing
+ * said why and there was no way out. Waiting and having failed are different states, and only one
+ * of them resolves on its own.
+ *
+ * The retry is unconditional here, unlike `ErrorState`'s, which appears only for an error the API
+ * marked retryable. While this gate is shut the member has no other way forward, so the button has
+ * to be there whatever the error says about itself.
+ */
+export function AwaitingServer({
+  label,
+  query,
+}: {
+  label: string;
+  query: { isRefetchError: boolean; isFetching: boolean; error: unknown; refetch: () => unknown };
+}) {
+  if (!query.isRefetchError || query.isFetching) return <Loading label={label} />;
+  return (
+    <View>
+      <ErrorState error={(query.error as ApiError) ?? null} />
+      <Button variant="secondary" onPress={() => void query.refetch()}>
+        Try again
+      </Button>
+    </View>
+  );
+}
+
 export function ErrorState({ error, retry }: { error: ApiError | null; retry?: () => void }) {
   if (!error) return null;
   // api() wraps every failure, including a rejected fetch, in an ApiError with a body — so

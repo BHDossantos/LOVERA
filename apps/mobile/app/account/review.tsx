@@ -80,7 +80,7 @@ export default function AccountReview() {
         body="You can still reach the safety centre and your own data."
       />
       <ErrorState error={error ?? ((q.error as ApiError) ?? null)} retry={() => q.refetch()} />
-      {awaitingServer(q) && <Loading label="Loading the decision" />}
+      {awaitingServer(q) && !q.isRefetchError && <Loading label="Loading the decision" />}
 
       {data?.actions.length === 0 && (
         <Card>

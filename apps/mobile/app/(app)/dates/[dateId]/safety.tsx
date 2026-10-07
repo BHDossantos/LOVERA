@@ -7,7 +7,7 @@ import { useRequireMember } from "@/lib/auth";
 import { awaitingServer, serverDriven } from "@/lib/query";
 import { telUri } from "@/components/safety";
 import type { DatePlan } from "@/api/types";
-import { Button, Card, Divider, ErrorState, Field, Loading, Options, PageTitle, Screen, StatusBanner, TextInput } from "@/components/ui";
+import { AwaitingServer, Button, Card, Divider, ErrorState, Field, Options, PageTitle, Screen, StatusBanner, TextInput } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
 
 /**
@@ -69,7 +69,7 @@ export default function DateCheckIn() {
   if (awaitingServer(q))
     return (
       <Screen scroll={false}>
-        <Loading label="Loading date" />
+        <AwaitingServer label="Loading date" query={q} />
       </Screen>
     );
 

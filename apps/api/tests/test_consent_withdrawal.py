@@ -47,6 +47,13 @@ def test_a_withdrawn_sensitive_preference_is_reported_as_not_in_use(client):
     others = [p for p in a.get("/preferences").json()["preferences"] if p["key"] != key]
     assert others and all(p["active"] is True for p in others)
 
+    # And the Blueprint payload carries the same objects, because its own summary of the member's
+    # criteria renders from them — typed without `active`, that summary went on calling this a Must
+    # one tap away from the page that says it is not in use.
+    bp = next(p for p in a.get("/blueprint/current").json()["preferences"] if p["key"] == key)
+    assert bp["active"] is False
+    assert bp["inactive_reason"] == "special_category_consent_withdrawn"
+
 
 def test_the_impact_preview_refuses_a_preference_the_save_would_refuse(client):
     key, value = _sensitive_preference_key()

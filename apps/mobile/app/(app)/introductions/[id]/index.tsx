@@ -9,13 +9,13 @@ import type { Introduction, Strength } from "@/api/types";
 import { DECLINE_REASONS, INTRO_STATUS_LABEL, PROMPT_LABEL, type DecisionResult } from "@/components/intro";
 import { CorrectionForm } from "@/components/CorrectionForm";
 import {
+  AwaitingServer,
   Badge,
   Button,
   Card,
   ChipGroup,
   Divider,
   ErrorState,
-  Loading,
   Options,
   PageTitle,
   Screen,
@@ -191,7 +191,7 @@ export default function IntroductionDetail() {
   if (awaitingServer(q))
     return (
       <Screen scroll={false}>
-        <Loading label="Loading introduction" />
+        <AwaitingServer label="Loading introduction" query={q} />
       </Screen>
     );
 

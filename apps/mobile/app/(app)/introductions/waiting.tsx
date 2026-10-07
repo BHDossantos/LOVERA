@@ -4,7 +4,7 @@ import { Text, View } from "react-native";
 import { ApiError, get } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
 import { awaitingServer, serverDriven } from "@/lib/query";
-import { Button, Card, Divider, ErrorState, Loading, PageTitle, Screen, StatusBanner } from "@/components/ui";
+import { AwaitingServer, Button, Card, Divider, ErrorState, PageTitle, Screen, StatusBanner } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
 
 type Waiting = {
@@ -39,7 +39,7 @@ export default function Waiting() {
   if (awaitingServer(q))
     return (
       <Screen scroll={false}>
-        <Loading label="Checking why" />
+        <AwaitingServer label="Checking why" query={q} />
       </Screen>
     );
 

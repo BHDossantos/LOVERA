@@ -16,7 +16,13 @@ import type { Strength } from "@/lib/types";
  * to change it. Offering the editor anyway meant every save came back 403.
  */
 type Signal = { key: string; category: string; label: string; value: string | null; value_label: string; confidence: Strength; evidence: string | null; member_corrected: boolean; freshness_at: string | null; special_category: boolean; correctable: boolean; options: { value: string; label: string }[] };
-type Pref = { key: string; label: string; tier: string };
+/**
+ * `current_payload` forwards the same preference objects the Preferences page gets, `active`
+ * included. Typing it without that field meant this summary kept calling a withdrawn-consent faith
+ * criterion a Must while the Preferences page, one tap away, correctly said it was not in use —
+ * and `build_snapshot` was applying neither.
+ */
+type Pref = { key: string; label: string; tier: string; active?: boolean };
 type Blueprint = {
   version: { id: string; version_no: number; confirmed_at: string | null; model_version: string } | null;
   signals: Signal[];
@@ -122,7 +128,12 @@ export default function BlueprintPage() {
               <ul className="flex flex-wrap gap-2">
                 {b.preferences.map((p) => (
                   <li key={p.key} className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1 text-sm">
-                    {p.label} <TierPill tier={p.tier} />
+                    {p.label}{" "}
+                    {p.active === false ? (
+                      <span className="text-xs text-ink-tertiary">not in use</span>
+                    ) : (
+                      <TierPill tier={p.tier} />
+                    )}
                   </li>
                 ))}
               </ul>
