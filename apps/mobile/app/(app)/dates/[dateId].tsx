@@ -75,12 +75,29 @@ export default function DateDetail() {
           )}
 
           {d.awaiting_your_confirmation && (
-            <Button
-              loading={busy === "confirm"}
-              onPress={() => run("confirm", () => post(`/date-plans/${d.id}/confirm`, {}, { ifMatch: d.version }))}
-            >
-              Confirm this date
-            </Button>
+            <>
+              <Button
+                loading={busy === "accept"}
+                onPress={() =>
+                  run("accept", () =>
+                    post(`/date-plans/${d.id}/respond`, { action: "accept" }, { ifMatch: d.version }),
+                  )
+                }
+              >
+                Confirm this date
+              </Button>
+              <Button
+                variant="secondary"
+                loading={busy === "decline"}
+                onPress={() =>
+                  run("decline", () =>
+                    post(`/date-plans/${d.id}/respond`, { action: "decline" }, { ifMatch: d.version }),
+                  )
+                }
+              >
+                Decline
+              </Button>
+            </>
           )}
 
           <Card>
@@ -119,18 +136,20 @@ export default function DateDetail() {
               <Text style={s.meta}>
                 Private. A second date is only revealed if you both say yes, and neither of you is told about a no.
               </Text>
-              <Button
-                loading={busy === "yes"}
-                onPress={() => run("yes", () => post(`/date-plans/${d.id}/feedback`, { second_date: true }))}
-              >
-                I'd like a second date
-              </Button>
-              <Button
-                variant="secondary"
-                loading={busy === "no"}
-                onPress={() => run("no", () => post(`/date-plans/${d.id}/feedback`, { second_date: false }))}
-              >
-                Not for me
+              {/* Feedback starts with whether the date happened at all: a no-show changes the
+                  plan's status and is how the other person's attendance dispute gets raised,
+                  so it cannot be assumed from a second-date answer. */}
+              <Button onPress={() => router.push(`/dates/${d.id}/feedback` as never)}>Give private feedback</Button>
+            </Card>
+          )}
+          {d.feedback_submitted && (
+            <Card>
+              <Text style={s.h2}>Your feedback is saved</Text>
+              <Text style={s.meta}>
+                If you both said yes to a second date, you will both hear. Nobody is told about a no.
+              </Text>
+              <Button variant="secondary" onPress={() => router.push(`/dates/${d.id}/feedback` as never)}>
+                Change my answers
               </Button>
             </Card>
           )}
