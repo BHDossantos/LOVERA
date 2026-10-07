@@ -63,7 +63,10 @@ export async function completeOnboarding(page: Page, opts: { name: string; gende
   await page.locator('textarea[aria-label="Prompt answer"]').first().fill("Something outdoors with good coffee.");
   await page.locator('textarea[aria-label="Prompt answer"]').nth(1).fill("Cooking with a podcast on.");
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
-  await page.locator('input[type="file"][accept="image/*"]').setInputFiles({ name: "me.png", mimeType: "image/png", buffer: png });
+  // By its label, not by its `accept` list: the list is now enumerated to match what the server
+  // validates (app/core/datauri.py), and a selector that pinned the old wildcard turned a widened
+  // allow-list into a 90-second timeout here.
+  await page.getByLabel("Add a photo").setInputFiles({ name: "me.png", mimeType: "image/png", buffer: png });
   await expect(page.getByText("Live")).toBeVisible();
   await page.getByRole("button", { name: /Save my profile|Saved/ }).click();
   await expect(page).toHaveURL(/onboarding\/availability/, { timeout: 20_000 });

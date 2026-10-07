@@ -88,7 +88,11 @@ export function ProfileEditor({ onSaved }: { onSaved?: () => void }) {
             ))}
         </ul>
         <label className="inline-flex cursor-pointer items-center gap-2 rounded-[var(--radius-lg)] border border-border bg-surface px-4 py-3 font-semibold">
-          <input type="file" accept={PHOTO_ACCEPT} className="sr-only" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0], "photo")} />
+          {/* Labelled explicitly, so nothing has to identify this input by its `accept` list. An e2e
+              selector keyed on `accept="image/*"` is what broke when the list was enumerated to
+              match the server, and a hidden input that only a wrapping label names is thin for a
+              screen reader anyway. */}
+          <input type="file" aria-label="Add a photo" accept={PHOTO_ACCEPT} className="sr-only" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0], "photo")} />
           + Add a photo
         </label>
         <p className="mt-2 text-xs text-ink-tertiary">Public. Reviewed before publishing. Up to six. Recent and recognisably you.</p>
@@ -97,7 +101,7 @@ export function ProfileEditor({ onSaved }: { onSaved?: () => void }) {
         <h2 className="mb-3 font-bold">Voice note (optional)</h2>
         {p.media.some((m) => m.type === "voice") ? <p className="text-sm text-success">Voice note added ✓</p> : <p className="mb-2 text-sm text-ink-secondary">Thirty seconds of you: an answer to “what makes a good Sunday?”</p>}
         <label className="inline-flex cursor-pointer items-center gap-2 rounded-[var(--radius-lg)] border border-border bg-surface px-4 py-3 font-semibold">
-          <input type="file" accept={VOICE_ACCEPT} className="sr-only" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0], "voice")} />
+          <input type="file" aria-label="Add a voice note" accept={VOICE_ACCEPT} className="sr-only" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0], "voice")} />
           🎤 Upload a voice note
         </label>
       </Card>
