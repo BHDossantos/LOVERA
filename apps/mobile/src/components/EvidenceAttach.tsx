@@ -26,6 +26,9 @@ const SHRINK_STEPS = [
   { width: 1200, compress: 0.6 },
 ];
 
+const hasApiBody = (e: unknown): boolean =>
+  typeof e === "object" && e !== null && typeof (e as { body?: { message?: unknown } }).body?.message === "string";
+
 const dataUrl = (contentType: string, base64: string) => `data:${contentType};base64,${base64}`;
 
 /**
@@ -44,8 +47,40 @@ export function EvidenceAttach({ reportId, onAdded }: { reportId: string; onAdde
   const [error, setError] = useState<ApiError | null>(null);
   const [added, setAdded] = useState(0);
 
+  /**
+   * Everything from the permission prompt onwards is inside the guard.
+   *
+   * The permission request and the picker launch used to sit outside it, and the button discards
+   * this promise with `void` — so an OS-level rejection or a camera that is unavailable became an
+   * unhandled rejection, and the member saw nothing at all. On the screen somebody uses to attach
+   * evidence of being harassed, silence is the worst available outcome.
+   */
   const attach = async (from: "library" | "camera") => {
     setError(null);
+    setBusy(true);
+    try {
+      await pick(from);
+    } catch (e) {
+      // Duck-typed rather than `instanceof`: anything carrying a server body already has a message
+      // written for the member, and losing it to a prototype check would replace a precise
+      // explanation with a generic one.
+      setError(
+        hasApiBody(e)
+          ? (e as ApiError)
+          : new ApiError(0, {
+              code: "PICKER_FAILED",
+              message:
+                from === "camera"
+                  ? "The camera could not be opened. Choosing an existing screenshot usually works."
+                  : "Your photos could not be opened. You can still send the report without an image.",
+            }),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pick = async (from: "library" | "camera") => {
     const perm =
       from === "camera"
         ? await ImagePicker.requestCameraPermissionsAsync()
@@ -72,37 +107,26 @@ export function EvidenceAttach({ reportId, onAdded }: { reportId: string; onAdde
     if (res.canceled || !res.assets?.length) return;
     const asset = res.assets[0];
     if (!asset.base64) {
-      setError(new ApiError(0, { code: "UPLOAD_FAILED", message: "That image could not be read. Try another one." }));
-      return;
+      throw new ApiError(0, { code: "UPLOAD_FAILED", message: "That image could not be read. Try another one." });
     }
-    setBusy(true);
-    try {
-      const prepared = await fitForUpload(asset, asset.base64);
-      if (!prepared) {
-        setError(
-          new ApiError(0, {
-            code: "TOO_LARGE",
-            message:
-              "That image is too large to attach, even after shrinking it. A screenshot of the same thing will usually go through.",
-          }),
-        );
-        return;
-      }
-      await post(`/safety/reports/${reportId}/evidence`, {
-        content_type: prepared.contentType,
-        size_bytes: Math.round((prepared.base64.length * 3) / 4),
-        checksum: null,
-        description: description.trim() || null,
-        data_url: dataUrl(prepared.contentType, prepared.base64),
+    const prepared = await fitForUpload(asset, asset.base64);
+    if (!prepared) {
+      throw new ApiError(0, {
+        code: "TOO_LARGE",
+        message:
+          "That image is too large to attach, even after shrinking it. A screenshot of the same thing will usually go through.",
       });
-      setDescription("");
-      setAdded((n) => n + 1);
-      await Promise.all([qc.invalidateQueries({ queryKey: ["safety-case", reportId] }), onAdded?.()]);
-    } catch (e) {
-      setError(e as ApiError);
-    } finally {
-      setBusy(false);
     }
+    await post(`/safety/reports/${reportId}/evidence`, {
+      content_type: prepared.contentType,
+      size_bytes: Math.round((prepared.base64.length * 3) / 4),
+      checksum: null,
+      description: description.trim() || null,
+      data_url: dataUrl(prepared.contentType, prepared.base64),
+    });
+    setDescription("");
+    setAdded((n) => n + 1);
+    await Promise.all([qc.invalidateQueries({ queryKey: ["safety-case", reportId] }), onAdded?.()]);
   };
 
   return (

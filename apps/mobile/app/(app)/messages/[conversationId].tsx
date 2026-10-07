@@ -5,7 +5,7 @@ import { FlatList, KeyboardAvoidingView, Platform, Pressable, Text, View } from 
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ApiError, get, newIdempotencyKey, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
-import { serverDriven } from "@/lib/query";
+import { awaitingServer, serverDriven } from "@/lib/query";
 import type { ConversationSummary, Message } from "@/api/types";
 import { Badge, Button, ErrorState, Loading, StatusBanner, TextInput } from "@/components/ui";
 import { color, radius, space, type as typo } from "@/theme";
@@ -108,8 +108,13 @@ export default function Conversation() {
       </SafeAreaView>
     );
 
-  const onHold = !!summary.data?.safety_hold;
-  const ended = summary.data?.status === "ended" || summary.data?.status === "closed";
+  // Null while the summary is still the answer from before the member got here. The header, the
+  // banners and the safety row all read it, and a stale one can say "active" on a conversation the
+  // server has closed, or offer Block to somebody already blocked. `summary.isLoading` was not
+  // enough: it is false whenever anything is cached, which is the whole point of this policy.
+  const conversation = awaitingServer(summary) ? null : summary.data;
+  const onHold = !!conversation?.safety_hold;
+  const ended = conversation?.status === "ended" || conversation?.status === "closed";
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: color.canvas }} edges={["top", "left", "right"]}>
@@ -118,9 +123,9 @@ export default function Conversation() {
           <Text style={s.back}>‹</Text>
         </Pressable>
         <Text style={s.headerName} numberOfLines={1}>
-          {summary.data?.other.display_name ?? "Conversation"}
+          {conversation?.other.display_name ?? "Conversation"}
         </Text>
-        {!!summary.data?.other.verified && <Badge label="Verified" tone="success" />}
+        {!!conversation?.other.verified && <Badge label="Verified" tone="success" />}
         {!ended && (
           <Pressable
             onPress={() => router.push(`/messages/${id}/close` as never)}
@@ -144,7 +149,7 @@ export default function Conversation() {
       )}
       {ended && !onHold && (
         <View style={{ paddingHorizontal: space.lg }}>
-          <StatusBanner tone="context" title={summary.data?.public_reason ?? "This conversation has ended."} />
+          <StatusBanner tone="context" title={conversation?.public_reason ?? "This conversation has ended."} />
         </View>
       )}
 
@@ -172,10 +177,10 @@ export default function Conversation() {
           or starts the first one. Hidden while a safety hold or an ending is in force. */}
       {!onHold && !ended && (
         <View style={{ paddingHorizontal: space.lg, paddingBottom: space.sm }}>
-          {summary.data?.date ? (
-            <Button variant="secondary" onPress={() => router.push(`/dates/${summary.data?.date?.date_plan_id}` as never)}>
-              {summary.data.date.starts_at
-                ? `Your date · ${new Date(summary.data.date.starts_at).toLocaleDateString()}`
+          {conversation?.date ? (
+            <Button variant="secondary" onPress={() => router.push(`/dates/${conversation?.date?.date_plan_id}` as never)}>
+              {conversation.date.starts_at
+                ? `Your date · ${new Date(conversation.date.starts_at).toLocaleDateString()}`
                 : "See the date you're planning"}
             </Button>
           ) : (

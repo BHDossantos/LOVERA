@@ -11,10 +11,15 @@ jest.mock("@/api/client", () => ({
   get: jest.fn(),
   post: (p: string, b: unknown) => mockPost(p, b),
   del: jest.fn(),
-  // The component constructs one of these itself when an asset has no base64 payload.
+  // Faithful to src/api/client.ts, which stores both: a double that drops `body` made the
+  // component's own errors look like unknown ones and get replaced with a generic message.
   ApiError: class extends Error {
+    status: number;
+    body: { code: string; message: string };
     constructor(s: number, b: { code: string; message: string }) {
       super(b.message);
+      this.status = s;
+      this.body = b;
     }
   },
 }));
@@ -214,4 +219,30 @@ test("an image too large even shrunk says so, instead of a generic validation er
 
   expect(mockPost).not.toHaveBeenCalled();
   expect(s.joined()).toContain("A screenshot of the same thing will usually go through.");
+});
+
+test("a camera that refuses to open is reported, not swallowed", async () => {
+  // The permission request and the picker launch used to sit outside the guard, and the button
+  // discards this promise with `void` — so this became an unhandled rejection and the member saw
+  // nothing at all, on the screen for attaching evidence of being harassed.
+  picker.requestCameraPermissionsAsync.mockResolvedValue({ granted: true } as never);
+  picker.launchCameraAsync.mockRejectedValue(new Error("Camera unavailable"));
+
+  const s = await renderScreen(<EvidenceAttach reportId="case_1" />);
+  await s.press("Take a photo");
+  await s.settle();
+
+  expect(s.joined()).toContain("The camera could not be opened.");
+  expect(mockPost).not.toHaveBeenCalled();
+});
+
+test("a permission request that throws is reported too", async () => {
+  picker.requestMediaLibraryPermissionsAsync.mockRejectedValue(new Error("OS refused"));
+
+  const s = await renderScreen(<EvidenceAttach reportId="case_1" />);
+  await s.press("Choose a screenshot");
+  await s.settle();
+
+  expect(s.joined()).toContain("Your photos could not be opened.");
+  expect(mockPost).not.toHaveBeenCalled();
 });
