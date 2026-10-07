@@ -124,7 +124,7 @@ report has to file one.
 
 ## C. Quality gaps
 
-- **Mobile test coverage is thin but no longer absent.** 82 tests over the screens where a wrong assumption about a payload is invisible until a member hits it. The API has 55 and the web app has Playwright e2e.
+- **Mobile test coverage is thin but no longer absent.** 88 tests over the screens where a wrong assumption about a payload is invisible until a member hits it. The API has 55 and the web app has Playwright e2e.
 - **The whole class of bug these guards exist for was real.** `get<T>()` is an unchecked assertion, and client paths are strings on one side and file names on the other, so three guards now run in CI: `tools/check_api_contract.py` (every call hits a route that accepts it), `apps/mobile/scripts/check-routes.js` (every navigation target *and* every path the API hands the app resolves to a screen), and `apps/mobile/scripts/check-native-config.py`. Each was written after a bug it would have caught shipped.
 - **A failing e2e run is currently diagnosed blind.** CI logs live on blob storage the API client will not follow, the check-run output comes back empty, and the Playwright artifact is unreachable. Emitting failures as `::error::` workflow annotations would fix this, because annotations *are* reachable.
 - **Messages poll instead of streaming.** Mobile refetches every 8s (`messages/[conversationId].tsx:42`); web uses `GET /realtime/token` and a WebSocket. Functional, slower, heavier on battery.
