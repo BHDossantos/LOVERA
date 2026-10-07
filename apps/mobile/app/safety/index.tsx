@@ -19,6 +19,7 @@ export default function SafetyCentre() {
   const { me } = useRequireMember({ allowRestricted: true, allowOnboarding: true });
   const router = useRouter();
   const [unblocking, setUnblocking] = useState<string | null>(null);
+  const [unblockError, setUnblockError] = useState<ApiError | null>(null);
 
   const centre = useQuery({ queryKey: ["safety"], queryFn: () => get<SafetyCenter>("/safety"), enabled: !!me });
   const cases = useQuery({
@@ -39,8 +40,12 @@ export default function SafetyCentre() {
           text: "Unblock",
           onPress: () => {
             setUnblocking(b.member_id);
+            setUnblockError(null);
+            // An offline device used to leave this as an unhandled rejection: the block
+            // stayed, nothing was said, and the member had no way to tell it had failed.
             void del(`/blocks/${b.member_id}`)
               .then(() => Promise.all([blocks.refetch(), centre.refetch()]))
+              .catch((e) => setUnblockError(e as ApiError))
               .finally(() => setUnblocking(null));
           },
         },
@@ -54,7 +59,7 @@ export default function SafetyCentre() {
         title="Safety centre"
         lede="Report someone, block them, or check a case. Nothing you report is shown to the person you report."
       />
-      <ErrorState error={(centre.error as ApiError) ?? null} retry={() => centre.refetch()} />
+      <ErrorState error={unblockError ?? ((centre.error as ApiError) ?? null)} retry={() => centre.refetch()} />
 
       {/* The emergency number comes first and does not depend on anything else loading. */}
       <StatusBanner

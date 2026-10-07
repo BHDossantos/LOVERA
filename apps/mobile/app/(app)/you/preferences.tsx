@@ -34,6 +34,27 @@ type Editing = {
   value: Record<string, unknown>;
 };
 
+/**
+ * The API returns `options: null` for any preference whose target is not a blueprint signal
+ * (`preferences_payload` in blueprint/service.py), and `languages` targets profile.languages.
+ * Without a fallback the chooser is skipped entirely and the preference saves as an empty
+ * list, so the member cannot express the thing the screen is offering. The web app supplies
+ * the same list for the same reason.
+ */
+const LANGUAGE_OPTIONS = [
+  { value: "en", label: "English" },
+  { value: "it", label: "Italiano" },
+  { value: "es", label: "Español" },
+  { value: "pt", label: "Português" },
+  { value: "fr", label: "Français" },
+  { value: "de", label: "Deutsch" },
+  { value: "ca", label: "Català" },
+  { value: "other", label: "Other" },
+];
+
+const optionsFor = (key: string, given: Option[] | null) =>
+  given ?? (key === "languages" ? LANGUAGE_OPTIONS : null);
+
 const TIERS = [
   { value: "must", label: "Must", body: "A hard gate. Never relaxed without you." },
   { value: "prefer", label: "Prefer", body: "Weighted in ranking." },
@@ -60,14 +81,30 @@ export default function YouPreferences() {
   const q = useQuery({ queryKey: ["preferences"], queryFn: () => get<PrefsOut>("/preferences"), enabled: !!me });
 
   const open = (p: Pref) => {
-    setEditing({ key: p.key, label: p.label, description: p.description, operator: p.operator, options: p.options, tier: p.tier, value: { ...p.value } });
+    setEditing({
+      key: p.key,
+      label: p.label,
+      description: p.description,
+      operator: p.operator,
+      options: optionsFor(p.key, p.options),
+      tier: p.tier,
+      value: { ...p.value },
+    });
     setImpact(null);
   };
 
   const add = (a: Available) => {
     const value: Record<string, unknown> =
       a.key === "age_range" ? { min: 25, max: 45 } : a.key === "distance_km" ? { max: 25 } : a.operator === "any_of" ? { any_of: [] } : { in: [] };
-    setEditing({ key: a.key, label: a.label, description: a.description, operator: a.operator, options: a.options, tier: a.default_tier, value });
+    setEditing({
+      key: a.key,
+      label: a.label,
+      description: a.description,
+      operator: a.operator,
+      options: optionsFor(a.key, a.options),
+      tier: a.default_tier,
+      value,
+    });
     setImpact(null);
   };
 
@@ -179,8 +216,12 @@ export default function YouPreferences() {
           </Button>
         </Card>
 
-        <Button loading={busy} onPress={save}>
-          Save
+        {/* This screen's whole claim is that you see the cost before you commit, and the
+            Save button was available before the preview had ever run — so a member could
+            set a Must criterion and never be shown what it costs. The preview is cleared by
+            every edit, so this also forces a fresh one after a change. */}
+        <Button disabled={!impact} loading={busy} onPress={save}>
+          {impact ? "Save" : "Check the impact first"}
         </Button>
         <Button
           variant="ghost"
