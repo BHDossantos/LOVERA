@@ -171,6 +171,22 @@ export async function renderScreen(ui: ReactElement) {
       });
       await flush();
     },
+    /**
+     * Run something that changes the screen — an `Alert` button's handler, say — inside `act`.
+     *
+     * `Alert.alert` is mocked, so a confirmation's `onPress` is reached by calling it off the spy
+     * rather than by pressing anything on screen, and calling it raw leaves React to schedule the
+     * resulting update whenever it likes. React says so ("An update to … was not wrapped in act"),
+     * and the consequence is worse than the warning: whether that state lands before the next
+     * assertion depends on how many microtask rounds `settle` happens to need, which differs
+     * between machines. Two tests passed here and failed in CI for exactly that reason.
+     */
+    run: async (fn: () => unknown) => {
+      await act(async () => {
+        await fn();
+      });
+      await flush();
+    },
     settle: flush,
   };
 }

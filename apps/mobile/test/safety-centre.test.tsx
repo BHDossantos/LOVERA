@@ -114,7 +114,7 @@ test("unblocking sends the blocked member's id, not the block row id", async () 
   // The confirmation is a native Alert, so invoke the action the member would choose.
   const buttons = alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[];
   await s.settle();
-  buttons.find((b) => b.text === "Unblock")?.onPress?.();
+  await s.run(() => buttons.find((b) => b.text === "Unblock")?.onPress?.());
   await s.settle();
   expect(mockDel).toHaveBeenCalledWith(expect.stringMatching(/^\/blocks\/mem_[ab]$/));
 });
@@ -133,7 +133,7 @@ test("a failed unblock is shown to the member, not swallowed", async () => {
   const s = await renderScreen(<SafetyCentre />);
   await s.press("Unblock");
   const buttons = alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[];
-  buttons.find((b) => b.text === "Unblock")?.onPress?.();
+  await s.run(() => buttons.find((b) => b.text === "Unblock")?.onPress?.());
   await s.settle();
   expect(s.joined()).toContain("You appear to be offline");
   // And the member can try again rather than being stuck on a spinner.
@@ -151,7 +151,7 @@ test("retrying a failed unblock retries the unblock, not the safety query", asyn
   mockDel.mockRejectedValueOnce(offline);
   const s = await renderScreen(<SafetyCentre />);
   await s.press("Unblock");
-  (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Unblock")?.onPress?.();
+  await s.run(() => (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Unblock")?.onPress?.());
   await s.settle();
   expect(s.joined()).toContain("You appear to be offline");
 
@@ -183,15 +183,15 @@ test("one unblock succeeding does not strand another's failure", async () => {
 
   const s = await renderScreen(<SafetyCentre />);
   const confirmLast = () =>
-    (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Unblock")?.onPress?.();
+    s.run(() => (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Unblock")?.onPress?.());
 
   // Ana's row first, and her request stays in flight.
   await s.press("Unblock", 0);
-  confirmLast();
+  await confirmLast();
   await s.settle();
   // Then Ben's, which fails while Ana's is still open.
   await s.press("Unblock", 1);
-  confirmLast();
+  await confirmLast();
   await s.settle();
   expect(s.joined()).toContain("You appear to be offline");
 
@@ -217,13 +217,13 @@ test("two unblocks failing on the shared list component keeps both failures", as
 
   const s = await renderScreen(<SafetyCentre />);
   const confirmLast = () =>
-    (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Unblock")?.onPress?.();
+    s.run(() => (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Unblock")?.onPress?.());
 
   await s.press("Unblock", 0);
-  confirmLast();
+  await confirmLast();
   await s.settle();
   await s.press("Unblock", 1);
-  confirmLast();
+  await confirmLast();
   await s.settle();
 
   expect(s.joined()).toContain("Could not unblock Ana");

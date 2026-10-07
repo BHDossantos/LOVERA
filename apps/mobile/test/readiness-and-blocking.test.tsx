@@ -176,7 +176,7 @@ test("blocking from the conversation sends POST /blocks and leaves the thread", 
 
   await s.press("Block");
   const buttons = alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[];
-  buttons.find((b) => b.text === "Block")?.onPress?.();
+  await s.run(() => buttons.find((b) => b.text === "Block")?.onPress?.());
   await s.settle();
 
   expect(mockPost).toHaveBeenCalledWith("/blocks", { member_id: "mem_them" });
@@ -193,9 +193,9 @@ test("a preference can be cleared, and the four the API refuses are not offered"
   await s.press("Change", 0);
   expect(s.texts()).toContain("Stop using this preference");
   await s.press("Stop using this preference");
-  (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[])
-    .find((b) => b.text === "Stop using it")
-    ?.onPress?.();
+  await s.run(() =>
+    (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Stop using it")?.onPress?.(),
+  );
   await s.settle();
   expect(mockDel).toHaveBeenCalledWith("/preferences/smoking");
 });
@@ -232,7 +232,7 @@ test("an ended conversation can still block the person", async () => {
   const s = await renderScreen(<Conversation />);
 
   await s.press("Block");
-  (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Block")?.onPress?.();
+  await s.run(() => (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Block")?.onPress?.());
   await s.settle();
   expect(mockPost).toHaveBeenCalledWith("/blocks", { member_id: "mem_them" });
 });
@@ -270,7 +270,7 @@ test("blocking drops the cached date and introduction it has just cancelled", as
   s.client.setQueryData(["introductions"], { current: [{ id: "intro_1" }], mutual: [] });
 
   await s.press("Block");
-  (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Block")?.onPress?.();
+  await s.run(() => (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Block")?.onPress?.());
   await s.settle();
 
   // The details are gone, not merely stale: stale data is still painted.
@@ -351,7 +351,7 @@ test("a preference the matcher is ignoring can still be deleted", async () => {
   expect(s.texts()).not.toContain("Change");
 
   await s.press("Delete this preference");
-  (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Stop using it")?.onPress?.();
+  await s.run(() => (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Stop using it")?.onPress?.());
   await s.settle();
   expect(mockDel).toHaveBeenCalledWith("/preferences/faith_importance");
 });
@@ -385,7 +385,7 @@ test("a preference write refreshes the Blueprint, which embeds the same list", a
 
   await s.press("Change", 0);
   await s.press("Stop using this preference");
-  (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Stop using it")?.onPress?.();
+  await s.run(() => (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Stop using it")?.onPress?.());
   await s.settle();
 
   expect(mockDel).toHaveBeenCalledWith("/preferences/smoking");

@@ -11,7 +11,15 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   fullyParallel: false,
   workers: 1,
-  reporter: [["list"], ["html", { open: "never" }]],
+  /**
+   * In CI, add the `github` reporter, which emits each failure as a `::error::` workflow annotation.
+   *
+   * The HTML report is unreachable from here — it is an artifact — and the job log is only readable
+   * through a tool that returns its last few seconds, so a red run was diagnosed by guessing. An
+   * annotation carries the file, the line and the message, is readable through the check-run API, and
+   * survives log retention.
+   */
+  reporter: process.env.CI ? [["list"], ["github"], ["html", { open: "never" }]] : [["list"], ["html", { open: "never" }]],
   use: {
     baseURL: process.env.E2E_BASE_URL ?? "http://127.0.0.1:3000",
     trace: "retain-on-failure",
