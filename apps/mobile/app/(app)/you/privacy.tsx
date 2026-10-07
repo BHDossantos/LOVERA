@@ -30,9 +30,17 @@ const COPY: Record<string, { label: string; body: string }> = {
     label: "AI help with matching and messages",
     body: "Lets us build your blueprint and offer draft replies and translation. Withdrawing keeps your account; matching falls back to the deterministic path and the draft and translate tools stop.",
   },
+  // What this consent actually governs, and what withdrawing it actually does — both of which this
+  // screen previously overstated. Onboarding asks for it as "I may choose to share faith for
+  // matching", off by default, so most members never grant it and are matched regardless. Claiming
+  // here that it covers sexual orientation, and that withdrawing stops new introductions, promised a
+  // consequence the matcher does not deliver: `build_snapshot` drops the sensitive signals and
+  // preferences, and nothing else changes. Saying so plainly is the fix; whether matching on gender
+  // and seeking needs its own basis is a question for the legal review, recorded in
+  // docs/LAUNCH-READINESS.md rather than answered by this copy.
   special_category: {
-    label: "Sexual orientation, and faith if you gave it",
-    body: "Needed to match you with people you could actually be interested in. Withdrawing stops new introductions being made, because there is nothing left to match on.",
+    label: "Sensitive answers used for matching",
+    body: "Faith, and anything similar you chose to share. Withdrawing stops them being used in matching and in your blueprint — they are ignored, not deleted. Introductions carry on.",
   },
   model_improvement: {
     label: "Help improve the matching model",
