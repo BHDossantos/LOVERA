@@ -126,6 +126,7 @@ def maybe_run_weekly_batch(db: Session) -> dict | None:
     from zoneinfo import ZoneInfo
 
     from app.core.config import get_settings
+    from app.core.timeutil import market_date
     from app.models.matching import MatchRun
     from app.modules.matching.service import run_batch, run_payload
 
@@ -133,11 +134,13 @@ def maybe_run_weekly_batch(db: Session) -> dict | None:
     now_local = datetime.now(ZoneInfo(settings.market_timezone))
     if now_local.weekday() != settings.match_batch_weekday or now_local.hour < settings.match_batch_hour:
         return None
-    cohort_date = now_local.date().isoformat()
+    # One value, used by the guard and by the run it guards. `now_local` is already in market time,
+    # so this is the same date the schedule above was compared against.
+    cohort_date = market_date(now_local)
     exists = db.execute(select(MatchRun.id).where(MatchRun.market_id == settings.market_id, MatchRun.cohort_date == cohort_date)).first()
     if exists:
         return None
-    run = run_batch(db, settings.market_id, auto_publish=settings.match_auto_publish)
+    run = run_batch(db, settings.market_id, auto_publish=settings.match_auto_publish, cohort_date=cohort_date)
     log.info("weekly batch %s status=%s allocated=%s", run.id, run.status, run.allocation_count)
     return run_payload(run)
 
