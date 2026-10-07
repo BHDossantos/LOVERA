@@ -18,6 +18,8 @@ const PREFS = {
         { value: "yes", label: "Yes" },
         { value: "open", label: "Open to it" },
       ],
+      active: true,
+      inactive_reason: null,
       updated_at: null,
     },
   ],
@@ -126,4 +128,45 @@ test("a preview for the current values does unlock Save", async () => {
   mockPost.mockResolvedValue({ key: "children", tier: "must", eligible_now: 12, eligible_after: 9, pool_size: 30, message: "Nine." });
   await s2.press("Check the impact");
   expect(s2.hasText("Save")).toBe(true);
+});
+
+test("a preference the matcher is ignoring does not claim to be a hard gate", async () => {
+  // Withdrawing special-category consent stops build_snapshot applying a faith preference at
+  // every tier, but the row stays — so the screen kept showing "must" for a criterion that was
+  // gating nobody, and offered a Change that would come back 403.
+  mockGet.mockImplementation(
+    routeGet({
+      "/preferences": {
+        ...PREFS,
+        preferences: [
+          {
+            ...PREFS.preferences[0],
+            key: "faith_importance",
+            label: "Faith in daily life",
+            active: false,
+            inactive_reason: "special_category_consent_withdrawn",
+          },
+        ],
+      },
+    }),
+  );
+  const s = await renderScreen(<YouPreferences />);
+  expect(s.hasText("Faith in daily life")).toBe(true);
+  expect(s.hasText("must")).toBe(false);
+  expect(s.hasText("not in use")).toBe(true);
+  expect(s.joined()).toContain("not being applied to your introductions");
+  // No control whose only outcome is a refusal; a way to the consent that would restore it.
+  expect(s.texts()).not.toContain("Change");
+  expect(s.hasText("Review your consents")).toBe(true);
+});
+
+test("a preference with no `active` field is still treated as in use", async () => {
+  // A store build can meet an API that predates the field. Defaulting to "not in use" would
+  // blank out every criterion the member has, which is worse than the bug it guards against.
+  const { active, inactive_reason, ...legacy } = PREFS.preferences[0];
+  mockGet.mockImplementation(routeGet({ "/preferences": { ...PREFS, preferences: [legacy] } }));
+  const s = await renderScreen(<YouPreferences />);
+  expect(s.hasText("must")).toBe(true);
+  expect(s.hasText("Change")).toBe(true);
+  expect(s.hasText("not in use")).toBe(false);
 });

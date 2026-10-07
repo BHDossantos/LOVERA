@@ -41,8 +41,13 @@ class Snapshot:
         return self.profile.display_name or "Member"
 
 
-def _is_sensitive_preference(key: str) -> bool:
-    """Whether this preference asks about a special-category signal."""
+def is_sensitive_preference(key: str) -> bool:
+    """Whether this preference asks about a special-category signal.
+
+    Public because the consent rule has to hold everywhere a preference is read, not only here:
+    the payload that tells a member whether a criterion is enforced, and the impact preview that
+    counts who it lets through, both have to agree with what the matcher actually does.
+    """
     from app.catalog.signals import PREFERENCES
 
     pdef = PREFERENCES.get(key)
@@ -81,7 +86,7 @@ def build_snapshot(db: Session, member: Member) -> Snapshot | None:
     prefs = [
         pref
         for pref in db.execute(select(Preference).where(Preference.member_id == member.id)).scalars().all()
-        if sensitive_ok or not _is_sensitive_preference(pref.key)
+        if sensitive_ok or not is_sensitive_preference(pref.key)
     ]
     availability = db.execute(select(AvailabilityVersion).where(AvailabilityVersion.member_id == member.id).order_by(AvailabilityVersion.created_at.desc())).scalars().first()
     ver = db.execute(select(Verification).where(Verification.member_id == member.id, Verification.status == "verified").order_by(Verification.created_at.desc())).scalars().first()

@@ -25,6 +25,23 @@ type Pair = {
   explanations: { for: string; reasons: Reason[]; friction: { text: string; strength: Strength } | null; unknown: { text: string; strength: Strength } | null }[];
   evidence: { overlaps: number | null; distance_km: number | null; shared_languages: string[] | null };
 };
+/**
+ * A correction a member filed against an explanation. The ones with `applied: false` are the
+ * reason this queue exists: the member said an inference was wrong without supplying a
+ * replacement, so nothing about their matching changed and only a person can act on it. They
+ * were being told "noted for a reviewer" while no reviewer had anywhere to read them.
+ */
+type Correction = {
+  id: string;
+  introduction_id: string;
+  member: { id: string; name: string };
+  signal_key: string;
+  signal_label: string;
+  corrected_value: string | null;
+  applied: boolean;
+  note: string | null;
+  created_at: string | null;
+};
 
 /** Concierge matching: run the weekly batch, review pairs with internal scores and explanations, publish. No safety data. */
 export default function AdminMatchingPage() {
@@ -39,6 +56,12 @@ export default function AdminMatchingPage() {
   const [error, setError] = useState<ApiError | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [publishOpen, setPublishOpen] = useState(false);
+  const [unappliedOnly, setUnappliedOnly] = useState(true);
+  const corrections = useQuery({
+    queryKey: ["admin", "matching", "corrections", unappliedOnly],
+    queryFn: () => get<{ items: Correction[] }>(`/admin/matching/corrections?unapplied_only=${unappliedOnly}`),
+    enabled: !!me,
+  });
 
   const act = async (label: string, fn: () => Promise<unknown>) => {
     setBusy(label);
@@ -127,6 +150,41 @@ export default function AdminMatchingPage() {
               </div>
             </Card>
           )}
+          <Card className="mb-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="font-bold">Member corrections</h2>
+              <label className="flex items-center gap-2 text-sm text-ink-secondary">
+                <input type="checkbox" checked={unappliedOnly} onChange={(e) => setUnappliedOnly(e.target.checked)} />
+                Only the ones that changed nothing
+              </label>
+            </div>
+            <p className="mb-2 text-sm text-ink-secondary">
+              Filed from an introduction&apos;s explanation. Where no replacement value was given, the member&apos;s
+              Blueprint is unchanged and this row is the only record — the signal they say is wrong is still live.
+            </p>
+            {corrections.isLoading && <Skeleton lines={3} label="Loading corrections" />}
+            {corrections.error && <ErrorState error={corrections.error as ApiError} retry={() => corrections.refetch()} />}
+            {corrections.data && corrections.data.items.length === 0 && (
+              <p className="text-sm text-ink-tertiary">Nothing waiting.</p>
+            )}
+            <ul className="divide-y divide-border">
+              {corrections.data?.items.map((c) => (
+                <li key={c.id} className="py-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold text-ink">{c.signal_label}</span>
+                    <span className="text-sm text-ink-secondary">{c.member.name}</span>
+                    <span className={cx("rounded-full border px-2 py-0.5 text-xs", c.applied ? "border-border text-ink-tertiary" : "border-caution text-caution")}>
+                      {c.applied ? `changed to ${c.corrected_value}` : "nothing changed"}
+                    </span>
+                  </div>
+                  {c.note && <p className="text-sm italic text-ink-secondary">“{c.note}”</p>}
+                  <p className="text-xs text-ink-tertiary">
+                    Introduction {c.introduction_id.slice(0, 8)} · {formatDateTime(c.created_at)}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </Card>
           {pairs.isLoading && <Skeleton lines={6} label="Loading pairs" />}
           {pairs.error && <ErrorState error={pairs.error as ApiError} retry={() => pairs.refetch()} />}
           {pairs.data && pairs.data.items.length === 0 && <EmptyState title="No allocated pairs in this run" body="Check gate failures in the run stats and unserved members with capacity." />}

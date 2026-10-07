@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useRouter } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Text, View } from "react-native";
 import { ApiError, get, patch, post } from "@/api/client";
@@ -19,7 +20,24 @@ import { color, space, type as typo } from "@/theme";
  * shown; the choice stays the member's.
  */
 type Option = { value: string; label: string };
-type Pref = { id: string; key: string; label: string; description: string; tier: string; operator: string; value: Record<string, unknown>; options: Option[] | null; updated_at: string | null };
+type Pref = {
+  id: string;
+  key: string;
+  label: string;
+  description: string;
+  tier: string;
+  operator: string;
+  value: Record<string, unknown>;
+  options: Option[] | null;
+  /**
+   * False when the matcher is ignoring this criterion even though it is still stored — today
+   * that means a sensitive preference whose special-category consent was withdrawn. The badge
+   * has to stop saying "Must", because the one thing a Must promises is that it is enforced.
+   */
+  active: boolean;
+  inactive_reason: string | null;
+  updated_at: string | null;
+};
 type Available = { key: string; label: string; description: string; default_tier: string; operator: string; options: Option[] | null };
 type PrefsOut = { preferences: Pref[]; available: Available[]; tier_meaning: Record<string, string> };
 type Impact = { key: string; tier: string; eligible_now: number; eligible_after: number; pool_size: number; message: string };
@@ -75,6 +93,7 @@ function describe(p: { value: Record<string, unknown>; options: Option[] | null 
 
 export default function YouPreferences() {
   const { me } = useRequireMember();
+  const router = useRouter();
   const qc = useQueryClient();
   const [editing, setEditing] = useState<Editing | null>(null);
   // The preview is stored with a signature of the values it was computed for. Clearing it on
@@ -264,12 +283,24 @@ export default function YouPreferences() {
         <Card key={p.key}>
           <View style={s.row}>
             <Text style={s.h2}>{p.label}</Text>
-            <Badge label={p.tier} tone={p.tier === "must" ? "caution" : "muted"} />
+            <Badge label={p.active === false ? "not in use" : p.tier} tone={p.active !== false && p.tier === "must" ? "caution" : "muted"} />
           </View>
           <Text style={s.meta}>{describe(p)}</Text>
-          <Button variant="secondary" onPress={() => open(p)}>
-            Change
-          </Button>
+          {p.active === false && (
+            <Text style={s.meta}>
+              You withdrew consent for sensitive data, so this is not being applied to your introductions. Your setting
+              is kept — granting that consent again in Privacy puts it back in use.
+            </Text>
+          )}
+          {p.active !== false ? (
+            <Button variant="secondary" onPress={() => open(p)}>
+              Change
+            </Button>
+          ) : (
+            <Button variant="ghost" onPress={() => router.push("/you/privacy")}>
+              Review your consents
+            </Button>
+          )}
         </Card>
       ))}
 

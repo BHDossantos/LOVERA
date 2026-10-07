@@ -10,7 +10,12 @@ import { Button, Card, EmptyState, ErrorState, EvidenceLabel, LinkButton, PageTi
 import { formatDate } from "@/lib/format";
 import type { Strength } from "@/lib/types";
 
-type Signal = { key: string; category: string; label: string; value: string | null; value_label: string; confidence: Strength; evidence: string | null; member_corrected: boolean; freshness_at: string | null; special_category: boolean; options: { value: string; label: string }[] };
+/**
+ * `correctable` is false for a special-category signal whose consent was withdrawn: the row is
+ * still returned, because a member is entitled to see what we hold, but `correct_signal` refuses
+ * to change it. Offering the editor anyway meant every save came back 403.
+ */
+type Signal = { key: string; category: string; label: string; value: string | null; value_label: string; confidence: Strength; evidence: string | null; member_corrected: boolean; freshness_at: string | null; special_category: boolean; correctable: boolean; options: { value: string; label: string }[] };
 type Pref = { key: string; label: string; tier: string };
 type Blueprint = {
   version: { id: string; version_no: number; confirmed_at: string | null; model_version: string } | null;
@@ -159,6 +164,12 @@ export default function BlueprintPage() {
                           Cancel
                         </Button>
                       </div>
+                    ) : s.correctable === false ? (
+                      <p className="mt-1 text-sm text-ink-secondary">
+                        You withdrew consent for sensitive data, so this is no longer used for matching and cannot be
+                        changed here. Granting that consent again in <a className="underline" href="/you/privacy">Privacy</a> makes it
+                        editable.
+                      </p>
                     ) : (
                       <Button size="sm" variant="ghost" className="mt-1" onClick={() => { setEditing(s.key); setDraft(s.value ?? ""); }}>
                         Correct this

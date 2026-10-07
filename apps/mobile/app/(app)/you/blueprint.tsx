@@ -128,7 +128,7 @@ export default function YouBlueprint() {
                   a member is entitled to see what we hold about them — but changing it needs the
                   consent that was withdrawn, so the only honest thing is to say so rather than
                   offer a button whose one outcome is a refusal. */}
-              {!sig.correctable ? (
+              {sig.correctable === false ? (
                 <Text style={s.meta}>
                   You withdrew consent for sensitive data, so this is no longer used for matching and cannot be
                   changed here. Granting that consent again in Privacy makes it editable.

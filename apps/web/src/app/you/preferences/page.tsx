@@ -9,7 +9,12 @@ import { Button, Card, EmptyState, ErrorState, Field, PageTitle, Skeleton, Statu
 import { LANG_LABEL } from "@/lib/format";
 
 type Option = { value: string; label: string };
-type Pref = { id: string; key: string; label: string; description: string; tier: string; operator: string; value: Record<string, unknown>; options: Option[] | null; updated_at: string | null };
+/**
+ * `active` is false when the matcher is ignoring a stored criterion — today, a sensitive
+ * preference whose special-category consent was withdrawn. The tier pill has to stop claiming
+ * "Must", because the one thing a Must promises is that it is being enforced.
+ */
+type Pref = { id: string; key: string; label: string; description: string; tier: string; operator: string; value: Record<string, unknown>; options: Option[] | null; active: boolean; inactive_reason: string | null; updated_at: string | null };
 type Available = { key: string; label: string; description: string; default_tier: string; operator: string; options: Option[] | null };
 type PrefsOut = { preferences: Pref[]; available: Available[]; tier_meaning: Record<string, string> };
 type Impact = { key: string; tier: string; eligible_now: number; eligible_after: number; pool_size: number; message: string };
@@ -100,14 +105,27 @@ export default function PreferencesPage() {
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-semibold text-ink">{p.label}</span>
-                      <TierPill tier={p.tier} />
+                      {p.active !== false ? <TierPill tier={p.tier} /> : <span className="rounded-full border border-border px-2 py-0.5 text-xs text-ink-tertiary">not in use</span>}
                       {CORE.has(p.key) && <span className="text-xs text-ink-tertiary">core · set to Open rather than remove</span>}
                     </div>
                     <p className="text-sm text-ink-secondary">{describe(p)}</p>
+                    {p.active === false && (
+                      <p className="mt-1 text-sm text-ink-secondary">
+                        You withdrew consent for sensitive data, so this is not being applied to your introductions. Your
+                        setting is kept — granting that consent again in <a className="underline" href="/you/privacy">Privacy</a> puts
+                        it back in use.
+                      </p>
+                    )}
                   </div>
-                  <Button size="sm" variant="secondary" onClick={() => startEdit(p)} aria-label={`Adjust ${p.label}`}>
-                    Adjust
-                  </Button>
+                  {p.active !== false ? (
+                    <Button size="sm" variant="secondary" onClick={() => startEdit(p)} aria-label={`Adjust ${p.label}`}>
+                      Adjust
+                    </Button>
+                  ) : (
+                    <a className="shrink-0 text-sm underline text-ink-secondary" href="/you/privacy">
+                      Review consents
+                    </a>
+                  )}
                 </li>
               ))}
             </ul>

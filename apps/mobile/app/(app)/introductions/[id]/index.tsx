@@ -76,7 +76,12 @@ export default function IntroductionDetail() {
   const sectionTops = useRef<Record<string, number>>({});
   const cardTop = useRef(0);
   const scrollY = useRef(0);
-  const reported = useRef(false);
+  // The sections already reported, not a single "done" flag. A member who stops reading for two
+  // seconds after the reasons alone used to send ["reasons"] and latch, so friction and unknown
+  // could never be reported however far they then scrolled — which systematically undercounts
+  // exactly the two sections this per-section tracking was added to measure.
+  const reported = useRef<string[]>([]);
+  const inflight = useRef(false);
   const idle = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const seenSections = useCallback(() => {
@@ -87,27 +92,39 @@ export default function IntroductionDetail() {
       .sort();
   }, [height]);
 
+  /**
+   * Sends the cumulative set, and only when it has grown. Each section therefore costs at most
+   * one request — three for the whole card — and the last one the API receives is the complete
+   * truth about what the member read, whether or not they ever reached the bottom.
+   */
   const send = useCallback(
     (sections: string[]) => {
-      if (reported.current || !intro || !sections.length) return;
-      reported.current = true;
-      void post(`/introductions/${intro.id}/explanation-viewed`, { sections }).catch(() => {
-        reported.current = false;
-      });
+      if (inflight.current || !intro || !sections.length) return;
+      if (sections.every((name) => reported.current.includes(name))) return;
+      const previous = reported.current;
+      reported.current = sections;
+      inflight.current = true;
+      void post(`/introductions/${intro.id}/explanation-viewed`, { sections })
+        .catch(() => {
+          reported.current = previous;
+        })
+        .finally(() => {
+          inflight.current = false;
+        });
     },
     [intro],
   );
 
   /** Wait for the scrolling to settle, unless every section has been measured and seen. */
   const considerReporting = useCallback(() => {
-    if (reported.current || !intro?.explanation) return;
+    if (!intro?.explanation || reported.current.length === SECTIONS.length) return;
     const seen = seenSections();
     if (!seen.length) return;
     // Against SECTIONS, not against what has been measured so far: layouts arrive one at a
     // time, and "every section I have measured is visible" is true of the first one on its own.
-    // That fired immediately with just ["reasons"] and then latched, so the two sections below
-    // it could never be reported however far the member read.
+    // That fired immediately with just ["reasons"], and used to latch there for good.
     if (seen.length === SECTIONS.length) {
+      if (idle.current) clearTimeout(idle.current);
       send(seen);
       return;
     }

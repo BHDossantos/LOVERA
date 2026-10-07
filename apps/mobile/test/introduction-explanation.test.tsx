@@ -163,6 +163,42 @@ test("a member who reads only the reasons has only the reasons reported", async 
   }
 });
 
+test("reading on after a pause reports the sections that pause missed", async () => {
+  // The latch the review found: the idle timer sent ["reasons"] and marked the whole screen
+  // reported, so friction and unknown could never be named however far the member then read.
+  // Two seconds of stillness is ordinary stop-and-read, which made it the common case.
+  jest.useFakeTimers();
+  try {
+    const s = await renderScreen(<IntroductionDetail />);
+    await layOut(s, 0, { reasons: 0, friction: 5000, unknown: 5200 });
+    await act(async () => {
+      jest.advanceTimersByTime(2_500);
+    });
+    let calls = posted("/introductions/intro_1/explanation-viewed");
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toEqual({ sections: ["reasons"] });
+
+    // They carry on to the bottom. The cumulative set has to arrive, so the last thing the API
+    // holds is the whole truth rather than the first two seconds of it.
+    await s.scroll(5000);
+    await act(async () => {
+      jest.advanceTimersByTime(2_500);
+    });
+    calls = posted("/introductions/intro_1/explanation-viewed");
+    expect(calls).toHaveLength(2);
+    expect(calls[1][1]).toEqual({ sections: ["friction", "reasons", "unknown"] });
+
+    // And no more than that: every section is now accounted for.
+    await s.scroll(6000);
+    await act(async () => {
+      jest.advanceTimersByTime(5_000);
+    });
+    expect(posted("/introductions/intro_1/explanation-viewed")).toHaveLength(2);
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 test("nothing is reported for an explanation never scrolled to", async () => {
   // Reporting on mount would make this a second name for introduction_opened.
   const s = await renderScreen(<IntroductionDetail />);

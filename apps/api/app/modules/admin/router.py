@@ -17,7 +17,7 @@ from app.models.account import Member
 from app.models.billing import CreditLedger, Subscription
 from app.models.conversations import Conversation, Message
 from app.models.dates import DatePlan, PostDateFeedback
-from app.models.introductions import IntroDecision, Introduction, MatchExplanation
+from app.models.introductions import IntroCorrection, IntroDecision, Introduction, MatchExplanation
 from app.models.matching import CandidatePair, MatchRun
 from app.models.privacy import AnalyticsEvent, AuditEvent
 from app.models.profile import Profile
@@ -109,6 +109,51 @@ def review_pair(pair_id: str, data: PairReviewIn, principal: Principal = Depends
     pair.review_note = data.note
     audit(db, actor_type="staff", actor_id=principal.id, action=f"admin.pair_{data.decision}", resource_type="candidate_pair", resource_id=pair.id, purpose="concierge_review", metadata={"note": data.note})
     return {"pair_id": pair.id, "review_status": pair.review_status}
+
+
+@router.get("/matching/corrections")
+def list_corrections(
+    unapplied_only: bool = Query(False),
+    limit: int = Query(50, le=200),
+    principal: Principal = Depends(require_roles("concierge", "admin")),
+    db: Session = Depends(get_db, scope="function"),
+) -> dict:
+    """Corrections members filed against an introduction's explanation.
+
+    These rows existed before this endpoint and were read by nothing, while the member was told
+    "noted for a reviewer" — a promise no reviewer could keep. The useful ones are those with no
+    replacement value: the member said an inference was wrong but could not say what the right
+    answer is, so nothing about their matching changed and only a person can act on it.
+    """
+    from app.catalog.signals import SIGNALS
+
+    stmt = select(IntroCorrection).order_by(IntroCorrection.created_at.desc())
+    rows = db.execute(stmt).scalars().all()
+    out = []
+    for c in rows:
+        applied = bool((c.corrected_value or {}).get("value"))
+        if unapplied_only and applied:
+            continue
+        sig = SIGNALS.get(c.signal_key)
+        out.append(
+            {
+                "id": c.id,
+                "introduction_id": c.introduction_id,
+                "member": {"id": c.member_id, "name": _name(db, c.member_id)},
+                "signal_key": c.signal_key,
+                "signal_label": sig.label if sig else c.signal_key,
+                "corrected_value": (c.corrected_value or {}).get("value"),
+                # False means the member's Blueprint was left as it was: they disputed the
+                # inference without supplying a replacement, so this row is the only record.
+                "applied": applied,
+                "note": c.note,
+                "created_at": iso(c.created_at),
+            }
+        )
+        if len(out) >= limit:
+            break
+    audit(db, actor_type="staff", actor_id=principal.id, action="admin.corrections_viewed", resource_type="intro_correction", resource_id=None, purpose="concierge_review", metadata={"count": len(out)})
+    return {"items": out}
 
 
 @router.post("/matching/runs/{run_id}/publish")
