@@ -90,7 +90,7 @@ function easProjectId(): string | undefined {
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
-  name: "AI Matchmaker",
+  name: "LOVERA",
   slug: "ai-matchmaker",
   scheme: "aimatchmaker",
   version: "1.0.0",
@@ -110,11 +110,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     config: { usesNonExemptEncryption: false },
     infoPlist: {
       NSCameraUsageDescription:
-        "AI Matchmaker uses the camera so you can take a profile photo and complete identity verification.",
+        "LOVERA uses the camera so you can take a profile photo and complete identity verification.",
       NSPhotoLibraryUsageDescription:
-        "AI Matchmaker needs your photo library so you can choose the photos that appear on your profile.",
+        "LOVERA needs your photo library so you can choose the photos that appear on your profile.",
       NSUserTrackingUsageDescription:
-        "AI Matchmaker does not track you across other companies' apps or websites.",
+        "LOVERA does not track you across other companies' apps or websites.",
     },
   },
   android: {
@@ -174,9 +174,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       "expo-image-picker",
       {
         photosPermission:
-          "AI Matchmaker needs your photo library so you can choose the photos that appear on your profile.",
+          "LOVERA needs your photo library so you can choose the photos that appear on your profile.",
         cameraPermission:
-          "AI Matchmaker uses the camera so you can take a profile photo and complete identity verification.",
+          "LOVERA uses the camera so you can take a profile photo and complete identity verification.",
         // The picker declares microphone access because it can capture video. We only
         // ever take stills, so this comes off: an unused permission with a boilerplate
         // purpose string is exactly what App Review looks for.
