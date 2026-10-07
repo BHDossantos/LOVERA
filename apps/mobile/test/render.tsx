@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import { useEffect, type ReactElement } from "react";
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -183,6 +183,37 @@ async function flush(rounds = 6) {
       jest.advanceTimersByTime?.(0);
     });
   }
+}
+
+/**
+ * `useFocusEffect` for the test renderer, plus a way to focus a screen again.
+ *
+ * The screens in the Tabs navigator are not remounted when a member comes back to them, which is
+ * why the freshness clock resets on focus rather than on mount. Nothing in this renderer has a
+ * navigator, so each test file's `expo-router` mock delegates here: the callback runs once on mount,
+ * as a first focus would, and `refocus()` runs every registered one again, as returning to the tab
+ * does.
+ */
+const focusCallbacks = new Set<() => void>();
+
+export function mockUseFocusEffect(effect: () => void | (() => void)) {
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  useEffect(() => {
+    focusCallbacks.add(effect);
+    const cleanup = effect();
+    return () => {
+      focusCallbacks.delete(effect);
+      if (typeof cleanup === "function") cleanup();
+    };
+  }, [effect]);
+}
+
+/** Focus every mounted screen again, as navigating back to a tab does. */
+export async function refocus() {
+  await act(async () => {
+    for (const cb of [...focusCallbacks]) cb();
+  });
+  await flush();
 }
 
 /** Negative indices count from the end, so a test can say "the last one" without counting. */

@@ -1,4 +1,5 @@
-import { useRef } from "react";
+import { useCallback, useRef, useState } from "react";
+import { useFocusEffect } from "expo-router";
 
 /**
  * Query behaviour for a screen the server sent the member to.
@@ -67,8 +68,39 @@ export function freshSince(q: { dataUpdatedAt: number }, mountedAt: number) {
  * A hook, because the question is "since this screen opened" and nothing on the query result
  * records when that was. Call it once per query and keep the boolean: a second call would start a
  * second clock.
+ *
+ * "Opened" means focused, not mounted, and the difference is the whole of why this is not a plain
+ * `useRef(Date.now())`. Today, Introductions, Messages and Dates live in a `Tabs` navigator, which
+ * keeps a screen mounted once it has been visited. Leaving and coming back focuses the screen that
+ * is already there: the observer never unmounted, so `gcTime: 0` collected nothing and
+ * `refetchOnMount: "always"` had no mount to fire on, and a clock set at mount still counted the
+ * previous visit's data as this visit's answer. A notification therefore opened Introductions on the
+ * list from before it — indefinitely, since nothing else refetches that one.
+ *
+ * So the clock resets on focus and takes the refetch with it. The first focus is skipped because
+ * mounting already fetched, and doubling it would mean two requests every time a screen is opened.
+ *
+ * The cost is honest: coming back to a tab by hand gates the screen until the request lands, the
+ * same as arriving from a notification does, because the screen cannot tell those apart. That is
+ * what `serverDriven` asks for — the previous answer is not this visit's answer — and it is one
+ * request, not a spinner the member waits on repeatedly.
  */
-export function useAwaitingServer(q: { dataUpdatedAt: number }) {
-  const mountedAt = useRef(Date.now());
-  return !freshSince(q, mountedAt.current);
+export function useAwaitingServer(q: { dataUpdatedAt: number; refetch: () => unknown }) {
+  const [openedAt, setOpenedAt] = useState(() => Date.now());
+  // Held in a ref so the focus callback can stay identity-stable: react-query's `refetch` is bound
+  // per observer, and a dependency on it would re-run the effect rather than only re-run on focus.
+  const refetch = useRef(q.refetch);
+  refetch.current = q.refetch;
+  const mounting = useRef(true);
+  useFocusEffect(
+    useCallback(() => {
+      if (mounting.current) {
+        mounting.current = false;
+        return;
+      }
+      setOpenedAt(Date.now());
+      void refetch.current();
+    }, []),
+  );
+  return !freshSince(q, openedAt);
 }

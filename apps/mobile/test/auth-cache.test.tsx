@@ -33,7 +33,11 @@ jest.mock("expo-secure-store", () => ({
   setItemAsync: jest.fn().mockResolvedValue(undefined),
   deleteItemAsync: jest.fn().mockResolvedValue(undefined),
 }));
-jest.mock("expo-router", () => ({ useRouter: () => ({ replace: jest.fn(), push: jest.fn(), back: jest.fn() }) }));
+jest.mock("expo-router", () => ({
+  // The screens in the Tabs navigator are focused rather than remounted when a member comes
+  // back to them, so the freshness clock resets on focus. The harness runs the callback once, as a
+  // first focus would, and `refocus()` runs it again.
+  useFocusEffect: (cb: () => void | (() => void)) => (require("./render") as { mockUseFocusEffect: (c: () => void | (() => void)) => void }).mockUseFocusEffect(cb), useRouter: () => ({ replace: jest.fn(), push: jest.fn(), back: jest.fn() }) }));
 
 import { AuthProvider, useAuth } from "@/lib/auth";
 

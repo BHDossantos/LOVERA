@@ -99,6 +99,10 @@ jest.mock("@/lib/auth", () => ({
   nextOnboardingPath: () => "/today",
 }));
 jest.mock("expo-router", () => ({
+  // The screens in the Tabs navigator are focused rather than remounted when a member comes
+  // back to them, so the freshness clock resets on focus. The harness runs the callback once, as a
+  // first focus would, and `refocus()` runs it again.
+  useFocusEffect: (cb: () => void | (() => void)) => (require("./render") as { mockUseFocusEffect: (c: () => void | (() => void)) => void }).mockUseFocusEffect(cb),
   useLocalSearchParams: () => ({ conversationId: "conv_1" }),
   useRouter: () => ({ push: (...a: unknown[]) => mockPush(...a), replace: (...a: unknown[]) => mockReplace(...a), back: jest.fn() }),
 }));

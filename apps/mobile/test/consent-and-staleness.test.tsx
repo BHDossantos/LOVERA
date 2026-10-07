@@ -1,4 +1,4 @@
-import { apiFailure, renderScreen, routeGet } from "./render";
+import { apiFailure, refocus, renderScreen, routeGet } from "./render";
 
 /**
  * Consent is the lawful basis for a sensitive criterion, so changing it changes the preferences
@@ -30,6 +30,10 @@ jest.mock("@/lib/auth", () => ({
   useAuth: () => ({ me: { id: "mem_me" }, refresh: jest.fn(), signOut: jest.fn() }),
 }));
 jest.mock("expo-router", () => ({
+  // The screens in the Tabs navigator are focused rather than remounted when a member comes
+  // back to them, so the freshness clock resets on focus. The harness runs the callback once, as a
+  // first focus would, and `refocus()` runs it again.
+  useFocusEffect: (cb: () => void | (() => void)) => (require("./render") as { mockUseFocusEffect: (c: () => void | (() => void)) => void }).mockUseFocusEffect(cb),
   useRouter: () => ({ push: jest.fn(), back: jest.fn(), replace: jest.fn() }),
   useLocalSearchParams: () => ({ conversationId: "conv_1" }),
 }));
@@ -96,4 +100,30 @@ test("a failed poll does not take the conversation list away", async () => {
   // Still there, with the failure reported beside it rather than in place of it.
   expect(s.hasText("Bruno")).toBe(true);
   expect(s.hasText("The network is unavailable.")).toBe(true);
+});
+
+
+const CONV_BEFORE = { id: "conv_1", status: "active", other: { member_id: "mem_them", display_name: "Bruno", verified: true, media: [] }, last_message: { text: "Hello", at: "2026-10-01T10:00:00Z" }, unread_count: 0, date: null, safety: { subject_id: "mem_them", blocked_by_you: false } };
+const CONV_AFTER = { id: "conv_1", status: "active", other: { member_id: "mem_other", display_name: "Chiara", verified: true, media: [] }, last_message: { text: "Hello again", at: "2026-10-01T10:00:00Z" }, unread_count: 0, date: null, safety: { subject_id: "mem_other", blocked_by_you: false } };
+
+test("coming back to a tab refetches, because the screen was never unmounted", async () => {
+  /**
+   * Today, Introductions, Messages and Dates live in a `Tabs` navigator, which keeps a screen
+   * mounted once it has been visited. So leaving and coming back *focuses* the screen that is
+   * already there: `gcTime: 0` collects nothing, `refetchOnMount: "always"` has no mount to fire
+   * on, and a clock set at mount counts the previous visit's data as this visit's answer. A
+   * notification therefore opened the list from before the thing it was notifying about.
+   */
+  mockGet.mockImplementation(routeGet({ "/conversations": { items: [CONV_BEFORE] } }));
+  const s = await renderScreen(<Messages />);
+  expect(s.hasText("Bruno")).toBe(true);
+  const callsBefore = mockGet.mock.calls.length;
+
+  // What the server has now, which is what the notification was about.
+  mockGet.mockImplementation(routeGet({ "/conversations": { items: [CONV_AFTER] } }));
+  await refocus();
+
+  expect(mockGet.mock.calls.length).toBeGreaterThan(callsBefore);
+  expect(s.hasText("Chiara")).toBe(true);
+  expect(s.hasText("Bruno")).toBe(false);
 });
