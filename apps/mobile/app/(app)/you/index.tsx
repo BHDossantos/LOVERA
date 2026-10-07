@@ -99,6 +99,13 @@ export default function YouScreen() {
           <Text style={s.label}>Open to introductions</Text>
           <Badge label={me?.date_ready ? "Yes" : "Paused"} tone={me?.date_ready ? "success" : "muted"} />
         </View>
+        {/* The badge used to be the end of it: a member whose readiness was off could read that
+            it was off and do nothing about it, while Today kept asking them to fix it. */}
+        {!me?.date_ready && (
+          <Button variant="secondary" onPress={() => router.push("/you/availability" as never)}>
+            Open myself to introductions again
+          </Button>
+        )}
       </Card>
 
       <Card>
@@ -115,6 +122,9 @@ export default function YouScreen() {
         </Button>
         <Button variant="secondary" onPress={() => router.push("/you/blueprint" as never)}>
           What we think we know about you
+        </Button>
+        <Button variant="secondary" onPress={() => router.push("/you/availability" as never)}>
+          When you can meet, and readiness
         </Button>
       </Card>
 

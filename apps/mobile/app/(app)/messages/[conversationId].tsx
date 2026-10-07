@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { FlatList, KeyboardAvoidingView, Platform, Pressable, Text, View } from "react-native";
+import { Alert, FlatList, KeyboardAvoidingView, Platform, Pressable, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ApiError, get, newIdempotencyKey, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
@@ -29,6 +29,8 @@ export default function Conversation() {
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState<Pending[]>([]);
   const [sendError, setSendError] = useState<ApiError | null>(null);
+  const [blockError, setBlockError] = useState<ApiError | null>(null);
+  const [blocking, setBlocking] = useState(false);
   const listRef = useRef<FlatList<Message>>(null);
 
   // The summary carries the state the notifications are about — a new message, a conversation
@@ -118,6 +120,50 @@ export default function Conversation() {
   const conversation = summary.data ?? null;
   const onHold = !!conversation?.safety_hold;
   const ended = conversation?.status === "ended" || conversation?.status === "closed";
+  const them = conversation?.other;
+
+  /**
+   * Blocking from inside the conversation, through POST /blocks.
+   *
+   * Until now the only way to block somebody was to file a report, or to answer a question on
+   * the way out of the conversation — so a member who simply wanted contact to stop had to
+   * accuse them of something first. Both stores expect block and report to be reachable from
+   * the content itself (Apple guideline 1.2), and this screen had neither.
+   */
+  const block = () => {
+    const memberId = them?.member_id;
+    if (!memberId) return;
+    Alert.alert(
+      `Block ${them?.display_name ?? "them"}?`,
+      "This ends the conversation and cancels any date you had planned. They are never told you blocked them — only that you are unavailable. You can undo it from the safety centre.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Block",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              setBlocking(true);
+              setBlockError(null);
+              try {
+                await post("/blocks", { member_id: memberId });
+                await Promise.all([
+                  qc.invalidateQueries({ queryKey: ["conversations"] }),
+                  qc.invalidateQueries({ queryKey: ["blocks"] }),
+                  qc.invalidateQueries({ queryKey: ["today"] }),
+                ]);
+                router.replace("/messages" as never);
+              } catch (e) {
+                setBlockError(e as ApiError);
+              } finally {
+                setBlocking(false);
+              }
+            })();
+          },
+        },
+      ],
+    );
+  };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: color.canvas }} edges={["top", "left", "right"]}>
@@ -155,6 +201,33 @@ export default function Conversation() {
           <StatusBanner tone="context" title={conversation?.public_reason ?? "This conversation has ended."} />
         </View>
       )}
+
+      {/* Report and block, from the conversation itself rather than three taps away in
+          another tab — and the report carries the conversation and the person with it, so a
+          reviewer gets the context instead of a bare narrative. Shown whatever the state: a
+          safety hold or an ending is exactly when somebody may still want to block. */}
+      <View style={{ paddingHorizontal: space.lg, paddingBottom: space.sm }}>
+        <ErrorState error={blockError} retry={blockError ? () => block() : undefined} />
+        <View style={{ flexDirection: "row", gap: space.sm }}>
+          <View style={{ flex: 1 }}>
+            <Button
+              variant="ghost"
+              onPress={() =>
+                router.push(
+                  `/safety/report?conversation=${id}${them?.member_id ? `&subject=${them.member_id}` : ""}` as never,
+                )
+              }
+            >
+              Report
+            </Button>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Button variant="ghost" loading={blocking} disabled={!them?.member_id} onPress={block}>
+              Block
+            </Button>
+          </View>
+        </View>
+      </View>
 
       {/* Writing help, translation and leaving. Drafting is a paid capability and the
           assistant screen says so itself rather than this one guessing; translation is

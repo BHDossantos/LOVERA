@@ -14,6 +14,25 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
  * field the API does not send throws during render, which is the bug class these tests
  * exist to catch. `texts()` is then enough to assert what a member would see.
  */
+/**
+ * Trees to tear down after the test that made them.
+ *
+ * A screen that polls — the conversation refetches every 8s — keeps a timer scheduled for as
+ * long as its query observer is mounted, and jest will not exit while one is pending. The
+ * suite passed in under a second and then sat there until it was killed, which in CI is a
+ * hung job rather than a failing one. Unmounting releases the observer, and its timer with it.
+ */
+const mounted: ReactTestRenderer[] = [];
+
+afterEach(() => {
+  while (mounted.length) {
+    const tree = mounted.pop();
+    act(() => {
+      tree?.unmount();
+    });
+  }
+});
+
 export async function renderScreen(ui: ReactElement) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } },
@@ -28,6 +47,7 @@ export async function renderScreen(ui: ReactElement) {
   // between asserting on real data and asserting on a fallback that happens to match.
   await flush();
   const r = tree as ReactTestRenderer;
+  mounted.push(r);
   return {
     tree: r,
     /**

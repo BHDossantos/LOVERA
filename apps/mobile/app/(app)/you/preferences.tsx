@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useRouter } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Text, View } from "react-native";
-import { ApiError, get, patch, post } from "@/api/client";
+import { Alert, Text, View } from "react-native";
+import { ApiError, del, get, patch, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
 import { Badge, Button, Card, Chip, ChipGroup, Divider, ErrorState, Loading, Options, PageTitle, Screen, StatusBanner } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
@@ -79,6 +79,14 @@ const TIERS = [
   { value: "open", label: "Open", body: "Used lightly, mostly to explain a match." },
 ];
 
+/**
+ * The four the API refuses to delete (`delete_preference` in blueprint/router.py): age,
+ * distance, children and relationship structure are eligibility, so they are set to Open
+ * rather than removed. Offering a Remove button that always 409s would be worse than offering
+ * none, so these do not get one.
+ */
+const CANNOT_REMOVE = ["age_range", "distance_km", "children", "relationship_structure"];
+
 /** Identifies an edit by exactly the values the impact preview is computed from. */
 const signature = (e: Editing) => JSON.stringify([e.key, e.tier, e.value]);
 
@@ -153,6 +161,38 @@ export default function YouPreferences() {
       setBusy(false);
     }
   };
+
+  /**
+   * Clear a preference back to unset.
+   *
+   * Setting one to Open is not the same thing: Open still weighs it, so a member who decides
+   * a criterion should play no part at all had no way to say so, and the one endpoint that
+   * does it was never called from either app.
+   */
+  const remove = async (key: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await del(`/preferences/${key}`);
+      await qc.invalidateQueries({ queryKey: ["preferences"] });
+      setEditing(null);
+      setImpact(null);
+    } catch (e) {
+      setError(e as ApiError);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmRemove = (key: string, label: string) =>
+    Alert.alert(
+      `Stop using ${label} entirely?`,
+      "It will play no part in your matches until you set it again. This is not the same as Open, which still weighs it lightly.",
+      [
+        { text: "Keep it", style: "cancel" },
+        { text: "Stop using it", style: "destructive", onPress: () => void remove(key) },
+      ],
+    );
 
   const save = async () => {
     if (!editing) return;
@@ -267,6 +307,12 @@ export default function YouPreferences() {
         >
           Cancel
         </Button>
+        {/* Only for a preference that is actually set, and only where the API will accept it. */}
+        {!CANNOT_REMOVE.includes(editing.key) && q.data?.preferences.some((p) => p.key === editing.key) && (
+          <Button variant="ghost" loading={busy} onPress={() => confirmRemove(editing.key, editing.label)}>
+            Stop using this preference
+          </Button>
+        )}
       </Screen>
     );
 

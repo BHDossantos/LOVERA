@@ -5,7 +5,7 @@ endpoint it came from, so you can check any line of it.
 
 **Verdict: not ready**, and the reasons are now entirely in section A. Three things stop the
 product working at all in production and every one of them needs an account or a decision
-only you can supply. The mobile app reaches 78 of the 92 member-facing API endpoints; the web
+only you can supply. The mobile app reaches 80 of the 92 member-facing API endpoints; the web
 app reaches 82.
 
 Section B was the mobile feature gap. Most of it is closed; what is left is listed with the
@@ -77,7 +77,7 @@ in both apps:
 | | member endpoints reached |
 |---|---|
 | Web | 82 / 92 |
-| Mobile | 78 / 92 |
+| Mobile | 80 / 92 |
 
 Closed since the first audit: date proposal, response, cancellation, overlaps and venues; the
 safety check-in; AI drafts and translation; the notifications inbox; conversation close;
@@ -85,33 +85,20 @@ profile editing and photo removal; preferences and blueprint editing; consent wi
 account review and appeals; export download; unblock; the second-date reveal; introduction
 extension; case evidence; the introduction correction; and `explanation-viewed`.
 
-### B1. Readiness cannot be turned back on — and Today tells members to do it
+### B1. What is left
 
-`PATCH /me` is never called from mobile. `app/(app)/you/index.tsx:100` *shows* `date_ready` as
-a badge with no control beside it, and Today emits a task that sends members to a screen that
-cannot act on it:
+- **`PATCH /me` — locale and timezone.** Neither app calls it. Both are captured from the device at signup and there is no screen to change either afterwards, so a member who moves city keeps the old timezone. `date_ready` was the third field on this endpoint and is now set through `PUT /availability`, which is where it actually lives and how the web app has always done it.
+- **`POST /safety/cases/{report_id}/appeal`** — the spec's "appeal the action attached to this case" path. Both apps appeal through `/account/review/{action_id}/appeal`, which covers the same ground, so this is a redundancy rather than a gap.
+- **`GET /blueprint/sessions/{session_id}`** — the interview's own POST responses already carry the session state, so nothing needs it.
+- **`GET /media/{media_id}`** — media arrive as URLs in their parent payloads.
 
-```
-# apps/api/app/modules/today/router.py
-"title": "You're marked as not ready to date", "path": "/you/profile", "cta": "Update readiness"
-```
-
-Pause and resume are a different thing (`POST /me/pause`, `/me/resume`) and both work. Locale
-and timezone are also only settable through `PATCH /me`, so neither can be changed either.
-
-### B2. Blocking somebody without reporting them
-
-`POST /blocks` is not called from either app. Blocking exists inside the report flow
-(`block_now`, default on), which is what satisfies Apple's guideline 1.2, and unblocking works
-from `/safety` and `/safety/blocks`. But a member who wants to cut contact without filing a
-report has to file one.
-
-### B3. Smaller, and real
-
-- `DELETE /preferences/{key}` — a preference can be set and changed but not cleared back to unset. Not called from either app.
-- `POST /safety/cases/{report_id}/appeal` — the spec's "appeal the action attached to this case" path. Mobile appeals through `/account/review/{action_id}/appeal`, which covers the same ground, so this is a redundancy rather than a gap.
-- `GET /blueprint/sessions/{session_id}` — the interview's own POST responses already carry the session state, so nothing needs it.
-- `GET /media/{media_id}` — media arrive as URLs in their parent payloads.
+Closed since: readiness could be turned off and never back on, because the editor that sets
+`date_ready` existed only inside onboarding — while Today emitted a task telling members to
+turn it on, pointing at `/you/profile`, which cannot change it. That task now points at
+`/you/availability`, which both apps have. Blocking somebody required filing a report against
+them first; the conversation itself now offers block and report, with the person and the
+conversation attached so a reviewer gets the context. And a preference can be cleared back to
+unset rather than only set to Open, which still weighs it.
 
 ### B4. Deferred by decision, not unfinished
 
@@ -140,7 +127,7 @@ report has to file one.
 
 - **Backend**: 92 member endpoints, 69 tests green. Schema creation race fixed with a Postgres advisory lock. Email transport with a production boot guard. Sandbox payment and verification endpoints correctly 404 in production.
 - **Web app**: complete — 60 routes, Playwright e2e, legal pages.
-- **Mobile**: 42 screens and 78 of 92 member endpoints. Onboarding end to end; Today; introductions with explanation, correction, extension and private decision; the mutual screen; messaging with AI drafts and translation; date proposal, response, venues, confirmation, check-in, feedback and the second-date reveal; the safety centre with report, evidence, case tracking, blocks and unblock; account review and appeals; profile, preferences and blueprint editing; consent withdrawal; export, pause and delete; notifications inbox; push registration.
+- **Mobile**: 43 screens and 80 of 92 member endpoints. Onboarding end to end; Today; introductions with explanation, correction, extension and private decision; the mutual screen; messaging with AI drafts and translation; date proposal, response, venues, confirmation, check-in, feedback and the second-date reveal; the safety centre with report, evidence, case tracking, blocks and unblock; account review and appeals; profile, preferences and blueprint editing; consent withdrawal; availability and readiness; block and report from inside a conversation; export, pause and delete; notifications inbox; push registration.
 - **Build pipeline**: native config generated and asserted (20 checks), placeholder API origins and missing EAS project ids refused before a build starts, EAS build workflow.
 - **Guards that would have caught what shipped**: the API contract check, the route check (including every path the API hands a client), and the native config check, all in CI. Each was verified by breaking the thing it checks and confirming it fails.
 
@@ -150,9 +137,9 @@ report has to file one.
 
 1. A real identity vendor, or an explicit decision to run manual review for the pilot. Nothing else matters while nobody can finish signing up.
 2. SMTP provider plus SPF/DKIM/DMARC. Deploy the API.
-3. Mobile: the readiness toggle (B1), standalone block (B2), clearing a preference (B3). Small, and the first one is a task Today actively asks members to do.
-4. IAP, if you intend to charge on mobile at launch. Otherwise ship free and add it later — but then the paid tiers do not exist on mobile.
-5. Legal review of the three documents, and store screenshots.
-6. Make e2e failures readable through the API (`::error::` annotations), so a red run can be diagnosed without guessing.
+3. IAP, if you intend to charge on mobile at launch. Otherwise ship free and add it later — but then the paid tiers do not exist on mobile.
+4. Legal review of the three documents, and store screenshots.
+5. Make e2e failures readable through the API (`::error::` annotations), so a red run can be diagnosed without guessing.
 
-Items 1, 2, 4 and 5 need decisions or accounts only you can supply. 3 and 6 are code.
+Items 1, 2, 3 and 4 need decisions or accounts only you can supply. 5 is code, and nothing is
+waiting on it.

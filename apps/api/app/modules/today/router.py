@@ -57,7 +57,10 @@ def today(principal: Principal = Depends(current_principal), db: Session = Depen
     if bp and bp["freshness"]["stale"]:
         tasks.append({"key": "blueprint_refresh", "priority": 40, "title": "Your Blueprint is getting stale", "body": "Life changes. A short refresh keeps introductions accurate.", "path": "/you/blueprint", "cta": "Review your Blueprint"})
     if not m.date_ready and m.status == "active":
-        tasks.append({"key": "readiness", "priority": 50, "title": "You're marked as not ready to date", "body": "Introductions pause while readiness is off.", "path": "/you/profile", "cta": "Update readiness"})
+        # /you/profile is the photos-and-prompts editor; readiness is part of availability, and
+        # pointing the task at a screen that cannot change it made this task a dead end in both
+        # apps for as long as it has existed.
+        tasks.append({"key": "readiness", "priority": 50, "title": "You're marked as not ready to date", "body": "Introductions pause while readiness is off.", "path": "/you/availability", "cta": "Update readiness"})
     ent = entitlements_for(db, m)
     if m.status == "active" and not tasks:
         tasks.append({"key": "waiting", "priority": 10, "title": "Nothing to do right now", "body": "Your next introductions arrive with the weekly batch. Less time in the app is fine.", "path": "/introductions/waiting", "cta": "See why"})
