@@ -45,10 +45,19 @@ const REASON_CODES = ["harassment", "scam_or_fraud", "impersonation", "threats",
 /** The types this page can show in place; everything else is offered as a download. */
 const PREVIEWABLE = ["image/png", "image/jpeg", "image/webp", "image/gif", "video/", "audio/", "text/plain"];
 
-/** The text inside a `data:text/plain;base64,…` attachment, for the one type shown as text. */
+/**
+ * The text inside a `data:text/plain;base64,…` attachment, for the one type shown as text.
+ *
+ * `atob` alone returns a binary string, one char per byte, so a saved chat log with an accented
+ * name, a non-Latin script or an emoji in it reached the reviewer as mojibake — on the screen where
+ * the point is to read what was actually said. `TextDecoder` turns those bytes back into the text
+ * the reporter submitted.
+ */
 function decodeDataUrlText(dataUrl: string) {
   try {
-    return atob(dataUrl.slice(dataUrl.indexOf(",") + 1));
+    const binary = atob(dataUrl.slice(dataUrl.indexOf(",") + 1));
+    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+    return new TextDecoder("utf-8").decode(bytes);
   } catch {
     return "This attachment could not be decoded. Download it instead.";
   }

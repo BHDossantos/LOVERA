@@ -105,7 +105,11 @@ export function ProfileEditor({ onSaved }: { onSaved?: () => void }) {
       setError(new ApiError(0, { code: "UPLOAD_FAILED", message: "That photo could not be read. Try another one." }));
       return;
     }
-    const contentType = asset.mimeType ?? "image/jpeg";
+    // JPEG, not `asset.mimeType`: the picker's `base64` is the asset's JPEG data regardless of what
+    // the member picked (expo-image-picker's own types), so `mimeType` would describe the HEIC that
+    // went in while the bytes going out are JPEG — and the server now checks that a file looks like
+    // what it says it is.
+    const contentType = "image/jpeg";
     setUploading(true);
     try {
       const created = await post<{ media: Media }>("/profile/media", {

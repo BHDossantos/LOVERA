@@ -72,12 +72,18 @@ test("sends the image as a data URL with the description the member wrote", asyn
 
   // size_bytes comes from the bytes actually sent, not from asset.fileSize: once an image has
   // been shrunk to fit, fileSize is the size of the original and would be a lie.
+  //
+  // And `image/jpeg` although the asset says `image/png`, which is the picker's contract rather than
+  // a convenience: `base64` is "the selected image's JPEG data" whatever was picked
+  // (expo-image-picker's own types), so `mimeType` describes what went in and these bytes are what
+  // comes out. This assertion used to read `image/png` — it was written from the code instead of
+  // from that contract, so it passed while the app declared a type the bytes were not.
   expect(mockPost).toHaveBeenCalledWith("/safety/reports/case_1/evidence", {
-    content_type: "image/png",
+    content_type: "image/jpeg",
     size_bytes: 3,
     checksum: null,
     description: "The message where he asks for a gift card",
-    data_url: "data:image/png;base64,QUJD",
+    data_url: "data:image/jpeg;base64,QUJD",
   });
   expect(s.hasText("Attached")).toBe(true);
 });
@@ -147,8 +153,9 @@ test("the picker is not asked to recompress on the way in", async () => {
 });
 
 test("an image that already fits is sent untouched", async () => {
-  // Re-encoding a clean PNG screenshot as JPEG for no reason would soften the text a reviewer
-  // needs to read, so nothing is shrunk unless it has to be.
+  // Every resize-and-re-encode pass softens the text a reviewer needs to read, so nothing is shrunk
+  // unless it has to be. The bytes are JPEG either way — the picker already made them that — so
+  // what this protects is the second pass, not a PNG that no longer exists by this point.
   picker.requestMediaLibraryPermissionsAsync.mockResolvedValue({ granted: true } as never);
   picker.launchImageLibraryAsync.mockResolvedValue({
     canceled: false,
@@ -160,7 +167,7 @@ test("an image that already fits is sent untouched", async () => {
   await s.settle();
 
   expect(mockResize).not.toHaveBeenCalled();
-  expect(mockPost.mock.calls[0][1]).toMatchObject({ content_type: "image/png", data_url: "data:image/png;base64,QUJD" });
+  expect(mockPost.mock.calls[0][1]).toMatchObject({ content_type: "image/jpeg", data_url: "data:image/jpeg;base64,QUJD" });
 });
 
 test("a photo too large for the API is shrunk rather than rejected", async () => {

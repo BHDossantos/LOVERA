@@ -227,17 +227,25 @@ export function EvidenceAttach({ reportId, onAdded }: { reportId: string; onAdde
 /**
  * The image as the API will accept it, or null when even the smallest step is too big.
  *
- * An image that already fits is sent untouched — re-encoding a clean PNG screenshot as JPEG
- * for no reason would soften the text a reviewer needs to read. Shrinking happens only when
- * the alternative is not sending it at all.
+ * An image that already fits is sent at the picker's own quality rather than being resized and
+ * re-encoded again, because every extra pass softens the text a reviewer needs to read. Shrinking
+ * happens only when the alternative is not sending it at all.
+ *
+ * It is JPEG either way: the picker's `base64` is the asset's JPEG data whatever the asset was, so
+ * there is no PNG left to preserve by the time this sees it.
  */
 async function fitForUpload(
   asset: ImagePicker.ImagePickerAsset,
   base64: string,
 ): Promise<{ contentType: string; base64: string } | null> {
-  const original = asset.mimeType ?? "image/jpeg";
-  if (dataUrl(original, base64).length <= DATA_URL_LIMIT) {
-    return { contentType: original, base64 };
+  // JPEG, not `asset.mimeType`. The installed expo-image-picker says so of `base64` itself:
+  // "a Base64-encoded string of the selected image's JPEG data... prepend this with
+  // 'data:image/jpeg;base64,'" (ImagePicker.types.d.ts). `mimeType` describes the *asset the member
+  // picked*, which is a different thing — so labelling these bytes with it declared a HEIC photo or
+  // a PNG screenshot and sent JPEG. Harmless until the server started checking that a file looks
+  // like what it says, and then it refused every screenshot that was not already a JPEG.
+  if (dataUrl("image/jpeg", base64).length <= DATA_URL_LIMIT) {
+    return { contentType: "image/jpeg", base64 };
   }
   for (const step of shrinkSteps(asset.width)) {
     // The contextual API; manipulateAsync is deprecated in this SDK.
