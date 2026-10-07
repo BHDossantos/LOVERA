@@ -22,16 +22,31 @@
 export const serverDriven = { staleTime: 0, gcTime: 0, refetchOnMount: "always" } as const;
 
 /**
- * Whether this query's data was fetched since the screen opened.
+ * Whether this query's data was fetched *successfully* since the screen opened.
  *
- * `isFetchedAfterMount` is the precise question. Checking staleness instead would spin on every
- * later background refetch, and checking `isLoading` trusts whatever was in the cache.
+ * `isFetchedAfterMount` alone is not that question, which is the second thing I got wrong here.
+ * query-core computes it as
+ *
+ *     dataUpdateCount > initial.dataUpdateCount || errorUpdateCount > initial.errorUpdateCount
+ *
+ * (queryObserver.js), so a refetch that *failed* satisfies it. A notification destination holding
+ * cached data whose refetch then fails would have been declared fresh and ungated — rendering the
+ * stale answer, with its actionable controls, underneath an error banner. That is worse than the
+ * bug this policy was written for, because now the screen looks wrong and acts live.
+ *
+ * `isRefetchError` is exactly `isError && hasData`: the refetch failed and what we hold is from
+ * before. Excluding it leaves the four cases right — fresh data arrived (fresh), refetch failed
+ * over cached data (not fresh, keep gating), first load failed with no data at all (nothing to
+ * gate; the screen shows its error state), and a later retry succeeding (fresh again).
+ *
+ * Checking staleness instead would spin on every later background refetch, and checking
+ * `isLoading` trusts whatever was in the cache.
  */
-export function isFresh(q: { isFetchedAfterMount: boolean }) {
-  return q.isFetchedAfterMount;
+export function isFresh(q: { isFetchedAfterMount: boolean; isRefetchError: boolean }) {
+  return q.isFetchedAfterMount && !q.isRefetchError;
 }
 
 /** True while a server-driven screen has nothing it is entitled to show yet. */
-export function awaitingServer(q: { isLoading: boolean; isFetchedAfterMount: boolean }) {
+export function awaitingServer(q: { isLoading: boolean; isFetchedAfterMount: boolean; isRefetchError: boolean }) {
   return q.isLoading || !isFresh(q);
 }

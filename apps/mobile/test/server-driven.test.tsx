@@ -75,9 +75,20 @@ test("the policy is what it claims to be, and all three parts are load-bearing",
   // `isLoading` is false whenever there is cached data. gcTime drops the entry when the screen
   // closes; awaitingServer withholds an answer fetched before the member arrived.
   expect(serverDriven).toEqual({ staleTime: 0, gcTime: 0, refetchOnMount: "always" });
-  expect(awaitingServer({ isLoading: false, isFetchedAfterMount: false })).toBe(true);
-  expect(awaitingServer({ isLoading: false, isFetchedAfterMount: true })).toBe(false);
-  expect(awaitingServer({ isLoading: true, isFetchedAfterMount: true })).toBe(true);
+  expect(awaitingServer({ isLoading: false, isFetchedAfterMount: false, isRefetchError: false })).toBe(true);
+  expect(awaitingServer({ isLoading: false, isFetchedAfterMount: true, isRefetchError: false })).toBe(false);
+  expect(awaitingServer({ isLoading: true, isFetchedAfterMount: true, isRefetchError: false })).toBe(true);
+});
+
+test("a refetch that failed is not freshness", () => {
+  // query-core computes isFetchedAfterMount as
+  //   dataUpdateCount > initial.dataUpdateCount || errorUpdateCount > initial.errorUpdateCount
+  // so a *failed* refetch satisfies it. Without excluding that, a destination holding cached data
+  // whose refetch fails would be ungated: the stale answer and its actionable controls rendered
+  // underneath an error banner, which is worse than the bug this policy exists for.
+  expect(awaitingServer({ isLoading: false, isFetchedAfterMount: true, isRefetchError: true })).toBe(true);
+  // And it recovers: a later retry that succeeds clears isRefetchError.
+  expect(awaitingServer({ isLoading: false, isFetchedAfterMount: true, isRefetchError: false })).toBe(false);
 });
 
 test.each(NOTIFICATION_SCREENS)("%s refetches what the server sent the member to see", (rel) => {

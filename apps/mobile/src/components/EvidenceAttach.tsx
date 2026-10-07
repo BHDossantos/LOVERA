@@ -50,18 +50,31 @@ export function shrinkSteps(sourceWidth: number | undefined): { width: number; c
   if (!sourceWidth || sourceWidth <= 0) return [...SHRINK_CEILINGS];
 
   const steps = SHRINK_CEILINGS.filter((s) => s.width < sourceWidth);
-  if (steps.length >= 2) return steps;
 
+  // The fractions always follow, never only when the ceilings left too little. Returning early
+  // once two ceilings applied put a cliff at each one: a 1601px source got 1600 and 1200 and
+  // nothing else, so a tall screenshot still over the cap at 1200 was refused — while a 1600px
+  // source, one pixel narrower, went on to 800, 528 and 400 and fitted.
+  //
+  // They halve from the smallest step so far rather than from the source, so the ladder keeps
+  // descending instead of landing next to a ceiling it already tried.
+  const smallest = steps.length ? steps[steps.length - 1].width : sourceWidth;
   for (const [scale, compress] of [
     [0.5, 0.7],
     [0.33, 0.6],
     [0.25, 0.5],
   ] as const) {
-    const width = Math.round(sourceWidth * scale);
+    const width = Math.round(smallest * scale);
     if (width < MIN_WIDTH || width >= sourceWidth) continue;
     if (steps.some((s) => s.width === width)) continue;
     steps.push({ width, compress });
   }
+
+  // Nothing narrower is worth asking for — a source already near the floor. Re-encode at the width
+  // it has: the resize is a no-op, and turning a PNG screenshot into a JPEG is most of the saving
+  // anyway, so this is a real attempt rather than a formality.
+  if (!steps.length) steps.push({ width: sourceWidth, compress: 0.6 });
+
   return steps.sort((a, b) => b.width - a.width);
 }
 

@@ -255,8 +255,14 @@ test("a permission request that throws is reported too", async () => {
  * told it was too large to attach when downscaling would have worked.
  */
 describe("shrinkSteps", () => {
-  test("a wide camera photo keeps the ceiling ladder", () => {
-    expect(shrinkSteps(4032).map((s) => s.width)).toEqual([2400, 1600, 1200]);
+  test("a wide camera photo starts at the ceilings and carries on below them", () => {
+    // The ceilings keep their place at the top — 2400 is where a message in a photo is still
+    // legible — and the fractions follow rather than replacing them, so there is somewhere to go
+    // when 1200 is still too big.
+    const widths = shrinkSteps(4032).map((s) => s.width);
+    expect(widths.slice(0, 3)).toEqual([2400, 1600, 1200]);
+    expect(widths.length).toBeGreaterThan(3);
+    expect(widths[widths.length - 1]).toBeLessThan(1200);
   });
 
   test("a narrow long screenshot gets steps that are actually smaller", () => {
@@ -266,10 +272,35 @@ describe("shrinkSteps", () => {
     expect(steps.map((s) => s.width)).toEqual([585, 386, 293]);
   });
 
-  test("no step ever exceeds the source, at any width", () => {
-    for (const w of [240, 320, 400, 720, 900, 1080, 1170, 1200, 1201, 1600, 2000, 2400, 3000, 4032, 8000]) {
-      for (const s of shrinkSteps(w)) expect(s.width).toBeLessThan(w);
+  test("no step ever enlarges the source, at any width", () => {
+    // At or below the source, never above: a step *equal* to the source is a no-op resize whose
+    // point is the JPEG re-encode, which is the only thing left to try for a source already at the
+    // floor. Anything above would be the original bug.
+    for (const w of [240, 320, 400, 720, 900, 1080, 1170, 1200, 1201, 1600, 1601, 2000, 2400, 3000, 4032, 8000]) {
+      const steps = shrinkSteps(w);
+      expect(steps.length).toBeGreaterThan(0);
+      for (const s of steps) expect(s.width).toBeLessThanOrEqual(w);
     }
+  });
+
+  test("one pixel of source width is not the difference between fitting and being refused", () => {
+    // Returning early once two ceilings applied put a cliff at each one: 1601 stopped at 1200
+    // while 1600 carried on to 800 and below, so a tall screenshot still over the cap at 1200 was
+    // refused for being one pixel wider.
+    const justOver = shrinkSteps(1601).map((s) => s.width);
+    const justUnder = shrinkSteps(1600).map((s) => s.width);
+    expect(justOver[justOver.length - 1]).toBeLessThan(1200);
+    expect(justUnder[justUnder.length - 1]).toBeLessThan(1200);
+    // Both end in the same place; the wider source simply has one more rung at the top.
+    expect(justOver.filter((w) => w < 1200)).toEqual(justUnder.filter((w) => w < 1200));
+  });
+
+  test("a source already at the floor still gets one real attempt", () => {
+    // Nothing narrower is worth asking for, but a huge PNG re-encoded as JPEG is most of the
+    // saving, so refusing without trying would be giving up early.
+    const steps = shrinkSteps(300);
+    expect(steps).toHaveLength(1);
+    expect(steps[0].width).toBe(300);
   });
 
   test("steps only ever descend", () => {
