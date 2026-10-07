@@ -10,6 +10,12 @@ stayed on the Dates list looking scheduled and actionable.
 
 Nothing else can see this. The key is a string literal in a call that always succeeds.
 
+Each root is checked against its own queries, never against the union of both. Every app has its
+own QueryClient, so a key the web app produces means nothing inside the mobile one: pooling them
+would accept a mobile invalidation of `["plans"]` — a web-only key — which is exactly the silent
+no-op this exists to catch, and the guard would have been asserting something weaker than it
+claimed.
+
     python tools/check_query_keys.py apps/mobile apps/web/src
 """
 from __future__ import annotations
@@ -39,36 +45,48 @@ def sources(root: str):
             yield path
 
 
-def main(roots: list[str]) -> int:
+def scan(root: str) -> tuple[set[str], list[tuple[Path, int, str, str]]]:
+    """The keys this client's queries produce, and every cache operation in it."""
     produced: set[str] = set()
     used: list[tuple[Path, int, str, str]] = []
+    for path in sources(root):
+        text = path.read_text(encoding="utf-8")
+        # A producer's key can sit a line or two below the `useQuery(`, so the window is the
+        # text following each call rather than the same line.
+        for m in PRODUCER.finditer(text):
+            window = text[m.end() : m.end() + 400]
+            k = KEY.search(window)
+            if k:
+                produced.add(k.group(1))
+        for lineno, line in enumerate(text.split("\n"), 1):
+            for rx in (CONSUMER_OBJ, CONSUMER_ARR):
+                for c in rx.finditer(line):
+                    used.append((path, lineno, c.group(1), c.group(2)))
+    return produced, used
 
+
+def main(roots: list[str]) -> int:
+    failed = False
+    checked = 0
     for root in roots:
-        for path in sources(root):
-            text = path.read_text(encoding="utf-8")
-            # A producer's key can sit a line or two below the `useQuery(`, so the window is the
-            # text following each call rather than the same line.
-            for m in PRODUCER.finditer(text):
-                window = text[m.end() : m.end() + 400]
-                k = KEY.search(window)
-                if k:
-                    produced.add(k.group(1))
-            for lineno, line in enumerate(text.split("\n"), 1):
-                for rx in (CONSUMER_OBJ, CONSUMER_ARR):
-                    for c in rx.finditer(line):
-                        used.append((path, lineno, c.group(1), c.group(2)))
-
-    dead = [(p, n, call, key) for (p, n, call, key) in used if key not in produced]
-    for p, n, call, key in dead:
-        print(f'{p}:{n}: {call} on ["{key}"], which no query uses')
-    if dead:
-        print()
-        print(f"{len(dead)} cache operation(s) name a key nothing reads.")
-        print("React Query matches by prefix and reports no match, so each of these is a silent")
-        print("no-op: the screen it was meant to refresh keeps showing what the server has changed.")
-        print(f"Keys queries actually use: {', '.join(sorted(produced))}")
+        produced, used = scan(root)
+        checked += len(used)
+        dead = [(p, n, call, key) for (p, n, call, key) in used if key not in produced]
+        for p, n, call, key in dead:
+            print(f'{p}:{n}: {call} on ["{key}"], which no query in {root} uses')
+        if dead:
+            failed = True
+            print()
+            print(f"{len(dead)} cache operation(s) in {root} name a key nothing in {root} reads.")
+            print("React Query matches by prefix and reports no match, so each of these is a silent")
+            print("no-op: the screen it was meant to refresh keeps showing what the server has changed.")
+            print(f"Keys {root} queries actually use: {', '.join(sorted(produced))}")
+            print()
+        else:
+            print(f"{root}: {len(used)} cache operations against {len(produced)} query keys; every one matches")
+    if failed:
         return 1
-    print(f"checked {len(used)} cache operations against {len(produced)} query keys; every one matches")
+    print(f"checked {checked} cache operations; every one names a key its own client produces")
     return 0
 
 
