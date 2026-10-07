@@ -14,8 +14,14 @@ visible fails except a badge that never clears.
 """
 from __future__ import annotations
 
+import threading
 import uuid
 
+from sqlalchemy import select
+
+from app.core.db import session_factory
+from app.models.conversations import Conversation, ReadCursor
+from app.modules.conversations.service import mark_read
 from tests.conftest import mutual_pair
 
 
@@ -60,3 +66,76 @@ def test_the_sender_has_nothing_to_read_of_their_own(client):
     a, b, conv_id = mutual_pair(client, "own")
     a.post(f"/conversations/{conv_id}/messages", json={"client_message_id": str(uuid.uuid4()), "text": "Mine."})
     assert _unread_for(a, conv_id) == 0
+
+
+def _stored_sequence(conv_id: str, member_id: str) -> int | None:
+    with session_factory()() as db:
+        cursor = db.execute(select(ReadCursor).where(ReadCursor.conversation_id == conv_id, ReadCursor.member_id == member_id)).scalar_one_or_none()
+        return cursor.last_read_sequence if cursor else None
+
+
+def test_two_overlapping_reads_cannot_lose_the_higher_one(client):
+    """The `max` has to happen in the database, not in Python.
+
+    Two tabs, or a newer message arriving before the previous POST finishes, means two transactions
+    overlapping on the same row. Reading the cursor and computing the new value in this process means
+    both read the same number and the one that commits last wins — so an older sequence can overwrite a
+    newer one and put messages the member has read back to unread. Nothing about a single request shows
+    it, which is why it needs this shape of test: the second transaction starts before the first
+    commits, and commits after it.
+
+    The upsert makes the comparison the database's: `ON CONFLICT ... GREATEST` locks the row, so the
+    second statement blocks until the first commits and is then evaluated against what it wrote.
+    """
+    a, b, conv_id = mutual_pair(client, "race")
+    # Three sequences, so the two racing reads are both *above* what is already stored. A second read
+    # equal to the stored value writes nothing — SQLAlchemy emits no change for an unchanged column —
+    # and this test passed against the broken code until it had three to work with.
+    sequences = [
+        a.post(f"/conversations/{conv_id}/messages", json={"client_message_id": str(uuid.uuid4()), "text": text}).json()["sequence"]
+        for text in ("One.", "Two.", "Three.")
+    ]
+    stored, lower, high = sequences
+    assert stored < lower < high
+
+    # The row exists first, which is the interleaving that loses data: both transactions would read it.
+    assert b.post(f"/conversations/{conv_id}/read", json={"sequence": stored}).status_code == 204
+
+    started = threading.Event()
+    finished = threading.Event()
+    failure: list[BaseException] = []
+
+    ahead = session_factory()()
+    behind = session_factory()()
+    try:
+        conv_ahead = ahead.execute(select(Conversation).where(Conversation.id == conv_id)).scalar_one()
+        mark_read(ahead, conv_ahead, b.id, high)
+        ahead.flush()  # the row is now locked by this uncommitted transaction
+
+        def older_read() -> None:
+            try:
+                conv_behind = behind.execute(select(Conversation).where(Conversation.id == conv_id)).scalar_one()
+                started.set()
+                mark_read(behind, conv_behind, b.id, lower)  # blocks on the lock above
+                behind.commit()
+            except BaseException as exc:  # pragma: no cover - reported below
+                failure.append(exc)
+            finally:
+                finished.set()
+
+        thread = threading.Thread(target=older_read, daemon=True)
+        thread.start()
+        assert started.wait(10), "the second transaction never got going"
+        # It must still be waiting: if it had finished already it never saw the first one's row.
+        assert not finished.wait(1), "the older read did not block on the newer one's lock"
+
+        ahead.commit()
+        thread.join(timeout=20)
+        assert not failure, f"the older read failed: {failure[0]!r}"
+        assert finished.is_set(), "the older read never completed after the lock was released"
+    finally:
+        ahead.close()
+        behind.close()
+
+    assert _stored_sequence(conv_id, b.id) == high, "the older read overwrote the newer one"
+    assert _unread_for(b, conv_id) == 0

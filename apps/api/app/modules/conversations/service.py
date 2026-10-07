@@ -3,12 +3,16 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
+# Postgres-specific, deliberately: `ON CONFLICT ... GREATEST` is what makes the read cursor's advance
+# atomic, and this application has only ever run on Postgres (JSONB columns, advisory locks).
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.core.analytics import track
 from app.core.audit import audit
 from app.core.errors import ApiError
+from app.core.ids import new_id
 from app.core.timeutil import iso, utcnow
 from app.models.account import Member
 from app.models.conversations import Conversation, Message, ReadCursor
@@ -127,19 +131,40 @@ def send_message(db: Session, conv_id: str, sender: Member, client_message_id: s
 
 
 def mark_read(db: Session, conv: Conversation, member_id: str, sequence: int) -> None:
-    cursor = db.execute(select(ReadCursor).where(ReadCursor.conversation_id == conv.id, ReadCursor.member_id == member_id)).scalar_one_or_none()
-    if cursor is None:
-        # `last_read_sequence=0` explicitly, not left to the column default: that default is applied
-        # by the INSERT, so on a row that has only been added to the session the attribute is still
-        # None and the `max` below raises. The 500 rolled the transaction back, so the row was never
-        # written and the next call added a fresh one and raised again — which made it permanent
-        # rather than a first-time glitch. `read_cursors` stayed empty, `unread_count` fell back to
-        # "nothing has been read", and messages a member had read went on being counted as unread.
-        cursor = ReadCursor(conversation_id=conv.id, member_id=member_id, last_read_sequence=0)
-        db.add(cursor)
-    # `max`, because a read of an older message arriving late must not rewind what is already read.
-    cursor.last_read_sequence = max(cursor.last_read_sequence or 0, sequence)
-    cursor.updated_at = utcnow()
+    """Advance the member's read cursor, never rewind it, whatever order the requests arrive in.
+
+    Written as one upsert because two things race here and both have bitten. Reading the row and
+    computing the new value in Python protects only requests that do not overlap: two tabs, or a newer
+    message arriving before the previous POST finishes, can both read the same cursor and the older
+    sequence can commit last — putting messages the member has read back to unread. And when there is
+    no row yet, two concurrent first reads both insert and one dies on `uq_read_cursor`.
+
+    `GREATEST` in the conflict clause settles both inside a single statement: the row is locked for the
+    update by Postgres, the comparison happens against whatever is committed at that moment rather than
+    against what this transaction read earlier, and the insert path needs no separate existence check.
+
+    It replaced `max(cursor.last_read_sequence, sequence)` on a freshly added row, where
+    `last_read_sequence` was still None because `default=0` is a column default applied by the INSERT.
+    That raised, the 500 rolled the transaction back so the row was never written, and the next call
+    raised again — so `read_cursors` stayed empty and nobody's unread count ever cleared.
+    """
+    now = utcnow()
+    insert = pg_insert(ReadCursor).values(
+        id=new_id(),
+        conversation_id=conv.id,
+        member_id=member_id,
+        last_read_sequence=sequence,
+        updated_at=now,
+    )
+    db.execute(
+        insert.on_conflict_do_update(
+            constraint="uq_read_cursor",
+            set_={
+                "last_read_sequence": func.greatest(ReadCursor.__table__.c.last_read_sequence, insert.excluded.last_read_sequence),
+                "updated_at": now,
+            },
+        )
+    )
 
 
 def close(db: Session, conv_id: str, member: Member, reason: str, private_note: str | None, block: bool) -> dict[str, Any]:
