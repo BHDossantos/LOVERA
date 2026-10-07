@@ -11,7 +11,7 @@ from app.core.analytics import track
 from app.core.db import get_db
 from app.core.deps import Principal, current_principal
 from app.core.errors import ApiError
-from app.core.timeutil import iso
+from app.core.timeutil import TimezoneName, iso
 from app.models.availability import AvailabilityVersion
 
 router = APIRouter(tags=["availability"])
@@ -25,7 +25,7 @@ class Window(BaseModel):
 
 
 class AvailabilityIn(BaseModel):
-    timezone: str | None = None
+    timezone: TimezoneName | None = None
     recurring_windows: list[Window]
     dated_exceptions: list[dict[str, Any]] = []
     date_styles: list[str] = []

@@ -129,6 +129,17 @@ export default function YouScreen() {
       </Card>
 
       <Card>
+        <Text style={s.h2}>Language and time zone</Text>
+        <Text style={s.note}>
+          Both were taken from your phone and your city when you joined. Your time zone decides which
+          evenings we offer when we look for a time you and somebody else could both meet.
+        </Text>
+        <Button variant="secondary" onPress={() => router.push("/you/settings" as never)}>
+          Language and time zone
+        </Button>
+      </Card>
+
+      <Card>
         <Text style={s.h2}>Safety</Text>
         <Text style={s.note}>
           Report someone, block them, or review an open case. Reports are never shown to the person you report.

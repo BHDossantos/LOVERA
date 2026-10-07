@@ -5,6 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.core.timeutil import TimezoneName
+
 
 class AuthStartIn(BaseModel):
     email: str = Field(pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$", max_length=320)
@@ -52,7 +54,7 @@ class AdultConsentIn(BaseModel):
 
 class MeUpdateIn(BaseModel):
     locale: str | None = Field(default=None, pattern="^(en|it|es|pt)$")
-    timezone: str | None = None
+    timezone: TimezoneName | None = None
     date_ready: bool | None = None
 
 
