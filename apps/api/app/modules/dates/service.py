@@ -98,9 +98,14 @@ def overlaps(db: Session, a_id: str, b_id: str, tz: str, horizon_days: int = 14)
     # A member's "I am away that day" is a date in their calendar, not in whoever is looking.
     a_zone, b_zone = ZoneInfo(a_tz), ZoneInfo(b_tz)
 
-    # Not today: a first date is arranged, not sprung. This is the horizon the old version walked.
+    # Not today: a first date is arranged, not sprung. The horizon is a pair of instants rather than a
+    # pair of dates to compare against, because a slot that crosses one of them has to be *cut* there,
+    # not thrown away — a window running from tonight into tomorrow is outside the horizon as a whole
+    # and its small hours are inside it.
     earliest = now.astimezone(zone).date() + timedelta(days=1)
     latest = now.astimezone(zone).date() + timedelta(days=horizon_days)
+    opens = max(now, datetime.combine(earliest, time.min, tzinfo=zone))
+    closes = datetime.combine(latest + timedelta(days=1), time.min, tzinfo=zone)
 
     out: list[dict[str, Any]] = []
     for starts_at, ends_at in intersect(
@@ -116,27 +121,24 @@ def overlaps(db: Session, a_id: str, b_id: str, tz: str, horizon_days: int = 14)
         for away, member_zone in ((away_a, a_zone), (away_b, b_zone)):
             pieces = [part for piece in pieces for part in _available_parts(piece[0], piece[1], away, member_zone)]
 
-        # Everything below is per piece, including the horizon. Checking the horizon against the whole
-        # interval was wrong once a slot could be cut in two: an interval beginning on the last allowed
-        # day and running past midnight, with that first day excluded, left a piece on `latest + 1` that
-        # was appended because the interval it came from had started inside the horizon. The mirror case
-        # threw away a good piece — an interval starting late today whose remainder is tomorrow.
+        # The horizon clips, like an excluded day does. Filtering on the piece's start date instead left
+        # the same hole one layer up: with no exception to split it, a window running from tonight into
+        # tomorrow stays one piece beginning today, and judging it by that date discarded the small
+        # hours of tomorrow that are perfectly inside the fortnight. The minimum is applied to what
+        # survives both cuts, because either can shorten a piece.
         for piece_start, piece_end in pieces:
-            if piece_start <= now:
+            start, end = max(piece_start, opens), min(piece_end, closes)
+            if end - start < timedelta(minutes=MINIMUM_SLOT_MINUTES):
                 continue
-            if piece_end - piece_start < timedelta(minutes=MINIMUM_SLOT_MINUTES):
-                continue
-            shown, shown_end = piece_start.astimezone(zone), piece_end.astimezone(zone)
-            if not (earliest <= shown.date() <= latest):
-                continue
+            shown, shown_end = start.astimezone(zone), end.astimezone(zone)
             out.append(
                 {
                     "date": shown.date().isoformat(),
                     "weekday": WEEKDAYS[shown.weekday()],
                     "start": shown.strftime("%H:%M"),
                     "end": shown_end.strftime("%H:%M"),
-                    "starts_at": iso(piece_start),
-                    "ends_at": iso(piece_end),
+                    "starts_at": iso(start),
+                    "ends_at": iso(end),
                 }
             )
     return out[:12]

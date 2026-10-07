@@ -130,6 +130,35 @@ def test_the_offset_is_taken_at_the_instant_not_at_its_clock_reading():
     assert weekly_overlaps(rome_evening, "Europe/Rome", utc_evening, "UTC", AT)[0] == 180
 
 
+def test_tonight_running_into_tomorrow_is_offered_from_midnight(client):
+    """No exception involved: the horizon alone has to cut the interval rather than reject it.
+
+    With contiguous windows either side of midnight and nothing excluded, tonight-into-tomorrow stays
+    one interval beginning today. Judged by that start date it is outside the fortnight and was thrown
+    away whole, taking the small hours of tomorrow — which are inside it — with it. The earlier test of
+    this passed only because its dated exception happened to split the interval at midnight for it,
+    which review caught and I had not.
+    """
+    a, b, conv_id = _mutual_conversation(client)
+    overnight = [{"weekday": d, "start": "22:00", "end": "24:00"} for d in range(7)]
+    overnight += [{"weekday": d, "start": "00:00", "end": "02:00"} for d in range(7)]
+    rome = ZoneInfo("Europe/Rome")
+    tomorrow = (datetime.now(timezone.utc).astimezone(rome) + timedelta(days=1)).date()
+
+    for who in (a, b):
+        assert who.put("/availability", json={"recurring_windows": overnight, "date_styles": ["drinks"], "timezone": "Europe/Rome"}).status_code in (200, 201)
+
+    plan_id = a.post("/date-plans", json={"conversation_id": conv_id}).json()["id"]
+    offers = a.get(f"/date-plans/{plan_id}/overlaps").json()["items"]
+
+    opening = [o for o in offers if o["date"] == tomorrow.isoformat() and o["start"] == "00:00"]
+    assert opening, f"the small hours of tomorrow are inside the fortnight: {offers}"
+    assert opening[0]["end"] == "02:00", "cut at the horizon, not discarded"
+    # Nothing before the horizon opens, and nothing after it closes.
+    latest = (datetime.now(timezone.utc).astimezone(rome) + timedelta(days=14)).date()
+    assert not [o for o in offers if o["date"] < tomorrow.isoformat() or o["date"] > latest.isoformat()]
+
+
 def test_the_horizon_is_judged_on_what_survives_the_cut(client):
     """The horizon was checked against the interval, not the piece left after an excluded day was cut.
 
