@@ -95,6 +95,12 @@ test.each(NOTIFICATION_SCREENS)("%s refetches what the server sent the member to
   const src = readFileSync(join(__dirname, "..", rel), "utf8");
   expect(src).toContain("...serverDriven");
   expect(src).toContain('from "@/lib/query"');
+  // And guards the member, which is the other half of being a notification destination. These
+  // queries are `enabled: !!me`, so a member whose session has gone never fetches, and the gate is
+  // right to withhold an answer that never arrived — but without a guard nothing sends them to sign
+  // in either, and the screen waits for ever. `account/review.tsx` used `useAuth` alone and did
+  // exactly that.
+  expect(src).toContain("useRequireMember");
 });
 
 test("submitting feedback drops the cached second-date outcome", () => {

@@ -3,7 +3,7 @@ import { useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { Text } from "react-native";
 import { ApiError, get, post } from "@/api/client";
-import { useAuth } from "@/lib/auth";
+import { useAuth, useRequireMember } from "@/lib/auth";
 import { awaitingServer, serverDriven } from "@/lib/query";
 import { Badge, Button, Card, Divider, ErrorState, Field, Loading, PageTitle, Screen, StatusBanner, TextInput } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
@@ -37,7 +37,14 @@ type Action = {
 type Review = { status: string; actions: Action[]; rights: string[] };
 
 export default function AccountReview() {
-  const { me, signOut } = useAuth();
+  // `useRequireMember`, not `useAuth`: this screen is a notification destination, and a member whose
+  // session has gone — the app reopened after a long time, or they signed out on another device —
+  // arrives with `me` null. The query is disabled until `me` exists, so nothing ever fetches, and
+  // the freshness gate is right to withhold an answer it never received. Nothing redirected though,
+  // so the screen sat on "Loading the decision" for ever. The guard sends them to sign in, and
+  // allows a restricted account through, which is the only kind of account this screen is for.
+  const { me } = useRequireMember({ allowRestricted: true, allowOnboarding: true });
+  const { signOut } = useAuth();
   const router = useRouter();
   const [appealing, setAppealing] = useState<string | null>(null);
   const [statement, setStatement] = useState("");
