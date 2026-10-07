@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useRouter } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
 import * as SecureStore from "expo-secure-store";
 import { registerForPush, unregisterPush } from "@/lib/push";
 import {
@@ -42,6 +43,8 @@ export async function deviceId() {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  // Reachable because QueryClientProvider wraps this provider in app/_layout.tsx.
+  const qc = useQueryClient();
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
@@ -88,9 +91,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         device_id: await deviceId(),
       });
       await setTokens(data.access_token, data.refresh_token);
+      // And on the way in, for the same reason from the other side: a session can end without
+      // signOut running (an expired refresh token, a force-quit), so whatever is cached at this
+      // point may belong to somebody else.
+      qc.clear();
       return refresh();
     },
-    [refresh],
+    [refresh, qc],
   );
 
   const signOut = useCallback(async () => {
@@ -103,8 +110,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       /* session already gone */
     }
     await clearSession();
+    // Then the cache. `clearSession()` takes the tokens, which stops new requests, but every
+    // answer already fetched stays in the QueryClient — safety case categories and receipt codes,
+    // blocked members' names, conversations, the Blueprint. `staleTime` does not help: a stale
+    // query renders its cached data while it refetches, and on a handset two people share, the
+    // next person to sign in sees the last person's for as long as that takes. The comment above
+    // is the rule; this is the rest of keeping it.
+    qc.clear();
     setMe(null);
-  }, []);
+  }, [qc]);
 
   // Registration happens once we have a member and is safe to repeat: the endpoint is
   // idempotent on the token, and the platform can reissue a token at any launch.

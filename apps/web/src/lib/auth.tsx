@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { ApiError, clearSession, get, hasStoredSession, onAuthChange, post, refreshSession, setTokens } from "./api";
 import type { Me } from "./types";
 
@@ -17,6 +18,8 @@ type AuthState = {
 const Ctx = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  // Reachable because QueryClientProvider wraps this provider in lib/providers.tsx.
+  const qc = useQueryClient();
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
@@ -56,9 +59,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (challengeId: string, code: string) => {
       const data = await post<{ access_token: string; refresh_token: string }>("/auth/verify", { challenge_id: challengeId, code, device_id: deviceId() });
       setTokens(data.access_token, data.refresh_token);
+      // And on the way in, for the same reason from the other side: a session can end without
+      // signOut running, so whatever is cached at this point may belong to somebody else.
+      qc.clear();
       return refresh();
     },
-    [refresh],
+    [refresh, qc],
   );
 
   const signOut = useCallback(async () => {
@@ -68,8 +74,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       /* session already gone */
     }
     clearSession();
+    // The same on a shared browser as on a shared handset: clearing the tokens stops new
+    // requests, but everything already fetched stays in the QueryClient and a stale query renders
+    // its cached data while it refetches.
+    qc.clear();
     setMe(null);
-  }, []);
+  }, [qc]);
 
   const value = useMemo(() => ({ me, loading, error, refresh, signOut, signIn }), [me, loading, error, refresh, signOut, signIn]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
