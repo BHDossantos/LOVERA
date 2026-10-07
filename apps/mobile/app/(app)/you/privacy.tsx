@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Text } from "react-native";
+import { Text, View } from "react-native";
 import { ApiError, get, post, put } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
 import { Badge, Button, Card, Divider, ErrorState, Loading, PageTitle, Screen, StatusBanner, Toggle } from "@/components/ui";
@@ -19,6 +19,8 @@ import { color, space, type as typo } from "@/theme";
  * too; rather than let a member hit that error, the switch is absent and the reason given.
  */
 type Consents = { purposes: string[]; consents: Record<string, { status: string; policy_version: string; changed_at: string | null }> };
+type PrivacyRequest = { id: string; type: string; status: string; requested_at: string; expires_at: string | null };
+type Privacy = { requests: PrivacyRequest[]; matching_data: string[]; never_in_matching: string[] };
 
 const COPY: Record<string, { label: string; body: string }> = {
   terms: { label: "Terms of Service", body: "Required to hold an account." },
@@ -48,6 +50,8 @@ export default function YouPrivacy() {
   const [requested, setRequested] = useState(false);
 
   const q = useQuery({ queryKey: ["consents"], queryFn: () => get<Consents>("/consents"), enabled: !!me });
+  const privacy = useQuery({ queryKey: ["privacy"], queryFn: () => get<Privacy>("/me/privacy"), enabled: !!me });
+  const [downloaded, setDownloaded] = useState<string | null>(null);
 
   const setConsent = async (purpose: string, granted: boolean) => {
     setBusy(purpose);
@@ -124,6 +128,7 @@ export default function YouPrivacy() {
             try {
               await post("/me/export", {});
               setRequested(true);
+              await privacy.refetch();
             } catch (e) {
               setError(e as ApiError);
             } finally {
@@ -133,6 +138,55 @@ export default function YouPrivacy() {
         >
           Request a copy of my data
         </Button>
+
+        {(privacy.data?.requests ?? [])
+          .filter((r) => r.type === "export")
+          .map((r) => {
+            const expired = !!r.expires_at && new Date(r.expires_at) <= new Date();
+            return (
+              <View key={r.id}>
+                <Text style={s.fine}>
+                  Requested {new Date(r.requested_at).toLocaleDateString()} · {expired ? "expired" : r.status}
+                  {r.expires_at && !expired ? ` · available until ${new Date(r.expires_at).toLocaleDateString()}` : ""}
+                </Text>
+                {r.status === "ready" && !expired && (
+                  <Button
+                    variant="ghost"
+                    loading={busy === r.id}
+                    onPress={async () => {
+                      setBusy(r.id);
+                      setError(null);
+                      try {
+                        // The export is JSON, not a file the OS can hand off, so it is
+                        // fetched and shown rather than downloaded. A real file export
+                        // arrives with the media service.
+                        const data = await get<Record<string, unknown>>(`/me/export/${r.id}`);
+                        setDownloaded(JSON.stringify(data, null, 2));
+                      } catch (e) {
+                        setError(e as ApiError);
+                      } finally {
+                        setBusy(null);
+                      }
+                    }}
+                  >
+                    Open this copy
+                  </Button>
+                )}
+              </View>
+            );
+          })}
+
+        {!!downloaded && (
+          <>
+            <Text style={s.h2}>Your data</Text>
+            <Text style={s.mono} selectable>
+              {downloaded.slice(0, 20000)}
+            </Text>
+            {downloaded.length > 20000 && (
+              <Text style={s.fine}>Truncated here. The web app offers the whole file.</Text>
+            )}
+          </>
+        )}
       </Card>
     </Screen>
   );
@@ -142,4 +196,5 @@ const s = {
   h2: { ...typo.heading, color: color.ink, marginBottom: space.xs },
   meta: { ...typo.small, color: color.inkSecondary, marginBottom: space.sm },
   fine: { ...typo.small, color: color.inkTertiary, marginTop: space.xs },
+  mono: { ...typo.small, color: color.inkSecondary, fontFamily: "monospace" as const, marginTop: space.sm },
 } as const;

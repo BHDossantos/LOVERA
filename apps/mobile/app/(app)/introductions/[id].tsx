@@ -46,6 +46,7 @@ export default function IntroductionDetail() {
   const [codes, setCodes] = useState<string[]>([]);
   const [consent, setConsent] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [extending, setExtending] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [idempotencyKey] = useState(() => newIdempotencyKey());
 
@@ -110,6 +111,38 @@ export default function IntroductionDetail() {
             />
           )}
           {!!p?.verified && <Badge label="Identity verified" tone="success" />}
+
+          {/* The window is short on purpose, but a member who is simply away for a weekend
+              should not lose an introduction to it. The extension is theirs to take without
+              asking, and the other person is never told it happened. */}
+          {!!intro.expires_at && (
+            <Card>
+              <Text style={s.h2}>You have until {new Date(intro.expires_at).toLocaleString()}</Text>
+              <Text style={s.reasonText}>
+                After that the introduction closes and neither of you is told what the other decided.
+              </Text>
+              {intro.actions.can_extend && (
+                <Button
+                  variant="secondary"
+                  loading={extending}
+                  onPress={async () => {
+                    setExtending(true);
+                    setError(null);
+                    try {
+                      await post(`/introductions/${intro.id}/extend`, {});
+                      await qc.invalidateQueries({ queryKey: ["introduction", intro.id] });
+                    } catch (e) {
+                      setError(e as ApiError);
+                    } finally {
+                      setExtending(false);
+                    }
+                  }}
+                >
+                  Give me more time
+                </Button>
+              )}
+            </Card>
+          )}
 
           {!!ex && (
             <Card style={{ marginTop: space.md }}>

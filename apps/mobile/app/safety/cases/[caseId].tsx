@@ -1,10 +1,11 @@
+import { useState } from "react";
 import { useLocalSearchParams } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { Text } from "react-native";
-import { ApiError, get } from "@/api/client";
+import { ApiError, get, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
 import { CATEGORY_LABEL } from "@/components/safety";
-import { Badge, Card, ErrorState, Loading, PageTitle, Screen } from "@/components/ui";
+import { Badge, Button, Card, ErrorState, Field, Loading, PageTitle, Screen, StatusBanner, TextInput } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
 
 type CaseDetail = {
@@ -26,6 +27,26 @@ export default function CaseDetailScreen() {
     queryFn: () => get<CaseDetail>(`/safety/cases/${caseId}`),
     enabled: !!me && !!caseId,
   });
+
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [noteError, setNoteError] = useState<ApiError | null>(null);
+  const [added, setAdded] = useState(false);
+
+  const addNote = async () => {
+    setBusy(true);
+    setNoteError(null);
+    try {
+      await post(`/safety/cases/${caseId}/notes`, { note: note.trim() });
+      setNote("");
+      setAdded(true);
+      await q.refetch();
+    } catch (e) {
+      setNoteError(e as ApiError);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   if (q.isLoading)
     return (
@@ -72,6 +93,21 @@ export default function CaseDetailScreen() {
               ))}
             </Card>
           )}
+
+          {/* People remember things afterwards, and a case a member cannot add to is one
+              they have to re-report to correct. The reviewer sees this; the other person
+              never does. */}
+          <Card>
+            <Text style={s.h2}>Something else to add?</Text>
+            <ErrorState error={noteError} />
+            {added && <StatusBanner tone="context" title="Added. The reviewer will see it." />}
+            <Field label="Anything you remembered since" help="Only you and the reviewer can see this.">
+              <TextInput value={note} onChangeText={setNote} multiline numberOfLines={4} maxLength={2000} />
+            </Field>
+            <Button disabled={!note.trim()} loading={busy} onPress={addNote}>
+              Add to the case
+            </Button>
+          </Card>
         </>
       )}
     </Screen>
