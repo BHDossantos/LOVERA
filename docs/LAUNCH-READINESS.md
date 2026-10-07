@@ -127,7 +127,7 @@ unset rather than only set to Open, which still weighs it.
 ## D. What is done, and solid
 
 - **Backend**: 92 member endpoints, 69 tests green. Schema creation race fixed with a Postgres advisory lock. Email transport with a production boot guard. Sandbox payment and verification endpoints correctly 404 in production.
-- **Web app**: complete — 60 routes, Playwright e2e, legal pages.
+- **Web app**: complete — 60 routes and 83 of 92 member endpoints, Playwright e2e, legal pages.
 - **Mobile**: 43 screens and 80 of 92 member endpoints. Onboarding end to end; Today; introductions with explanation, correction, extension and private decision; the mutual screen; messaging with AI drafts and translation; date proposal, response, venues, confirmation, check-in, feedback and the second-date reveal; the safety centre with report, evidence, case tracking, blocks and unblock; account review and appeals; profile, preferences and blueprint editing; consent withdrawal; availability and readiness; block and report from inside a conversation; export, pause and delete; notifications inbox; push registration.
 - **Build pipeline**: native config generated and asserted (20 checks), placeholder API origins and missing EAS project ids refused before a build starts, EAS build workflow.
 - **Guards that would have caught what shipped**: the API contract check, the route check (including every path the API hands a client), and the native config check, all in CI. Each was verified by breaking the thing it checks and confirming it fails.
