@@ -18,7 +18,12 @@ import { color, space, type as typo } from "@/theme";
 export default function SafetyCentre() {
   const { me } = useRequireMember({ allowRestricted: true, allowOnboarding: true });
   const router = useRouter();
-  const [unblocking, setUnblocking] = useState<string | null>(null);
+  // Both are keyed by member, because rows other than the one spinning stay pressable and so
+  // several unblocks really can be in flight at once. Anything held as a single value here is
+  // stomped on by whichever request finishes last, and a lost failure is a block that silently
+  // stayed — which is the bug this error handling exists for in the first place.
+  const [unblocking, setUnblocking] = useState<string[]>([]);
+  const [failures, setFailures] = useState<Record<string, ApiError>>({});
 
   const centre = useQuery({ queryKey: ["safety"], queryFn: () => get<SafetyCenter>("/safety"), enabled: !!me });
   const cases = useQuery({
@@ -29,6 +34,24 @@ export default function SafetyCentre() {
   const blocks = useQuery({ queryKey: ["blocks"], queryFn: () => get<{ items: Block[] }>("/blocks"), enabled: !!me });
 
   const emergency = centre.data?.emergency;
+  const forget = (memberId: string) => setFailures(({ [memberId]: _cleared, ...rest }) => rest);
+
+  const runUnblock = async (b: Block) => {
+    setUnblocking((u) => [...u, b.member_id]);
+    forget(b.member_id);
+    try {
+      await del(`/blocks/${b.member_id}`);
+      forget(b.member_id);
+      await Promise.all([blocks.refetch(), centre.refetch()]);
+    } catch (e) {
+      // An offline device used to leave this as an unhandled rejection: the block stayed,
+      // nothing was said, and the member had no way to tell it had failed.
+      setFailures((f) => ({ ...f, [b.member_id]: e as ApiError }));
+    } finally {
+      setUnblocking((u) => u.filter((id) => id !== b.member_id));
+    }
+  };
+
   const unblock = (b: Block) =>
     Alert.alert(
       `Unblock ${b.display_name}?`,
@@ -37,12 +60,7 @@ export default function SafetyCentre() {
         { text: "Keep blocked", style: "cancel" },
         {
           text: "Unblock",
-          onPress: () => {
-            setUnblocking(b.member_id);
-            void del(`/blocks/${b.member_id}`)
-              .then(() => Promise.all([blocks.refetch(), centre.refetch()]))
-              .finally(() => setUnblocking(null));
-          },
+          onPress: () => void runUnblock(b),
         },
       ],
     );
@@ -114,8 +132,17 @@ export default function SafetyCentre() {
         <Card key={b.member_id}>
           <Text style={s.name}>{b.display_name}</Text>
           <Text style={s.meta}>Blocked {new Date(b.created_at).toLocaleDateString()}</Text>
+          {/* A failure belongs in the row it happened to, not in a banner at the top of the
+              page. A banner has to pick one when several fail, and whichever it drops becomes a
+              block that silently stayed. Here the message sits next to the person it is about
+              and its retry cannot be ambiguous.
+
+              The retry repeats the DELETE rather than reopening the confirmation: the member
+              already said yes, and asking twice because our request failed is our problem to
+              absorb, not theirs to re-answer. */}
+          <ErrorState error={failures[b.member_id] ?? null} retry={() => void runUnblock(b)} />
           {/* A block you cannot lift is a decision made for you. */}
-          <Button variant="ghost" loading={unblocking === b.member_id} onPress={() => unblock(b)}>
+          <Button variant="ghost" loading={unblocking.includes(b.member_id)} onPress={() => unblock(b)}>
             Unblock
           </Button>
         </Card>

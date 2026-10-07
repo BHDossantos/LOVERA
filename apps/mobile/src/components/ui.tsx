@@ -173,10 +173,15 @@ export function StatusBanner({ tone = "context", title, body }: { tone?: "contex
  */
 export function ErrorState({ error, retry }: { error: ApiError | null; retry?: () => void }) {
   if (!error) return null;
+  // api() wraps every failure, including a rejected fetch, in an ApiError with a body — so
+  // `error.body` is always there in practice. This is still guarded because an error
+  // renderer that throws replaces a readable message with a blank screen, and that is the
+  // worst possible place to be strict about a shape.
+  const body = error.body ?? { code: "INTERNAL", message: error.message || "Something went wrong.", retryable: false };
   return (
     <View style={{ marginBottom: space.lg }}>
-      <StatusBanner tone="caution" title={error.body.message} />
-      {(error.body.retryable ?? false) && !!retry && (
+      <StatusBanner tone="caution" title={body.message} />
+      {(body.retryable ?? false) && !!retry && (
         <View style={{ marginTop: space.sm }}>
           <Button variant="secondary" onPress={retry}>
             Try again

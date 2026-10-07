@@ -44,6 +44,12 @@ jest.mock("expo-router", () => ({
 
 import SafetyCentre from "../app/safety/index";
 
+afterEach(() => {
+  // Spies on shared singletons like Alert accumulate across tests, so calls[0] belongs to
+  // whichever test ran first and its handlers close over that render's state setters.
+  jest.restoreAllMocks();
+});
+
 beforeEach(() => {
   mockGet.mockReset();
   mockDel.mockReset();
@@ -80,9 +86,133 @@ test("unblocking sends the blocked member's id, not the block row id", async () 
   const s = await renderScreen(<SafetyCentre />);
   await s.press("Unblock");
   // The confirmation is a native Alert, so invoke the action the member would choose.
-  const buttons = alert.mock.calls[0][2] as { text: string; onPress?: () => void }[];
+  const buttons = alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[];
   await s.settle();
   buttons.find((b) => b.text === "Unblock")?.onPress?.();
   await s.settle();
   expect(mockDel).toHaveBeenCalledWith(expect.stringMatching(/^\/blocks\/mem_[ab]$/));
+});
+
+test("a failed unblock is shown to the member, not swallowed", async () => {
+  // This had no rejection handler: the block stayed, nothing was said, and React Native got
+  // an unhandled rejection. An offline device is the ordinary case, not an edge one.
+  const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+  // Exactly what api() throws when fetch rejects — see src/api/client.ts.
+  mockDel.mockRejectedValue(
+    Object.assign(new Error("You appear to be offline. Nothing was lost."), {
+      status: 0,
+      body: { code: "OFFLINE", message: "You appear to be offline. Nothing was lost.", retryable: true },
+    }),
+  );
+  const s = await renderScreen(<SafetyCentre />);
+  await s.press("Unblock");
+  const buttons = alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[];
+  buttons.find((b) => b.text === "Unblock")?.onPress?.();
+  await s.settle();
+  expect(s.joined()).toContain("You appear to be offline");
+  // And the member can try again rather than being stuck on a spinner.
+  expect(s.texts().filter((t) => t === "Unblock")).toHaveLength(2);
+});
+
+test("retrying a failed unblock retries the unblock, not the safety query", async () => {
+  // The retry callback used to refetch /safety, so "Try again" left the person blocked and
+  // the error on screen.
+  const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+  const offline = Object.assign(new Error("You appear to be offline. Nothing was lost."), {
+    status: 0,
+    body: { code: "OFFLINE", message: "You appear to be offline. Nothing was lost.", retryable: true },
+  });
+  mockDel.mockRejectedValueOnce(offline);
+  const s = await renderScreen(<SafetyCentre />);
+  await s.press("Unblock");
+  (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Unblock")?.onPress?.();
+  await s.settle();
+  expect(s.joined()).toContain("You appear to be offline");
+
+  mockDel.mockResolvedValueOnce(undefined);
+  await s.press("Try again");
+  // Two DELETEs for the same member: the first failed, the retry repeated it.
+  expect(mockDel.mock.calls.filter(([p]) => String(p).startsWith("/blocks/"))).toHaveLength(2);
+  expect(s.joined()).not.toContain("You appear to be offline");
+});
+
+test("one unblock succeeding does not strand another's failure", async () => {
+  // Rows other than the one spinning stay pressable, so two unblocks can be in flight at once.
+  // Ana's success used to clear the block Ben's failure needed, leaving Ben's error on screen
+  // with no "Try again" and Ben still blocked.
+  const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+  const offline = Object.assign(new Error("You appear to be offline. Nothing was lost."), {
+    status: 0,
+    body: { code: "OFFLINE", message: "You appear to be offline. Nothing was lost.", retryable: true },
+  });
+
+  let finishAna: () => void = () => {};
+  mockDel.mockImplementation((path: string) =>
+    path === "/blocks/mem_a"
+      ? new Promise<void>((resolve) => {
+          finishAna = resolve;
+        })
+      : Promise.reject(offline),
+  );
+
+  const s = await renderScreen(<SafetyCentre />);
+  const confirmLast = () =>
+    (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Unblock")?.onPress?.();
+
+  // Ana's row first, and her request stays in flight.
+  await s.press("Unblock", 0);
+  confirmLast();
+  await s.settle();
+  // Then Ben's, which fails while Ana's is still open.
+  await s.press("Unblock", 1);
+  confirmLast();
+  await s.settle();
+  expect(s.joined()).toContain("You appear to be offline");
+
+  // Ana now succeeds. Ben's failure is not hers to clear.
+  finishAna();
+  await s.settle();
+  expect(s.joined()).toContain("You appear to be offline");
+  expect(s.texts()).toContain("Try again");
+  // Ben is still blocked, so his row is still there to retry from.
+  expect(mockDel.mock.calls.map(([p]) => p)).toEqual(["/blocks/mem_a", "/blocks/mem_b"]);
+});
+
+test("two unblocks failing keeps both failures, each with its own retry", async () => {
+  // A single error slot meant the second failure overwrote the first, so one member's block
+  // silently stayed with nothing on screen about it. Failures are per member now, and each
+  // one is rendered in the row it belongs to.
+  const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+  const offline = (who: string) =>
+    Object.assign(new Error(`Could not unblock ${who}. You appear to be offline.`), {
+      status: 0,
+      body: { code: "OFFLINE", message: `Could not unblock ${who}. You appear to be offline.`, retryable: true },
+    });
+  mockDel.mockImplementation((path: string) =>
+    Promise.reject(offline(path === "/blocks/mem_a" ? "Ana" : "Ben")),
+  );
+
+  const s = await renderScreen(<SafetyCentre />);
+  const confirmLast = () =>
+    (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Unblock")?.onPress?.();
+
+  await s.press("Unblock", 0);
+  confirmLast();
+  await s.settle();
+  await s.press("Unblock", 1);
+  confirmLast();
+  await s.settle();
+
+  expect(s.joined()).toContain("Could not unblock Ana");
+  expect(s.joined()).toContain("Could not unblock Ben");
+  expect(s.texts().filter((t) => t === "Try again")).toHaveLength(2);
+
+  // Retrying Ana's clears only Ana's. Ben is still blocked, so his stays put.
+  mockDel.mockImplementation((path: string) =>
+    path === "/blocks/mem_a" ? Promise.resolve(undefined) : Promise.reject(offline("Ben")),
+  );
+  await s.press("Try again", 0);
+  await s.settle();
+  expect(s.joined()).not.toContain("Could not unblock Ana");
+  expect(s.joined()).toContain("Could not unblock Ben");
 });
