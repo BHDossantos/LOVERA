@@ -261,3 +261,42 @@ test("saving readiness refreshes Today, not only the member", async () => {
   expect(mockRefresh).toHaveBeenCalled();
   expect(s.client.getQueryState(["today"])?.isInvalidated).toBe(true);
 });
+
+test("a preference the matcher is ignoring can still be deleted", async () => {
+  // Marking a withdrawn-consent preference inactive took away the Change button — and the only
+  // route to the delete control was through that editor. So the member likeliest to want the
+  // criterion gone was the one who had to re-grant the consent they withdrew in order to erase
+  // it. `delete_preference` needs no consent; it refuses only the four eligibility criteria.
+  const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+  mockGet.mockImplementation(
+    routeGet({
+      "/preferences": {
+        ...PREFS,
+        preferences: [
+          { ...PREFS.preferences[0], key: "faith_importance", label: "Faith in daily life", active: false, inactive_reason: "special_category_consent_withdrawn" },
+        ],
+      },
+    }),
+  );
+  const s = await renderScreen(<Preferences />);
+  expect(s.texts()).not.toContain("Change");
+
+  await s.press("Delete this preference");
+  (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Stop using it")?.onPress?.();
+  await s.settle();
+  expect(mockDel).toHaveBeenCalledWith("/preferences/faith_importance");
+});
+
+test("an inactive eligibility criterion offers no delete, because the API refuses it", async () => {
+  mockGet.mockImplementation(
+    routeGet({
+      "/preferences": {
+        ...PREFS,
+        preferences: [{ ...PREFS.preferences[1], active: false, inactive_reason: "special_category_consent_withdrawn" }],
+      },
+    }),
+  );
+  const s = await renderScreen(<Preferences />);
+  expect(s.joined()).toContain("Age range");
+  expect(s.texts()).not.toContain("Delete this preference");
+});

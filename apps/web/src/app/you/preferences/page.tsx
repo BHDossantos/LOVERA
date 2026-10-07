@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError, get, patch, post } from "@/lib/api";
+import { ApiError, del, get, patch, post } from "@/lib/api";
 import { useRequireMember } from "@/lib/auth";
 import { AppShell } from "@/components/shell/AppShell";
 import { Button, Card, EmptyState, ErrorState, Field, PageTitle, Skeleton, StatusBanner, TextInput, TierPill, TierSelect, cx } from "@/components/ui";
@@ -63,6 +63,30 @@ export default function PreferencesPage() {
       setBusy(null);
     }
   };
+  /**
+   * Clear a preference back to unset.
+   *
+   * Open is not the same thing — it still weighs the criterion — so a member who wants one to
+   * play no part at all had no way to say so, and `DELETE /preferences/{key}` was called by
+   * neither app. It needs no sensitive-data consent, which matters for a criterion whose
+   * consent has just been withdrawn: that member is the likeliest to want it gone, and
+   * re-granting the consent must not be the price of deleting it.
+   */
+  const remove = async (key: string) => {
+    setBusy(`remove:${key}`);
+    setError(null);
+    try {
+      await del(`/preferences/${key}`);
+      await qc.invalidateQueries({ queryKey: ["preferences"] });
+      setEditing(null);
+      setImpact(null);
+    } catch (e) {
+      setError(e as ApiError);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const save = async () => {
     if (!editing) return;
     setBusy("save");
@@ -117,15 +141,30 @@ export default function PreferencesPage() {
                       </p>
                     )}
                   </div>
-                  {p.active !== false ? (
-                    <Button size="sm" variant="secondary" onClick={() => startEdit(p)} aria-label={`Adjust ${p.label}`}>
-                      Adjust
-                    </Button>
-                  ) : (
-                    <a className="shrink-0 text-sm underline text-ink-secondary" href="/you/privacy">
-                      Review consents
-                    </a>
-                  )}
+                  <div className="flex shrink-0 flex-col items-end gap-1">
+                    {p.active !== false ? (
+                      <Button size="sm" variant="secondary" onClick={() => startEdit(p)} aria-label={`Adjust ${p.label}`}>
+                        Adjust
+                      </Button>
+                    ) : (
+                      <a className="text-sm underline text-ink-secondary" href="/you/privacy">
+                        Review consents
+                      </a>
+                    )}
+                    {/* The four eligibility criteria are a 409 from `delete_preference`: they are
+                        set to Open, never removed, so no button offers it. */}
+                    {!CORE.has(p.key) && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        loading={busy === `remove:${p.key}`}
+                        onClick={() => remove(p.key)}
+                        aria-label={`Delete ${p.label}`}
+                      >
+                        Delete
+                      </Button>
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>

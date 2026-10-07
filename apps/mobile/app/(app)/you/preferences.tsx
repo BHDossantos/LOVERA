@@ -343,9 +343,21 @@ export default function YouPreferences() {
               Change
             </Button>
           ) : (
-            <Button variant="ghost" onPress={() => router.push("/you/privacy")}>
-              Review your consents
-            </Button>
+            <>
+              {/* Erasing it needs no consent — `delete_preference` refuses only the four
+                  eligibility criteria — and a member who has just withdrawn consent for
+                  sensitive data is the likeliest person to want this one gone. Routing them
+                  through the editor would have made re-granting that consent the price of
+                  deleting the thing they withdrew it over. */}
+              {!CANNOT_REMOVE.includes(p.key) && (
+                <Button variant="ghost" loading={busy} onPress={() => confirmRemove(p.key, p.label)}>
+                  Delete this preference
+                </Button>
+              )}
+              <Button variant="ghost" onPress={() => router.push("/you/privacy")}>
+                Review your consents
+              </Button>
+            </>
           )}
         </Card>
       ))}
