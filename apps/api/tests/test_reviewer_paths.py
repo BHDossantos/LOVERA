@@ -177,7 +177,11 @@ def test_the_unresolved_corrections_queue_can_be_drained(client):
     assert r.json()["review"]["decision"] == "no_change"
     # Named, not only identified: nothing turns a staff id into a person on the client, and a
     # shared queue needs to show who settled a dispute so the next reviewer can ask them why.
-    assert r.json()["review"]["reviewer"]["name"]
+    #
+    # And a name a colleague can act on, not a UUID prefix. Staff accounts are created through
+    # `staff_bootstrap_emails` with a Profile that has no display_name, which is the normal path, so
+    # the first version of this rendered "Reviewed by 1a2b3c4d" for every reviewer there is.
+    assert r.json()["review"]["reviewer"]["name"] == "concierge"
 
     after = concierge.get("/admin/matching/corrections?unresolved_only=true&limit=200").json()
     assert correction_id not in [c["id"] for c in after["items"]], "a reviewed correction must leave the unresolved queue"

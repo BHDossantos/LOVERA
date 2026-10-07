@@ -77,6 +77,31 @@ def _name(db: Session, member_id: str | None) -> str:
     return (p.display_name if p and p.display_name else member_id[:8])
 
 
+STAFF_ROLES = ("concierge", "safety_reviewer", "support", "admin")
+
+
+def _staff_name(db: Session, member_id: str | None) -> str:
+    """A colleague's name, for a staff-facing record of who did something.
+
+    `_name` is for members and falls back to eight characters of a UUID, which is right there —
+    staff should not be shown a member's email because a profile has no display name. For staff it
+    is useless: accounts created through `staff_bootstrap_emails` get a `Profile` with no
+    `display_name` at all (account/service.py), which is the normal way a reviewer account comes
+    into existence, so every resolved correction read "Reviewed by 1a2b3c4d". The local part of a
+    colleague's work address is the thing another colleague can act on, and the role check keeps
+    this from ever becoming a way to read a member's email out of the admin API.
+    """
+    if not member_id:
+        return "—"
+    profile = db.get(Profile, member_id)
+    if profile and profile.display_name:
+        return profile.display_name
+    member = db.get(Member, member_id)
+    if member and any(r in STAFF_ROLES for r in (member.roles or [])):
+        return member.email.split("@")[0]
+    return member_id[:8]
+
+
 def _review_payload(db: Session, review: IntroCorrectionReview) -> dict[str, Any]:
     """One correction's review, with the reviewer named rather than only identified.
 
@@ -87,7 +112,7 @@ def _review_payload(db: Session, review: IntroCorrectionReview) -> dict[str, Any
     return {
         "decision": review.decision,
         "note": review.note,
-        "reviewer": {"id": review.reviewer_id, "name": _name(db, review.reviewer_id)},
+        "reviewer": {"id": review.reviewer_id, "name": _staff_name(db, review.reviewer_id)},
         "at": iso(review.created_at),
     }
 
