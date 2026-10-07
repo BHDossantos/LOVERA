@@ -29,6 +29,19 @@ jobs:
         env:
           MM_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/matchmaker_test
           MM_ENV: test
+      # Both front ends address the API with string literals, and nothing ties those
+      # strings to the routes they mean to hit. A path that was renamed, pluralised or
+      # never existed compiles, typechecks, bundles and ships, then 404s on a member's
+      # phone. This job already has the API importable, so it is the cheapest place to
+      # compare the two. It is how /safety/center and a /date-plans/{id}/confirm that
+      # never existed were found.
+      - name: Every client API call hits a route that exists
+        run: |
+          python -c "import json; from app.main import app; json.dump(app.openapi(), open('openapi.json','w'))"
+          python ../../tools/check_api_contract.py openapi.json ../../apps/mobile ../../apps/web/src
+        env:
+          MM_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/matchmaker_test
+          MM_ENV: test
   web:
     runs-on: ubuntu-latest
     defaults:

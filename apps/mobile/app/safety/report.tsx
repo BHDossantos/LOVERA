@@ -30,7 +30,7 @@ export default function Report() {
   const { me } = useRequireMember({ allowRestricted: true, allowOnboarding: true });
   const router = useRouter();
   const params = useLocalSearchParams<{ subject?: string; conversation?: string; date?: string }>();
-  const center = useQuery({ queryKey: ["safety"], queryFn: () => get<SafetyCenter>("/safety/center"), enabled: !!me });
+  const center = useQuery({ queryKey: ["safety"], queryFn: () => get<SafetyCenter>("/safety"), enabled: !!me });
 
   const [category, setCategory] = useState("");
   const [urgency, setUrgency] = useState("recent");

@@ -11,7 +11,7 @@ import { color, space, type as typo } from "@/theme";
 export default function SafetyCentre() {
   const { me } = useRequireMember({ allowRestricted: true, allowOnboarding: true });
   const router = useRouter();
-  const q = useQuery({ queryKey: ["safety"], queryFn: () => get<SafetyCenter>("/safety/center"), enabled: !!me });
+  const q = useQuery({ queryKey: ["safety"], queryFn: () => get<SafetyCenter>("/safety"), enabled: !!me });
 
   return (
     <Screen>
