@@ -1,96 +1,14 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import * as ImagePicker from "expo-image-picker";
-import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { Alert, Text, View } from "react-native";
 import { ApiError, post } from "@/api/client";
 import { Button, Card, ErrorState, Field, StatusBanner, TextInput } from "@/components/ui";
+import { dataUrl, fitForUpload } from "@/lib/upload";
 import { color, space, type as typo } from "@/theme";
-
-/**
- * `EvidenceIn.data_url` is capped at 15,000,000 characters
- * (apps/api/app/modules/safety/router.py), and base64 is four characters per three bytes, so
- * anything over about 11 MB is refused. A screenshot is comfortably under that; a photo
- * straight off a flagship camera often is not, and "Take a photo" is one of the two buttons
- * here. Unshrunk, those came back as a generic validation error on a safety path.
- */
-const DATA_URL_LIMIT = 15_000_000;
-
-/**
- * Tried in order, only when the original does not fit. 2400px keeps the text in a screenshot
- * of a message legible, which is what most of this evidence is.
- *
- * Ceilings, not targets — and the distinction is the whole of `shrinkSteps` below. `resize({
- * width })` sets the *result* width (expo-image-manipulator's own types: "Values correspond to
- * the result image dimensions"), so a step wider than the source enlarges the image instead of
- * shrinking it.
- */
-const SHRINK_CEILINGS = [
-  { width: 2400, compress: 0.8 },
-  { width: 1600, compress: 0.7 },
-  { width: 1200, compress: 0.6 },
-];
-
-/** Below this a screenshot of a message stops being readable, so there is no point going on. */
-const MIN_WIDTH = 240;
-
-/**
- * The widths actually worth asking for, given what the source is.
- *
- * A long chat screenshot — the commonest evidence on this screen — is often under 1200px wide
- * and thousands tall, so every one of the ceilings above was *larger* than its width: all three
- * steps enlarged it, it never got under the cap, and the member was told their image was too
- * large to attach even though downscaling it would have worked.
- *
- * So the ceilings are filtered to those that genuinely reduce the width, and where that leaves
- * nothing much to try, fractions of the source take over.
- */
-export function shrinkSteps(sourceWidth: number | undefined): { width: number; compress: number }[] {
-  // An asset with no width reported: nothing to reason from, so keep the ceilings as they are.
-  if (!sourceWidth || sourceWidth <= 0) return [...SHRINK_CEILINGS];
-
-  const steps = SHRINK_CEILINGS.filter((s) => s.width < sourceWidth);
-
-  // The fractions always follow, never only when the ceilings left too little. Returning early
-  // once two ceilings applied put a cliff at each one: a 1601px source got 1600 and 1200 and
-  // nothing else, so a tall screenshot still over the cap at 1200 was refused — while a 1600px
-  // source, one pixel narrower, went on to 800, 528 and 400 and fitted.
-  //
-  // They halve from the smallest step so far rather than from the source, so the ladder keeps
-  // descending instead of landing next to a ceiling it already tried.
-  const smallest = steps.length ? steps[steps.length - 1].width : sourceWidth;
-  for (const [scale, compress] of [
-    [0.5, 0.7],
-    [0.33, 0.6],
-    [0.25, 0.5],
-  ] as const) {
-    const width = Math.round(smallest * scale);
-    if (width < MIN_WIDTH || width >= sourceWidth) continue;
-    if (steps.some((s) => s.width === width)) continue;
-    steps.push({ width, compress });
-  }
-
-  // Nothing narrower came out of the ceilings or the fractions — a source already near the floor.
-  // Re-encode at the width it has: the resize is a no-op, and turning a PNG screenshot into a JPEG
-  // is most of the saving anyway, so this is a real attempt rather than a formality. It is tried
-  // first, being the widest, so an image that fits at full width is never downscaled for nothing.
-  if (!steps.length) steps.push({ width: sourceWidth, compress: 0.6 });
-
-  // And the floor itself, which the ladder could not previously reach. Every fraction of a source
-  // under about 479px rounds below MIN_WIDTH and is skipped, so a 400px-wide screenshot thousands
-  // of pixels tall got one no-op re-encode and then a refusal — while 240px, the width this file
-  // declares readable, was never tried at all. The member was told their evidence was too large on
-  // a safety report when the one step that would have fitted was the one being withheld.
-  const narrowest = steps.reduce((min, step) => Math.min(min, step.width), Infinity);
-  if (MIN_WIDTH < sourceWidth && narrowest > MIN_WIDTH) steps.push({ width: MIN_WIDTH, compress: 0.5 });
-
-  return steps.sort((a, b) => b.width - a.width);
-}
 
 const hasApiBody = (e: unknown): boolean =>
   typeof e === "object" && e !== null && typeof (e as { body?: { message?: unknown } }).body?.message === "string";
-
-const dataUrl = (contentType: string, base64: string) => `data:${contentType};base64,${base64}`;
 
 /**
  * S02/S03 evidence. A screenshot is often the whole report — a threatening message, a demand
@@ -180,7 +98,7 @@ export function EvidenceAttach({ reportId, onAdded }: { reportId: string; onAdde
     }
     await post(`/safety/reports/${reportId}/evidence`, {
       content_type: prepared.contentType,
-      size_bytes: Math.round((prepared.base64.length * 3) / 4),
+      size_bytes: prepared.sizeBytes,
       checksum: null,
       description: description.trim() || null,
       data_url: dataUrl(prepared.contentType, prepared.base64),
@@ -222,40 +140,6 @@ export function EvidenceAttach({ reportId, onAdded }: { reportId: string; onAdde
       </View>
     </Card>
   );
-}
-
-/**
- * The image as the API will accept it, or null when even the smallest step is too big.
- *
- * An image that already fits is sent at the picker's own quality rather than being resized and
- * re-encoded again, because every extra pass softens the text a reviewer needs to read. Shrinking
- * happens only when the alternative is not sending it at all.
- *
- * It is JPEG either way: the picker's `base64` is the asset's JPEG data whatever the asset was, so
- * there is no PNG left to preserve by the time this sees it.
- */
-async function fitForUpload(
-  asset: ImagePicker.ImagePickerAsset,
-  base64: string,
-): Promise<{ contentType: string; base64: string } | null> {
-  // JPEG, not `asset.mimeType`. The installed expo-image-picker says so of `base64` itself:
-  // "a Base64-encoded string of the selected image's JPEG data... prepend this with
-  // 'data:image/jpeg;base64,'" (ImagePicker.types.d.ts). `mimeType` describes the *asset the member
-  // picked*, which is a different thing — so labelling these bytes with it declared a HEIC photo or
-  // a PNG screenshot and sent JPEG. Harmless until the server started checking that a file looks
-  // like what it says, and then it refused every screenshot that was not already a JPEG.
-  if (dataUrl("image/jpeg", base64).length <= DATA_URL_LIMIT) {
-    return { contentType: "image/jpeg", base64 };
-  }
-  for (const step of shrinkSteps(asset.width)) {
-    // The contextual API; manipulateAsync is deprecated in this SDK.
-    const rendered = await ImageManipulator.manipulate(asset.uri).resize({ width: step.width }).renderAsync();
-    const out = await rendered.saveAsync({ base64: true, compress: step.compress, format: SaveFormat.JPEG });
-    if (out.base64 && dataUrl("image/jpeg", out.base64).length <= DATA_URL_LIMIT) {
-      return { contentType: "image/jpeg", base64: out.base64 };
-    }
-  }
-  return null;
 }
 
 const s = {

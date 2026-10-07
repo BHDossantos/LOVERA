@@ -32,6 +32,26 @@ VIDEO_TYPES = ("video/mp4", "video/quicktime", "video/webm", "video/x-matroska",
 # which is why these are enumerated rather than matched as `image/*`.
 DOCUMENT_TYPES = ("application/pdf", "text/plain")
 
+# How much file either upload endpoint will take, and the one number both of its gates are
+# written from.
+#
+# There were two, and they disagreed. `create_media` refused a declared `size_bytes` over
+# 15 MiB while the `data_url` field was capped at 15,000,000 *characters* — base64, four
+# characters per three bytes, so about 11.25 MB of actual file. A photo between the two passed
+# the first gate, which creates the row, and then failed the second as a bare string-length
+# error, which `app/main.py` renders as "Some fields need attention." That is the whole of what
+# a member was told about an 11 MB photo, on the screen where they add one, and on the safety
+# evidence endpoint it was what somebody reporting harassment got for a screenshot.
+#
+# `MAX_DATA_URL_CHARS` is deliberately well above what `MAX_UPLOAD_BYTES` needs, and the gap is
+# the point: a request a little over the limit has to reach `decode_data_url` to be told what is
+# wrong with it, so the field length is an outer bound against an absurd body rather than the
+# limit members are held to. 11,000,000 bytes is what the old 15,000,000-character cap could
+# already carry, so nothing that used to upload stops uploading.
+MAX_UPLOAD_BYTES = 11_000_000
+MAX_UPLOAD_LABEL = "11 MB"
+MAX_DATA_URL_CHARS = 20_000_000
+
 # What each upload endpoint accepts, named here rather than assembled at the call site. The client
 # that chooses the file declares the same set as an `accept` attribute, and the two have drifted in
 # both directions; `tools/check_upload_types.py` compares them, and it can only do that against a
@@ -91,6 +111,12 @@ def decode_data_url(data_url: str, declared_content_type: str, allowed: tuple[st
         raise refuse("That attachment is not valid base64. Send the file again.")
     if not raw:
         raise refuse("That attachment is empty.")
+    # Measured on the decoded bytes rather than the string, because that is the file the member
+    # chose and the number they can do something about. Both endpoints check the size they were
+    # told before any of this, so an honest client is refused before it uploads anything; this is
+    # the backstop for one that under-declares, and the only gate safety evidence has.
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise refuse(f"That file is {len(raw) / 1_000_000:.1f} MB, and the largest we can take is {MAX_UPLOAD_LABEL}. A smaller version of the same thing will go through.")
 
     expected = SIGNATURES.get(media_type)
     if expected and not raw.startswith(expected):

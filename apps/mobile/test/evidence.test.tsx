@@ -43,7 +43,8 @@ jest.mock("expo-image-manipulator", () => ({
   },
 }));
 
-import { EvidenceAttach, shrinkSteps } from "@/components/EvidenceAttach";
+import { EvidenceAttach } from "@/components/EvidenceAttach";
+import { shrinkSteps } from "@/lib/upload";
 
 const picker = ImagePicker as jest.Mocked<typeof ImagePicker>;
 

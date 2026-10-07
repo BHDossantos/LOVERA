@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as ImagePicker from "expo-image-picker";
 import { ApiError, del, get, patch, post } from "@/api/client";
 import { Badge, Button, Card, ErrorState, Field, Loading, TextInput } from "@/components/ui";
+import { dataUrl, fitForUpload } from "@/lib/upload";
 import { color, radius, space, type as typo } from "@/theme";
 
 type Media = { id: string; type: string; url: string | null; state?: string; alt_text?: string | null };
@@ -105,22 +106,38 @@ export function ProfileEditor({ onSaved }: { onSaved?: () => void }) {
       setError(new ApiError(0, { code: "UPLOAD_FAILED", message: "That photo could not be read. Try another one." }));
       return;
     }
-    // JPEG, not `asset.mimeType`: the picker's `base64` is the asset's JPEG data regardless of what
-    // the member picked (expo-image-picker's own types), so `mimeType` would describe the HEIC that
-    // went in while the bytes going out are JPEG — and the server now checks that a file looks like
-    // what it says it is.
-    const contentType = "image/jpeg";
     setUploading(true);
     try {
+      /**
+       * Shrunk to fit if it has to be, by the same helper the evidence attachment uses.
+       *
+       * The crop to 4:5 and `quality: 0.8` above were doing this job implicitly, and they do it for
+       * a 12-megapixel camera: the result lands far below the endpoint's limit. They do not do it
+       * for a 50- or 200-megapixel one, because the editor crops at the source's resolution — so
+       * the member with the newest phone was the one whose photo the server refused, and before
+       * the limits agreed what they got back for it said nothing about size.
+       */
+      const prepared = await fitForUpload(asset, asset.base64);
+      if (!prepared) {
+        setError(
+          new ApiError(0, {
+            code: "TOO_LARGE",
+            message: "That photo is too large to upload, even after shrinking it. Try another one.",
+          }),
+        );
+        return;
+      }
       const created = await post<{ media: Media }>("/profile/media", {
         type: "photo",
-        content_type: contentType,
-        size_bytes: asset.fileSize ?? Math.round((asset.base64.length * 3) / 4),
+        // The bytes being sent, not `asset.fileSize`, which is the file the picker handed us before
+        // any of this — a number describing a photo the server never receives.
+        content_type: prepared.contentType,
+        size_bytes: prepared.sizeBytes,
         checksum: null,
         alt_text: "Profile photo",
       });
       await post(`/profile/media/${created.media.id}/complete`, {
-        data_url: `data:${contentType};base64,${asset.base64}`,
+        data_url: dataUrl(prepared.contentType, prepared.base64),
       });
       await qc.invalidateQueries({ queryKey: ["profile"] });
     } catch (err) {

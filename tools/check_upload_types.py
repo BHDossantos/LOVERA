@@ -178,6 +178,36 @@ def pickers(roots: list[str]) -> tuple[dict[str, list[tuple[Path, str | None]]],
     return found, problems
 
 
+# Where the mobile app keeps the same limit, and the name it keeps it under. One file, one constant,
+# compared with the server's by value — not a type list, but the same failure: two numbers that have
+# to agree, written in two places.
+MOBILE_LIMIT = (REPO / "apps" / "mobile" / "src" / "lib" / "upload.ts", "MAX_UPLOAD_BYTES")
+
+
+def check_size_limit() -> int:
+    """The client's idea of how much file the server takes is the server's.
+
+    The mobile app shrinks a photo until it fits before uploading it, so it needs the number — and
+    while it compared the length of the *data URL* against the field's `max_length`, it was the
+    wrong number in a way that looked right. The field length is deliberately above what the byte
+    limit allows, so that a request a little over reaches the server's own check and comes back with
+    a reason, which means a client measuring the string accepts files the server refuses.
+    """
+    path, name = MOBILE_LIMIT
+    if not path.exists():
+        print(f"FAIL: {path.relative_to(REPO)} is gone; the mobile upload limit cannot be compared with the server's")
+        return 1
+    found = re.findall(rf"^export const {name} = ([0-9_]+);$", path.read_text(), re.M)
+    if len(found) != 1:
+        print(f"FAIL {path.relative_to(REPO)}: expected exactly one `export const {name} = <number>;`, found {len(found)}")
+        return 1
+    client = int(found[0].replace("_", ""))
+    if client != datauri.MAX_UPLOAD_BYTES:
+        print(f"FAIL {path.relative_to(REPO)}: {name} is {client:,} but the server takes {datauri.MAX_UPLOAD_BYTES:,} (MAX_UPLOAD_BYTES in app/core/datauri.py) — a client that shrinks to the wrong number either refuses photos the server would take or uploads ones it will not")
+        return 1
+    return 0
+
+
 def main(roots: list[str]) -> int:
     enforced, calls, problems = server_lists()
 
@@ -257,9 +287,11 @@ def main(roots: list[str]) -> int:
             print(f"FAIL {path}: {name} uploads {expected_kind!r}, which is a kind {module} branches on, so it does not reach the fall-through list this check compares it with")
             problems += 1
 
+    problems += check_size_limit()
+
     if problems:
         return 1
-    print(f"checked {len(found)} upload pickers, at the {sum(len(v) for v in used.values())} inputs that carry them, against the {len(enforced)} allow-lists {calls} decode_data_url calls enforce, branch by branch; every one offers exactly what its own branch accepts")
+    print(f"checked {len(found)} upload pickers, at the {sum(len(v) for v in used.values())} inputs that carry them, against the {len(enforced)} allow-lists {calls} decode_data_url calls enforce, branch by branch; every one offers exactly what its own branch accepts, and the mobile app shrinks to the {datauri.MAX_UPLOAD_BYTES:,}-byte limit the server enforces")
     return 0
 
 

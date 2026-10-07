@@ -132,7 +132,11 @@ def add_evidence(db: Session, reporter: Member, report_id: str, content_type: st
         # Everything the pickers offer. A recording of a call and a saved chat log are evidence as
         # much as a screenshot is, and narrowing the server behind the client meant the member
         # attached a file, was told the report was filed, and the reviewer got nothing.
-        decode_data_url(data_url, content_type, EVIDENCE_TYPES)
+        raw = decode_data_url(data_url, content_type, EVIDENCE_TYPES)
+        # The bytes, not the client's claim about them. A reviewer reads this number to decide
+        # whether to open the attachment at all, and it described whatever the picker had opened
+        # rather than what was sent.
+        size_bytes = len(raw)
     key = f"evidence/{report.id}/{secrets.token_hex(8)}"
     ev = SafetyEvidence(report_id=report.id, storage_key=key, content_type=content_type, size_bytes=size_bytes, checksum=checksum, description=(description or "")[:300] or None)
     db.add(ev)

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.core.datauri import MAX_DATA_URL_CHARS
 from app.core.db import get_db
 from app.core.deps import Principal, current_principal
 from app.core.errors import ApiError
@@ -38,7 +39,7 @@ class MediaCreate(BaseModel):
 
 class MediaComplete(BaseModel):
     checksum: str | None = None
-    data_url: str | None = Field(default=None, max_length=15_000_000)
+    data_url: str | None = Field(default=None, max_length=MAX_DATA_URL_CHARS)
 
 
 @router.get("/profile")
