@@ -43,7 +43,7 @@ jest.mock("expo-image-manipulator", () => ({
   },
 }));
 
-import { EvidenceAttach } from "@/components/EvidenceAttach";
+import { EvidenceAttach, shrinkSteps } from "@/components/EvidenceAttach";
 
 const picker = ImagePicker as jest.Mocked<typeof ImagePicker>;
 
@@ -245,4 +245,65 @@ test("a permission request that throws is reported too", async () => {
 
   expect(s.joined()).toContain("Your photos could not be opened.");
   expect(mockPost).not.toHaveBeenCalled();
+});
+
+/**
+ * `resize({ width })` sets the result width — expo-image-manipulator's own types say "Values
+ * correspond to the result image dimensions" — so it is not a maximum bound. A fixed ladder of
+ * 2400/1600/1200 therefore *enlarged* anything narrower than 1200, which a long chat screenshot
+ * usually is: all three steps made it bigger, it never fell under the cap, and the member was
+ * told it was too large to attach when downscaling would have worked.
+ */
+describe("shrinkSteps", () => {
+  test("a wide camera photo keeps the ceiling ladder", () => {
+    expect(shrinkSteps(4032).map((s) => s.width)).toEqual([2400, 1600, 1200]);
+  });
+
+  test("a narrow long screenshot gets steps that are actually smaller", () => {
+    const steps = shrinkSteps(1170);
+    expect(steps.length).toBeGreaterThan(0);
+    for (const s of steps) expect(s.width).toBeLessThan(1170);
+    expect(steps.map((s) => s.width)).toEqual([585, 386, 293]);
+  });
+
+  test("no step ever exceeds the source, at any width", () => {
+    for (const w of [240, 320, 400, 720, 900, 1080, 1170, 1200, 1201, 1600, 2000, 2400, 3000, 4032, 8000]) {
+      for (const s of shrinkSteps(w)) expect(s.width).toBeLessThan(w);
+    }
+  });
+
+  test("steps only ever descend", () => {
+    for (const w of [900, 1300, 2000, 4032]) {
+      const widths = shrinkSteps(w).map((s) => s.width);
+      expect(widths).toEqual([...widths].sort((a, b) => b - a));
+    }
+  });
+
+  test("an asset with no reported width falls back to the ceilings", () => {
+    expect(shrinkSteps(undefined).map((s) => s.width)).toEqual([2400, 1600, 1200]);
+    expect(shrinkSteps(0).map((s) => s.width)).toEqual([2400, 1600, 1200]);
+  });
+});
+
+test("a long screenshot narrower than the ceilings is shrunk, not enlarged", async () => {
+  // End to end through the component: the asset reports its width, and every resize asked for is
+  // below it. With the fixed ladder this sent resize({width: 2400}) on a 1170px image.
+  picker.requestMediaLibraryPermissionsAsync.mockResolvedValue({ granted: true } as never);
+  picker.launchImageLibraryAsync.mockResolvedValue({
+    canceled: false,
+    assets: [{ uri: "file:///chat.png", base64: OVERSIZED, mimeType: "image/png", width: 1170, height: 9400 }],
+  } as never);
+  mockSave.mockImplementation((size: { width: number }) =>
+    Promise.resolve({ base64: size.width <= 585 ? "T0s=" : OVERSIZED }),
+  );
+
+  const s = await renderScreen(<EvidenceAttach reportId="case_1" />);
+  await s.press("Choose a screenshot");
+  await s.settle();
+
+  const asked = mockResize.mock.calls.map(([size]) => size.width);
+  expect(asked.length).toBeGreaterThan(0);
+  for (const w of asked) expect(w).toBeLessThan(1170);
+  expect(mockPost.mock.calls[0][1]).toMatchObject({ data_url: "data:image/jpeg;base64,T0s=" });
+  expect(s.hasText("Attached")).toBe(true);
 });

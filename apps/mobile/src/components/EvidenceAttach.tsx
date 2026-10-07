@@ -19,12 +19,51 @@ const DATA_URL_LIMIT = 15_000_000;
 /**
  * Tried in order, only when the original does not fit. 2400px keeps the text in a screenshot
  * of a message legible, which is what most of this evidence is.
+ *
+ * Ceilings, not targets — and the distinction is the whole of `shrinkSteps` below. `resize({
+ * width })` sets the *result* width (expo-image-manipulator's own types: "Values correspond to
+ * the result image dimensions"), so a step wider than the source enlarges the image instead of
+ * shrinking it.
  */
-const SHRINK_STEPS = [
+const SHRINK_CEILINGS = [
   { width: 2400, compress: 0.8 },
   { width: 1600, compress: 0.7 },
   { width: 1200, compress: 0.6 },
 ];
+
+/** Below this a screenshot of a message stops being readable, so there is no point going on. */
+const MIN_WIDTH = 240;
+
+/**
+ * The widths actually worth asking for, given what the source is.
+ *
+ * A long chat screenshot — the commonest evidence on this screen — is often under 1200px wide
+ * and thousands tall, so every one of the ceilings above was *larger* than its width: all three
+ * steps enlarged it, it never got under the cap, and the member was told their image was too
+ * large to attach even though downscaling it would have worked.
+ *
+ * So the ceilings are filtered to those that genuinely reduce the width, and where that leaves
+ * nothing much to try, fractions of the source take over.
+ */
+export function shrinkSteps(sourceWidth: number | undefined): { width: number; compress: number }[] {
+  // An asset with no width reported: nothing to reason from, so keep the ceilings as they are.
+  if (!sourceWidth || sourceWidth <= 0) return [...SHRINK_CEILINGS];
+
+  const steps = SHRINK_CEILINGS.filter((s) => s.width < sourceWidth);
+  if (steps.length >= 2) return steps;
+
+  for (const [scale, compress] of [
+    [0.5, 0.7],
+    [0.33, 0.6],
+    [0.25, 0.5],
+  ] as const) {
+    const width = Math.round(sourceWidth * scale);
+    if (width < MIN_WIDTH || width >= sourceWidth) continue;
+    if (steps.some((s) => s.width === width)) continue;
+    steps.push({ width, compress });
+  }
+  return steps.sort((a, b) => b.width - a.width);
+}
 
 const hasApiBody = (e: unknown): boolean =>
   typeof e === "object" && e !== null && typeof (e as { body?: { message?: unknown } }).body?.message === "string";
@@ -178,7 +217,7 @@ async function fitForUpload(
   if (dataUrl(original, base64).length <= DATA_URL_LIMIT) {
     return { contentType: original, base64 };
   }
-  for (const step of SHRINK_STEPS) {
+  for (const step of shrinkSteps(asset.width)) {
     // The contextual API; manipulateAsync is deprecated in this SDK.
     const rendered = await ImageManipulator.manipulate(asset.uri).resize({ width: step.width }).renderAsync();
     const out = await rendered.saveAsync({ base64: true, compress: step.compress, format: SaveFormat.JPEG });
