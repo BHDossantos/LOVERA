@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Image, Text, View, useWindowDimensions, type LayoutChangeEvent } from "react-native";
@@ -22,6 +22,9 @@ import {
   Toggle,
 } from "@/components/ui";
 import { color, radius, space, type as typo } from "@/theme";
+
+/** The explanation's three parts, in the order they are rendered. */
+const SECTIONS = ["reasons", "friction", "unknown"] as const;
 
 function strengthTone(s: Strength) {
   return s === "strong" ? "success" : s === "promising" ? "context" : "muted";
@@ -59,39 +62,73 @@ export default function IntroductionDetail() {
   const intro = q.data;
 
   /**
-   * The API wants to know whether the member actually reached the explanation, not whether
-   * the screen that contains it was opened — that is the whole point of the signal, and
-   * firing it on mount would make it a synonym for introduction_opened. So we report it once
-   * the explanation has been scrolled into the viewport, which on a tall phone is often
-   * immediately and on a short one is not.
+   * The API wants to know whether the member actually reached the explanation, not whether the
+   * screen that contains it was opened — firing on mount would make this a synonym for
+   * introduction_opened, which the API already records.
    *
-   * It is fire-and-forget: a member is never shown an error, and never blocked, because our
-   * analytics request failed.
+   * Each of the three sections is measured separately, and only the ones whose top has come
+   * into view are named. Measuring the card as a whole and then naming all three overstated it:
+   * on a short screen the card's top reaching the fold says nothing about whether the friction
+   * and the unknown, which sit below the reasons, were ever on screen.
+   *
+   * One request, sent once the member has stopped scrolling for a moment or has seen all three,
+   * so `sections` describes what they actually read rather than what the screen contains. It is
+   * fire-and-forget: nobody is shown an error because our analytics request failed.
    */
   const { height } = useWindowDimensions();
-  const explanationTop = useRef<number | null>(null);
+  const sectionTops = useRef<Record<string, number>>({});
+  const cardTop = useRef(0);
   const scrollY = useRef(0);
   const reported = useRef(false);
+  const idle = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const reportViewed = useCallback(() => {
-    const top = explanationTop.current;
-    if (reported.current || top === null || !intro?.explanation) return;
-    if (top > scrollY.current + height * 0.85) return;
-    reported.current = true;
-    const ex = intro.explanation;
-    const sections = [
-      ex.reasons.length ? "reasons" : null,
-      ex.friction?.text ? "friction" : null,
-      ex.unknown?.text ? "unknown" : null,
-    ].filter((x): x is string => !!x);
-    void post(`/introductions/${intro.id}/explanation-viewed`, { sections }).catch(() => {
-      reported.current = false;
-    });
-  }, [height, intro]);
+  const seenSections = useCallback(() => {
+    const fold = scrollY.current + height * 0.85;
+    return Object.entries(sectionTops.current)
+      .filter(([, y]) => cardTop.current + y <= fold)
+      .map(([name]) => name)
+      .sort();
+  }, [height]);
+
+  const send = useCallback(
+    (sections: string[]) => {
+      if (reported.current || !intro || !sections.length) return;
+      reported.current = true;
+      void post(`/introductions/${intro.id}/explanation-viewed`, { sections }).catch(() => {
+        reported.current = false;
+      });
+    },
+    [intro],
+  );
+
+  /** Wait for the scrolling to settle, unless every section has been measured and seen. */
+  const considerReporting = useCallback(() => {
+    if (reported.current || !intro?.explanation) return;
+    const seen = seenSections();
+    if (!seen.length) return;
+    // Against SECTIONS, not against what has been measured so far: layouts arrive one at a
+    // time, and "every section I have measured is visible" is true of the first one on its own.
+    // That fired immediately with just ["reasons"] and then latched, so the two sections below
+    // it could never be reported however far the member read.
+    if (seen.length === SECTIONS.length) {
+      send(seen);
+      return;
+    }
+    if (idle.current) clearTimeout(idle.current);
+    idle.current = setTimeout(() => send(seenSections()), 2_000);
+  }, [intro, seenSections, send]);
+
+  useEffect(() => () => void (idle.current && clearTimeout(idle.current)), []);
 
   const onExplanationLayout = (e: LayoutChangeEvent) => {
-    explanationTop.current = e.nativeEvent.layout.y;
-    reportViewed();
+    cardTop.current = e.nativeEvent.layout.y;
+    considerReporting();
+  };
+
+  /** `y` here is relative to the card, so it is added to the card's own offset. */
+  const onSectionLayout = (name: string) => (e: LayoutChangeEvent) => {
+    sectionTops.current = { ...sectionTops.current, [name]: e.nativeEvent.layout.y };
+    considerReporting();
   };
 
   const submit = async () => {
@@ -138,7 +175,7 @@ export default function IntroductionDetail() {
     <Screen
       onScroll={(e) => {
         scrollY.current = e.nativeEvent.contentOffset.y;
-        reportViewed();
+        considerReporting();
       }}
     >
       <ErrorState error={error ?? ((q.error as ApiError) ?? null)} retry={() => q.refetch()} />
@@ -194,20 +231,28 @@ export default function IntroductionDetail() {
           {!!ex && (
             <Card style={{ marginTop: space.md }} onLayout={onExplanationLayout}>
               <Text style={s.h2}>Why the matchmaker chose this</Text>
-              {ex.reasons.map((r) => (
-                <View key={r.label} style={{ marginBottom: space.md }}>
-                  <View style={s.row}>
-                    <Text style={s.reasonLabel}>{r.label}</Text>
-                    <Badge label={r.strength.replace("_", " ")} tone={strengthTone(r.strength)} />
+              {/* Each section measures itself, so "viewed" can mean this section rather than
+                  the card that happens to contain it. */}
+              <View onLayout={onSectionLayout("reasons")}>
+                {ex.reasons.map((r) => (
+                  <View key={r.label} style={{ marginBottom: space.md }}>
+                    <View style={s.row}>
+                      <Text style={s.reasonLabel}>{r.label}</Text>
+                      <Badge label={r.strength.replace("_", " ")} tone={strengthTone(r.strength)} />
+                    </View>
+                    <Text style={s.reasonText}>{r.text}</Text>
                   </View>
-                  <Text style={s.reasonText}>{r.text}</Text>
-                </View>
-              ))}
+                ))}
+              </View>
               <Divider />
-              <Text style={s.h3}>One honest friction</Text>
-              <Text style={s.reasonText}>{ex.friction.text}</Text>
-              <Text style={s.h3}>What only a date can tell you</Text>
-              <Text style={s.reasonText}>{ex.unknown.text}</Text>
+              <View onLayout={onSectionLayout("friction")}>
+                <Text style={s.h3}>One honest friction</Text>
+                <Text style={s.reasonText}>{ex.friction.text}</Text>
+              </View>
+              <View onLayout={onSectionLayout("unknown")}>
+                <Text style={s.h3}>What only a date can tell you</Text>
+                <Text style={s.reasonText}>{ex.unknown.text}</Text>
+              </View>
               <Text style={s.fine}>
                 Based on: {ex.data_categories.join(", ")}. No compatibility percentage is produced, because none
                 would be honest.

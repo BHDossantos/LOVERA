@@ -441,9 +441,14 @@ def test_the_explanation_only_names_gaps_the_viewer_can_fill(client):
 
     current = a.get("/blueprint/current").json()
     answered = {s["key"] for s in current["signals"]}
-    # Every catalog signal is either answered or offered as unanswered; nothing falls through.
-    assert answered | {s["key"] for s in current["unanswered"]} == set(SIGNALS)
+    # Every catalog signal is either answered, offered as unanswered, or withheld because it is
+    # special-category and this member did not consent to that category. Nothing else falls
+    # through — a signal that is neither answered nor offered is one nobody can ever supply.
+    withheld = {k for k, s in SIGNALS.items() if s.special_category}
+    assert answered | {s["key"] for s in current["unanswered"]} | withheld == set(SIGNALS)
     assert answered.isdisjoint({s["key"] for s in current["unanswered"]})
+    # onboard() leaves special-category consent off, so the sensitive ones really are withheld.
+    assert withheld.isdisjoint({s["key"] for s in current["unanswered"]})
     # And the unanswered ones carry what a chooser needs.
     for sig in current["unanswered"]:
         assert sig["options"] and sig["label"] and "value" not in sig
@@ -454,3 +459,41 @@ def test_the_explanation_only_names_gaps_the_viewer_can_fill(client):
     choosable = answered | {s["key"] for s in current["unanswered"]}
     assert all(k in choosable for k in keys), keys
     assert all(k in SIGNALS for k in keys), keys
+
+
+def test_a_sensitive_signal_needs_consent_before_it_can_be_corrected(client):
+    """GDPR Art. 9 data is declared, never collected by a side door.
+
+    The interview path refuses a special-category question without explicit consent. The
+    correction path (`POST /blueprint/signals/{key}`) only validated the key and the value, so
+    anything that could reach it could write faith data for a member who had declined. Exposing
+    unanswered catalog signals to the correction form made that reachable from the UI.
+    """
+    from app.catalog.signals import SIGNALS
+
+    sensitive = [k for k, s in SIGNALS.items() if s.special_category]
+    assert sensitive, "this test is about special-category signals; the catalog has none"
+    key = sensitive[0]
+
+    declined = Actor(client, unique_email("ana-noconsent"))
+    onboard(declined, gender="woman", seeking=["man"], name="Ana", zone="rome:prati", faith_consent=False)
+
+    # Not offered: a control that is going to be refused is its own kind of wrong.
+    current = declined.get("/blueprint/current").json()
+    assert key not in {s["key"] for s in current["unanswered"]}
+    assert key not in {s["key"] for s in current["signals"]}
+
+    # And refused if asked for anyway, because the client is not what enforces this.
+    r = declined.post(f"/blueprint/signals/{key}", json={"tier": "open", "value": {"value": next(iter(SIGNALS[key].options))}})
+    assert r.status_code == 403, r.text
+    # error_payload merges `extra` into the error object rather than nesting it.
+    assert r.json()["error"]["consent_required"] == "special_category"
+
+    # A member who did consent is offered it and can set it.
+    consented = Actor(client, unique_email("ben-consent"))
+    onboard(consented, gender="man", seeking=["woman"], name="Ben", zone="rome:centro", birth_year=1990, faith_consent=True)
+    offered = consented.get("/blueprint/current").json()
+    assert key in {s["key"] for s in offered["unanswered"]} | {s["key"] for s in offered["signals"]}
+    value = next(iter(SIGNALS[key].options))
+    r = consented.post(f"/blueprint/signals/{key}", json={"tier": "open", "value": {"value": value}})
+    assert r.status_code == 200, r.text

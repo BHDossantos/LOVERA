@@ -301,6 +301,14 @@ def current_payload(db: Session, member: Member) -> dict[str, Any]:
     # one thing the member could not fill. Kept separate from `signals` so neither `coverage`
     # nor the Blueprint screen changes meaning.
     answered = {s["key"] for s in signals}
+    # A special-category signal is only offered to a member who has consented to that category.
+    # Listing it unconditionally invited sensitive data from somebody who had declined or
+    # withdrawn consent — `correct_signal` now refuses it, and offering a control that is going
+    # to be refused is its own kind of wrong. Already-answered ones stay in `signals`: a member
+    # is entitled to see what we hold about them even after withdrawing consent to collect more.
+    from app.modules.account.service import has_consent
+
+    sensitive_ok = has_consent(db, member.id, "special_category")
     unanswered = [
         {
             "key": sig.key,
@@ -310,7 +318,7 @@ def current_payload(db: Session, member: Member) -> dict[str, Any]:
             "options": [{"value": v, "label": l} for v, l in sig.options.items()],
         }
         for sig in SIGNALS.values()
-        if sig.key not in answered
+        if sig.key not in answered and (sensitive_ok or not sig.special_category)
     ]
     return {
         "version": {"id": version.id, "version_no": version.version_no, "confirmed_at": iso(version.confirmed_at), "model_version": version.model_version} if version else None,

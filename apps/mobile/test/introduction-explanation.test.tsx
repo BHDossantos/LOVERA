@@ -1,3 +1,4 @@
+import { act } from "react-test-renderer";
 import { renderScreen, routeGet } from "./render";
 
 /**
@@ -96,34 +97,76 @@ beforeEach(() => {
   mockGet.mockImplementation(routeGet({ "/introductions/intro_1": INTRO, "/blueprint/current": BLUEPRINT }));
 });
 
-test("reports the explanation as viewed once it is actually on screen, and only once", async () => {
+/**
+ * Lay out the card and its three sections. `y` values are relative to the card, as React Native
+ * reports them, so the screen adds the card's own offset before comparing with the fold.
+ */
+async function layOut(
+  s: Awaited<ReturnType<typeof renderScreen>>,
+  card: number,
+  tops: { reasons: number; friction: number; unknown: number },
+) {
+  await s.layout(0, card);
+  await s.layout(1, tops.reasons);
+  await s.layout(2, tops.friction);
+  await s.layout(3, tops.unknown);
+}
+
+test("reports every section once they have all been on screen, and only once", async () => {
   const s = await renderScreen(<IntroductionDetail />);
-  // onLayout is what tells the screen where the explanation sits; without it the screen has
-  // no idea whether the member ever reached it, and must not claim they did.
-  const card = s.tree.root.findAll((n) => typeof (n.props as { onLayout?: unknown }).onLayout === "function");
-  expect(card.length).toBeGreaterThan(0);
   expect(posted("/introductions/intro_1/explanation-viewed")).toHaveLength(0);
 
-  await s.layout(0, 40);
-  expect(posted("/introductions/intro_1/explanation-viewed")).toHaveLength(1);
-  expect(posted("/introductions/intro_1/explanation-viewed")[0][1]).toEqual({
-    sections: ["reasons", "friction", "unknown"],
-  });
+  await layOut(s, 0, { reasons: 0, friction: 120, unknown: 240 });
+  const calls = posted("/introductions/intro_1/explanation-viewed");
+  expect(calls).toHaveLength(1);
+  expect(calls[0][1]).toEqual({ sections: ["friction", "reasons", "unknown"] });
 
   // Scrolling again must not report it a second time.
-  await s.layout(0, 40);
+  await s.scroll(50);
   expect(posted("/introductions/intro_1/explanation-viewed")).toHaveLength(1);
 });
 
-test("an explanation below the fold is not reported as viewed until it is reached", async () => {
-  // Reporting on mount would make this signal a synonym for introduction_opened, which the
-  // API already records separately. The point of it is to distinguish the two.
+test("a section still below the fold is not reported as seen", async () => {
+  // The card's top reaching the fold says nothing about the friction and the unknown, which sit
+  // below the reasons. Naming all three because the card was measured overstated what was read.
   const s = await renderScreen(<IntroductionDetail />);
-  await s.layout(0, 4000);
+  await layOut(s, 0, { reasons: 0, friction: 5000, unknown: 5200 });
   expect(posted("/introductions/intro_1/explanation-viewed")).toHaveLength(0);
 
-  await s.scroll(3800);
-  expect(posted("/introductions/intro_1/explanation-viewed")).toHaveLength(1);
+  // Scroll until they are in view, and now there is nothing left to wait for.
+  await s.scroll(5000);
+  const calls = posted("/introductions/intro_1/explanation-viewed");
+  expect(calls).toHaveLength(1);
+  expect(calls[0][1]).toEqual({ sections: ["friction", "reasons", "unknown"] });
+});
+
+test("a member who reads only the reasons has only the reasons reported", async () => {
+  // This is what the field means. Measuring the card and naming all three said the friction and
+  // the unknown had been read whenever the top of the card came into view, which on a short
+  // screen is most of the time.
+  jest.useFakeTimers();
+  try {
+    const s = await renderScreen(<IntroductionDetail />);
+    await layOut(s, 0, { reasons: 0, friction: 5000, unknown: 5200 });
+    expect(posted("/introductions/intro_1/explanation-viewed")).toHaveLength(0);
+
+    // The member stops scrolling without ever reaching the other two.
+    await act(async () => {
+      jest.advanceTimersByTime(2_500);
+    });
+    const calls = posted("/introductions/intro_1/explanation-viewed");
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toEqual({ sections: ["reasons"] });
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test("nothing is reported for an explanation never scrolled to", async () => {
+  // Reporting on mount would make this a second name for introduction_opened.
+  const s = await renderScreen(<IntroductionDetail />);
+  await layOut(s, 9000, { reasons: 0, friction: 120, unknown: 240 });
+  expect(posted("/introductions/intro_1/explanation-viewed")).toHaveLength(0);
 });
 
 test("a wrong assumption can be corrected, and the signal the matcher guessed comes first", async () => {

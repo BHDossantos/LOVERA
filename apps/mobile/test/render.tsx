@@ -94,9 +94,10 @@ export async function renderScreen(ui: ReactElement) {
      * arrives and such a screen can only be tested in its "I don't know yet" state.
      */
     layout: async (index: number, y: number, height = 400) => {
-      const nodes = r.root.findAll((n) => typeof (n.props as { onLayout?: unknown }).onLayout === "function");
+      const nodes = layoutables(r.root);
       const node = at(nodes, index);
       if (!node) throw new Error(`no onLayout at index ${index} (found ${nodes.length})`);
+
       await act(async () => {
         (node.props as { onLayout: (e: unknown) => void }).onLayout({
           nativeEvent: { layout: { x: 0, y, width: 360, height } },
@@ -130,6 +131,21 @@ async function flush(rounds = 6) {
 /** Negative indices count from the end, so a test can say "the last one" without counting. */
 function at<T>(list: T[], index: number): T | undefined {
   return index < 0 ? list[list.length + index] : list[index];
+}
+
+/**
+ * The nodes that handle onLayout, one per handler, in tree order.
+ *
+ * A `View` shows up as both its composite and its host node and both carry the same handler, so
+ * a raw findAll returns roughly twice as many nodes as there are measured elements — and an
+ * index into that list means nothing. Handler identity is what distinguishes one from another.
+ */
+function layoutables(root: ReactTestInstance): ReactTestInstance[] {
+  const byHandler = new Map<unknown, ReactTestInstance>();
+  for (const n of root.findAll((node) => typeof (node.props as { onLayout?: unknown }).onLayout === "function")) {
+    byHandler.set((n.props as { onLayout: unknown }).onLayout, n);
+  }
+  return [...byHandler.values()];
 }
 
 /**

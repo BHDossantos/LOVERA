@@ -132,8 +132,12 @@ def build_explanation(me: Snapshot, other: Snapshot, features: dict[str, Any]) -
     # uncertainty maths, wrong here. A gap on the other side is not the viewer's to fill, and
     # naming it led the form to promote a value of theirs that was perfectly fine, while the
     # signal they actually could have supplied was not offered at all.
+    # Both halves read from the viewer, not from the pair. `low_evidence_signals` is built from
+    # `{**a.confidences, **b.confidences}`, so for a signal they share, whichever participant is
+    # serialised second wins — a viewer with strong evidence could be asked to fix the other
+    # person's uncertainty, and a viewer whose own evidence was weak could be offered nothing.
     yours_to_fix = [k for k in snap.get("missing_signals", []) if k not in me.signals]
-    yours_to_fix += [k for k in snap.get("low_evidence_signals", []) if k in me.signals and k not in yours_to_fix]
+    yours_to_fix += [k for k, c in me.confidences.items() if c == "low_evidence" and k in me.signals and k not in yours_to_fix]
     unknown = {
         "text": UNKNOWN_COPY.get(unknown_key, "What a first meeting will feel like for both of you."),
         "strength": "low_evidence",
