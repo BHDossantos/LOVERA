@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, del, get, patch, post } from "@/lib/api";
 import { useRequireMember } from "@/lib/auth";
 import { AppShell } from "@/components/shell/AppShell";
-import { Button, Card, EmptyState, ErrorState, Field, PageTitle, Skeleton, StatusBanner, TextInput, TierPill, TierSelect, cx } from "@/components/ui";
+import { Button, Card, EmptyState, ErrorState, Field, Modal, PageTitle, Skeleton, StatusBanner, TextInput, TierPill, TierSelect, cx } from "@/components/ui";
 import { LANG_LABEL } from "@/lib/format";
 
 type Option = { value: string; label: string };
@@ -38,6 +38,10 @@ export default function PreferencesPage() {
   const q = useQuery({ queryKey: ["preferences"], queryFn: () => get<PrefsOut>("/preferences"), enabled: !!me });
   const [editing, setEditing] = useState<Editing | null>(null);
   const [impact, setImpact] = useState<Impact | null>(null);
+  // Deleting a criterion is not undoable: the tier and the values are gone, and getting them back
+  // means reconstructing them and running the impact preview again. The mobile app has always
+  // asked first; this one deleted on the first click, one button away from Adjust.
+  const [confirmRemove, setConfirmRemove] = useState<{ key: string; label: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
 
@@ -87,6 +91,7 @@ export default function PreferencesPage() {
       ]);
       setEditing(null);
       setImpact(null);
+      setConfirmRemove(null);
     } catch (e) {
       setError(e as ApiError);
     } finally {
@@ -165,7 +170,7 @@ export default function PreferencesPage() {
                         size="sm"
                         variant="ghost"
                         loading={busy === `remove:${p.key}`}
-                        onClick={() => remove(p.key)}
+                        onClick={() => setConfirmRemove({ key: p.key, label: p.label })}
                         aria-label={`Delete ${p.label}`}
                       >
                         Delete
@@ -256,6 +261,23 @@ export default function PreferencesPage() {
           </div>
         </Card>
       )}
+      {/* The same wording as the mobile dialog, including the part that matters most: this is not
+          Open. A member who meant to loosen a criterion and deleted it instead has lost the tier
+          and the values, and is matched on neither. */}
+      <Modal open={!!confirmRemove} title={confirmRemove ? `Stop using ${confirmRemove.label} entirely?` : ""} onClose={() => setConfirmRemove(null)}>
+        <p className="mb-3 text-sm text-ink-secondary">
+          It will play no part in your matches until you set it again. This is not the same as Open, which still weighs it
+          lightly.
+        </p>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button variant="danger" loading={!!confirmRemove && busy === `remove:${confirmRemove.key}`} onClick={() => confirmRemove && remove(confirmRemove.key)}>
+            Stop using it
+          </Button>
+          <Button variant="secondary" onClick={() => setConfirmRemove(null)}>
+            Keep it
+          </Button>
+        </div>
+      </Modal>
     </AppShell>
   );
 }
