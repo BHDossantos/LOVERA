@@ -36,22 +36,46 @@ export async function completeOnboarding(page: Page, opts: { name: string; gende
     }
     const heading = page.getByRole("heading", { level: 1 });
     const before = await heading.textContent();
+    const where = async () => (page.url().includes("/blueprint/review") ? "review" : await heading.textContent());
+    const advanced = async (timeout: number) => expect.poll(where, { timeout }).not.toBe(before);
     const skip = page.getByRole("button", { name: "Skip this question" });
     if (await skip.isVisible().catch(() => false)) {
       await skip.click();
+      await advanced(15_000);
     } else {
-      const radios = page.getByRole("radio");
-      if ((await radios.count()) > 0) await radios.first().click();
+      /**
+       * Answering is retried as one unit: choose, submit, and see the question change.
+       *
+       * The interview clears the previous answer in an effect keyed on the question
+       * (`setChoice(null)` in app/onboarding/blueprint/interview/page.tsx), and that effect runs
+       * *after* the new question's prompt is on screen. So there is a window in which this loop
+       * has already been told the next question is up while the reset for it is still pending,
+       * and anything answered inside that window is wiped. It surfaces two ways, both seen:
+       * `canSubmit` reads `choice`, so if the reset lands before the click on submit the button is
+       * disabled and stays disabled — a ten-second timeout on a button that resolved twenty-one
+       * times, every time disabled, which is how this failed in CI while passing locally. If it
+       * lands between the click and the request, the answer posts as nothing, the server returns
+       * the same question, and the wait for the prompt to change times out instead.
+       *
+       * Confirming the selection took is not enough on its own, because the reset can land after
+       * the confirmation and before the submit. Only retrying the whole thing closes it, and the
+       * reset fires once per question, so the second attempt sticks.
+       */
+      const choices = page.locator('[role="radiogroup"]:not([aria-label="Preference tier"]) [role="radio"]');
       const partnerChips = page.locator("button[aria-pressed]");
-      if ((await partnerChips.count()) > 0) await partnerChips.first().click();
       const submit = page.getByRole("button", { name: /Save and continue|That's me/ });
-      await expect(submit).toBeEnabled();
-      await submit.click();
+      await expect(async () => {
+        // A previous attempt may have got through and only lost the race to see it, in which case
+        // there is nothing left to answer — without this, the retry would answer the *next*
+        // question and skip past it.
+        if ((await where()) !== before) return;
+        if ((await choices.count()) > 0) await choices.first().click();
+        if ((await partnerChips.count()) > 0) await partnerChips.first().click();
+        await expect(submit).toBeEnabled({ timeout: 2_000 });
+        await submit.click();
+        await advanced(5_000);
+      }).toPass({ timeout: 30_000, intervals: [250, 500, 1_000] });
     }
-    // Wait for the next question to be committed (or the review page) before interacting again.
-    await expect
-      .poll(async () => (page.url().includes("/blueprint/review") ? "review" : await heading.textContent()), { timeout: 15_000 })
-      .not.toBe(before);
   }
   await expect(page).toHaveURL(/blueprint\/review/, { timeout: 20_000 });
   await expect(page.getByRole("heading", { name: /Here's what we understood/ })).toBeVisible();
