@@ -48,6 +48,14 @@ export default function IntroductionsScreen() {
     queryFn: () => get<IntroductionList>("/introductions"),
     enabled: !!me,
   });
+  /**
+   * Null while the screen is still waiting on the server, so nothing stale renders.
+   *
+   * `awaitingServer` as an extra spinner was not enough: `gcTime: 0` cannot evict a query that
+   * another mounted screen still observes, so the previous answer stayed on screen — and
+   * actionable — underneath the loading indicator.
+   */
+  const data = awaitingServer(q) ? null : q.data;
 
   const open = (id: string) => router.push(`/introductions/${id}` as never);
 
@@ -60,57 +68,57 @@ export default function IntroductionsScreen() {
       />
       {awaitingServer(q) && <Loading label="Loading introductions" />}
       <ErrorState error={(q.error as ApiError) ?? null} retry={() => q.refetch()} />
-      {!!q.data && (
+            {!!data && (
         <>
-          {q.data.current.length > 0 ? (
+          {data.current.length > 0 ? (
             <>
               <Text style={s.section}>Waiting for your private decision</Text>
-              {q.data.current.map((i) => (
+              {data.current.map((i) => (
                 <IntroRow key={i.id} intro={i} onPress={() => open(i.id)} />
               ))}
             </>
           ) : (
-            !!q.data.waiting && (
+            !!data.waiting && (
               <Card>
                 <Text style={s.sectionInline}>Why it's quiet</Text>
                 <Text style={s.meta}>
-                  {q.data.waiting.eligible_after_must} of {q.data.waiting.verified_pool} verified members clear your
-                  Musts right now. Next batch {q.data.waiting.next_batch}.
+                  {data.waiting.eligible_after_must} of {data.waiting.verified_pool} verified members clear your
+                  Musts right now. Next batch {data.waiting.next_batch}.
                 </Text>
-                {q.data.waiting.reasons.map((r) => (
+                {data.waiting.reasons.map((r) => (
                   <Text key={r.code} style={s.reason}>
                     • {r.text}
                   </Text>
                 ))}
-                {!!q.data.waiting.protected_credits && (
+                {!!data.waiting.protected_credits && (
                   <Text style={s.meta}>
-                    {q.data.waiting.protected_credits} protected credit(s) held — a quiet week never costs you one.
+                    {data.waiting.protected_credits} protected credit(s) held — a quiet week never costs you one.
                   </Text>
                 )}
-                <Text style={s.meta}>{q.data.waiting.broaden_hint}</Text>
+                <Text style={s.meta}>{data.waiting.broaden_hint}</Text>
               </Card>
             )
           )}
 
-          {q.data.mutual.length > 0 && (
+          {data.mutual.length > 0 && (
             <>
               <Text style={s.section}>You both said yes</Text>
-              {q.data.mutual.map((i) => (
+              {data.mutual.map((i) => (
                 <IntroRow key={i.id} intro={i} onPress={() => open(i.id)} />
               ))}
             </>
           )}
 
-          {q.data.history.length > 0 && (
+          {data.history.length > 0 && (
             <>
               <Text style={s.section}>Earlier</Text>
-              {q.data.history.map((i) => (
+              {data.history.map((i) => (
                 <IntroRow key={i.id} intro={i} onPress={() => open(i.id)} />
               ))}
             </>
           )}
 
-          {!q.data.current.length && !q.data.mutual.length && !q.data.history.length && !q.data.waiting && (
+          {!data.current.length && !data.mutual.length && !data.history.length && !data.waiting && (
             <Empty title="No introductions yet" body="The first batch arrives once your Blueprint and availability are in." />
           )}
         </>

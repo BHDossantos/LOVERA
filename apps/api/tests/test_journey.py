@@ -524,3 +524,41 @@ def test_a_sensitive_signal_needs_consent_before_it_can_be_corrected(client):
         assert snap.special_category_consent is False
     finally:
         db.close()
+
+
+def test_a_sensitive_preference_stops_being_applied_when_consent_is_withdrawn(client):
+    """The other half of the same rule.
+
+    Dropping the member's own faith signal stops them being ranked on it. A faith *preference*
+    they set while consented keeps ranking and gating other people by theirs, because
+    directional_fit() and hard_gate() both iterate viewer.preferences — so withdrawing consent
+    has to end that too.
+    """
+    from app.catalog.signals import PREFERENCES, SIGNALS
+    from app.core.db import session_factory
+    from app.models.account import Member
+    from app.modules.matching.snapshot import build_snapshot
+
+    pref_key = next(k for k, p in PREFERENCES.items() if (SIGNALS.get(p.target) and SIGNALS[p.target].special_category))
+    value = next(iter(SIGNALS[PREFERENCES[pref_key].target].options))
+
+    a = Actor(client, unique_email("ana-pref"))
+    onboard(a, gender="woman", seeking=["man"], name="Ana", zone="rome:prati", faith_consent=True)
+    r = a.patch(f"/preferences/{pref_key}", json={"tier": "prefer", "value": {"in": [value]}})
+    assert r.status_code == 200, r.text
+
+    db = session_factory()()
+    try:
+        snap = build_snapshot(db, db.get(Member, a.id))
+        assert snap and pref_key in {p.key for p in snap.preferences}, "set while consented, so it applies"
+    finally:
+        db.close()
+
+    a.put("/consents/special_category", json={"status": "revoked", "policy_version": "2026-01-01"})
+    db = session_factory()()
+    try:
+        snap = build_snapshot(db, db.get(Member, a.id))
+        assert snap is not None
+        assert pref_key not in {p.key for p in snap.preferences}, "withdrawn, so it must not rank or gate anybody"
+    finally:
+        db.close()

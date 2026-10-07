@@ -19,6 +19,14 @@ export default function MessagesScreen() {
     enabled: !!me,
     refetchInterval: 30_000,
   });
+  /**
+   * Null while the screen is still waiting on the server, so nothing stale renders.
+   *
+   * `awaitingServer` as an extra spinner was not enough: `gcTime: 0` cannot evict a query that
+   * another mounted screen still observes, so the previous answer stayed on screen — and
+   * actionable — underneath the loading indicator.
+   */
+  const data = awaitingServer(q) ? null : q.data;
 
   return (
     <Screen>
@@ -29,10 +37,10 @@ export default function MessagesScreen() {
       />
       {awaitingServer(q) && <Loading label="Loading conversations" />}
       <ErrorState error={(q.error as ApiError) ?? null} retry={() => q.refetch()} />
-      {!!q.data && q.data.items.length === 0 && (
+      {!!data && data.items.length === 0 && (
         <Empty title="No conversations yet" body="A conversation opens the moment an introduction is mutual." />
       )}
-      {q.data?.items.map((c) => (
+      {data?.items.map((c) => (
         <Pressable key={c.id} onPress={() => router.push(`/messages/${c.id}` as never)} accessibilityRole="button">
           <Card>
             <View style={s.row}>

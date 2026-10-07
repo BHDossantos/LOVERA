@@ -46,6 +46,14 @@ export default function AccountReview() {
   const [sent, setSent] = useState<string | null>(null);
 
   const q = useQuery({ queryKey: ["account-review"], queryFn: () => get<Review>("/account/review"), enabled: !!me, ...serverDriven });
+  /**
+   * Null while the screen is still waiting on the server, so nothing stale renders.
+   *
+   * `awaitingServer` as an extra spinner was not enough: `gcTime: 0` cannot evict a query that
+   * another mounted screen still observes, so the previous answer stayed on screen — and
+   * actionable — underneath the loading indicator.
+   */
+  const data = awaitingServer(q) ? null : q.data;
 
   const submit = async (actionId: string) => {
     setBusy(true);
@@ -74,7 +82,7 @@ export default function AccountReview() {
       <ErrorState error={error ?? ((q.error as ApiError) ?? null)} retry={() => q.refetch()} />
       {awaitingServer(q) && <Loading label="Loading the decision" />}
 
-      {q.data?.actions.length === 0 && (
+      {data?.actions.length === 0 && (
         <Card>
           <Text style={s.body}>
             There is no decision notice on your account. If introductions are paused, a review is in progress and
@@ -83,7 +91,7 @@ export default function AccountReview() {
         </Card>
       )}
 
-      {q.data?.actions.map((a) => (
+      {data?.actions.map((a) => (
         <Card key={a.id}>
           <Text style={s.h2}>{a.notice}</Text>
           <Badge label={a.active ? "In effect" : "Ended"} tone={a.active ? "caution" : "muted"} />
@@ -132,10 +140,10 @@ export default function AccountReview() {
         </Card>
       ))}
 
-      {!!q.data?.rights.length && (
+      {!!data?.rights.length && (
         <Card>
           <Text style={s.h2}>What you are entitled to</Text>
-          {q.data.rights.map((r) => (
+          {data.rights.map((r) => (
             <Text key={r} style={s.fine}>
               • {r}
             </Text>

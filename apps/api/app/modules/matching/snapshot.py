@@ -41,6 +41,15 @@ class Snapshot:
         return self.profile.display_name or "Member"
 
 
+def _is_sensitive_preference(key: str) -> bool:
+    """Whether this preference asks about a special-category signal."""
+    from app.catalog.signals import PREFERENCES
+
+    pdef = PREFERENCES.get(key)
+    target = SIGNALS.get(pdef.target) if pdef else None
+    return bool(target and target.special_category)
+
+
 def build_snapshot(db: Session, member: Member) -> Snapshot | None:
     profile = db.get(Profile, member.id)
     if profile is None:
@@ -65,7 +74,15 @@ def build_snapshot(db: Session, member: Member) -> Snapshot | None:
             if s.key in SIGNALS and (sensitive_ok or not SIGNALS[s.key].special_category):
                 signals[s.key] = s.normalized_value.get("value")
                 confidences[s.key] = s.confidence
-    prefs = db.execute(select(Preference).where(Preference.member_id == member.id)).scalars().all()
+    # The same rule on the other side of the comparison. Dropping the member's own faith signal
+    # stopped them being ranked on it; a faith *preference* they set while consented kept ranking
+    # and gating other people by theirs, because directional_fit() and hard_gate() both iterate
+    # viewer.preferences. Withdrawing consent has to end both halves of that processing.
+    prefs = [
+        pref
+        for pref in db.execute(select(Preference).where(Preference.member_id == member.id)).scalars().all()
+        if sensitive_ok or not _is_sensitive_preference(pref.key)
+    ]
     availability = db.execute(select(AvailabilityVersion).where(AvailabilityVersion.member_id == member.id).order_by(AvailabilityVersion.created_at.desc())).scalars().first()
     ver = db.execute(select(Verification).where(Verification.member_id == member.id, Verification.status == "verified").order_by(Verification.created_at.desc())).scalars().first()
     verified = bool(ver and (ver.expires_at is None or ver.expires_at > utcnow()))
@@ -76,7 +93,7 @@ def build_snapshot(db: Session, member: Member) -> Snapshot | None:
         profile=profile,
         signals=signals,
         confidences=confidences,
-        preferences=list(prefs),
+        preferences=prefs,
         windows=list(availability.recurring_windows) if availability else [],
         date_styles=list(availability.date_styles) if availability else [],
         verified=verified,
