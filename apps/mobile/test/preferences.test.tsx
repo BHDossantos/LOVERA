@@ -100,3 +100,30 @@ test("an edit clears the preview, so the saved value is always one that was cost
   expect(s.hasText("Save")).toBe(false);
   expect(s.hasText("Check the impact first")).toBe(true);
 });
+
+test("a preview that lands after an edit does not unlock Save for uncosted values", async () => {
+  // The race the review found: clearing `impact` on every edit was not enough, because a
+  // request already in flight would resolve afterwards and put it back.
+  const s2 = await renderScreen(<YouPreferences />);
+  await s2.press("Change");
+
+  let resolvePreview: ((v: unknown) => void) | undefined;
+  mockPost.mockImplementation(() => new Promise((res) => { resolvePreview = res; }));
+  await s2.press("Check the impact");           // in flight
+  await s2.press("Open");                        // the member changes the tier meanwhile
+  resolvePreview?.({ key: "children", tier: "must", eligible_now: 12, eligible_after: 9, pool_size: 30, message: "Nine." });
+  await s2.settle();
+
+  // The response was computed for tier=must; the edit is now tier=open, so it must not count.
+  expect(s2.hasText("Check the impact first")).toBe(true);
+  expect(s2.hasText("Save")).toBe(false);
+  expect(mockPatch).not.toHaveBeenCalled();
+});
+
+test("a preview for the current values does unlock Save", async () => {
+  const s2 = await renderScreen(<YouPreferences />);
+  await s2.press("Change");
+  mockPost.mockResolvedValue({ key: "children", tier: "must", eligible_now: 12, eligible_after: 9, pool_size: 30, message: "Nine." });
+  await s2.press("Check the impact");
+  expect(s2.hasText("Save")).toBe(true);
+});

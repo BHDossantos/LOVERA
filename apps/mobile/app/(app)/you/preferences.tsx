@@ -61,6 +61,9 @@ const TIERS = [
   { value: "open", label: "Open", body: "Used lightly, mostly to explain a match." },
 ];
 
+/** Identifies an edit by exactly the values the impact preview is computed from. */
+const signature = (e: Editing) => JSON.stringify([e.key, e.tier, e.value]);
+
 function describe(p: { value: Record<string, unknown>; options: Option[] | null }) {
   const v = p.value as { min?: number; max?: number; in?: string[]; any_of?: string[] };
   if (typeof v.min === "number" && typeof v.max === "number") return `${v.min}–${v.max}`;
@@ -74,7 +77,12 @@ export default function YouPreferences() {
   const { me } = useRequireMember();
   const qc = useQueryClient();
   const [editing, setEditing] = useState<Editing | null>(null);
-  const [impact, setImpact] = useState<Impact | null>(null);
+  // The preview is stored with a signature of the values it was computed for. Clearing it on
+  // every edit was not enough: a request already in flight would resolve afterwards and put
+  // it back, enabling Save for a value nobody had costed. Cancelling and opening another
+  // preference while one was pending did the same. Comparing signatures discards a stale
+  // response instead of racing it.
+  const [impact, setImpact] = useState<{ sig: string; data: Impact } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
 
@@ -113,7 +121,13 @@ export default function YouPreferences() {
     setBusy(true);
     setError(null);
     try {
-      setImpact(await post<Impact>("/preferences/impact-preview", { key: editing.key, tier: editing.tier, value: editing.value }));
+      const sig = signature(editing);
+      const data = await post<Impact>("/preferences/impact-preview", {
+        key: editing.key,
+        tier: editing.tier,
+        value: editing.value,
+      });
+      setImpact({ sig, data });
     } catch (e) {
       setError(e as ApiError);
     } finally {
@@ -144,9 +158,11 @@ export default function YouPreferences() {
       </Screen>
     );
 
+  // Only a preview computed for exactly these values counts.
+  const costed = editing && impact?.sig === signature(editing) ? impact.data : null;
   // A change that leaves almost nobody eligible is worth naming before it is saved.
   const overFiltering =
-    !!impact && impact.eligible_after < impact.eligible_now && (impact.eligible_after <= 3 || impact.eligible_after < impact.eligible_now / 2);
+    !!costed && costed.eligible_after < costed.eligible_now && (costed.eligible_after <= 3 || costed.eligible_after < costed.eligible_now / 2);
   const listKey = editing?.operator === "any_of" ? "any_of" : "in";
   const list = (editing?.value[listKey] as string[] | undefined) ?? [];
 
@@ -194,14 +210,14 @@ export default function YouPreferences() {
 
         <Card>
           <Text style={s.h2}>What this costs you</Text>
-          {!impact && <Text style={s.meta}>See how many people would still be eligible before you save.</Text>}
-          {!!impact && (
+          {!costed && <Text style={s.meta}>See how many people would still be eligible before you save.</Text>}
+          {!!costed && (
             <>
-              <Text style={s.meta}>{impact.message}</Text>
+              <Text style={s.meta}>{costed.message}</Text>
               <Text style={s.big}>
-                {impact.eligible_after} of {impact.pool_size}
+                {costed.eligible_after} of {costed.pool_size}
               </Text>
-              <Text style={s.fine}>eligible after this change, from {impact.eligible_now} now</Text>
+              <Text style={s.fine}>eligible after this change, from {costed.eligible_now} now</Text>
             </>
           )}
           {overFiltering && (
@@ -212,7 +228,7 @@ export default function YouPreferences() {
             />
           )}
           <Button variant="secondary" loading={busy} onPress={preview}>
-            {impact ? "Check again" : "Check the impact"}
+            {costed ? "Check again" : "Check the impact"}
           </Button>
         </Card>
 
@@ -220,8 +236,8 @@ export default function YouPreferences() {
             Save button was available before the preview had ever run — so a member could
             set a Must criterion and never be shown what it costs. The preview is cleared by
             every edit, so this also forces a fresh one after a change. */}
-        <Button disabled={!impact} loading={busy} onPress={save}>
-          {impact ? "Save" : "Check the impact first"}
+        <Button disabled={!costed} loading={busy} onPress={save}>
+          {costed ? "Save" : "Check the impact first"}
         </Button>
         <Button
           variant="ghost"

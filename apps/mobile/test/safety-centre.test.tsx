@@ -113,3 +113,25 @@ test("a failed unblock is shown to the member, not swallowed", async () => {
   // And the member can try again rather than being stuck on a spinner.
   expect(s.texts().filter((t) => t === "Unblock")).toHaveLength(2);
 });
+
+test("retrying a failed unblock retries the unblock, not the safety query", async () => {
+  // The retry callback used to refetch /safety, so "Try again" left the person blocked and
+  // the error on screen.
+  const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+  const offline = Object.assign(new Error("You appear to be offline. Nothing was lost."), {
+    status: 0,
+    body: { code: "OFFLINE", message: "You appear to be offline. Nothing was lost.", retryable: true },
+  });
+  mockDel.mockRejectedValueOnce(offline);
+  const s = await renderScreen(<SafetyCentre />);
+  await s.press("Unblock");
+  (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Unblock")?.onPress?.();
+  await s.settle();
+  expect(s.joined()).toContain("You appear to be offline");
+
+  mockDel.mockResolvedValueOnce(undefined);
+  await s.press("Try again");
+  // Two DELETEs for the same member: the first failed, the retry repeated it.
+  expect(mockDel.mock.calls.filter(([p]) => String(p).startsWith("/blocks/"))).toHaveLength(2);
+  expect(s.joined()).not.toContain("You appear to be offline");
+});

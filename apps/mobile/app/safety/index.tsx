@@ -20,6 +20,7 @@ export default function SafetyCentre() {
   const router = useRouter();
   const [unblocking, setUnblocking] = useState<string | null>(null);
   const [unblockError, setUnblockError] = useState<ApiError | null>(null);
+  const [failedUnblock, setFailedUnblock] = useState<Block | null>(null);
 
   const centre = useQuery({ queryKey: ["safety"], queryFn: () => get<SafetyCenter>("/safety"), enabled: !!me });
   const cases = useQuery({
@@ -30,6 +31,23 @@ export default function SafetyCentre() {
   const blocks = useQuery({ queryKey: ["blocks"], queryFn: () => get<{ items: Block[] }>("/blocks"), enabled: !!me });
 
   const emergency = centre.data?.emergency;
+  const runUnblock = async (b: Block) => {
+    setUnblocking(b.member_id);
+    setUnblockError(null);
+    try {
+      await del(`/blocks/${b.member_id}`);
+      setFailedUnblock(null);
+      await Promise.all([blocks.refetch(), centre.refetch()]);
+    } catch (e) {
+      // An offline device used to leave this as an unhandled rejection: the block stayed,
+      // nothing was said, and the member had no way to tell it had failed.
+      setUnblockError(e as ApiError);
+      setFailedUnblock(b);
+    } finally {
+      setUnblocking(null);
+    }
+  };
+
   const unblock = (b: Block) =>
     Alert.alert(
       `Unblock ${b.display_name}?`,
@@ -38,16 +56,7 @@ export default function SafetyCentre() {
         { text: "Keep blocked", style: "cancel" },
         {
           text: "Unblock",
-          onPress: () => {
-            setUnblocking(b.member_id);
-            setUnblockError(null);
-            // An offline device used to leave this as an unhandled rejection: the block
-            // stayed, nothing was said, and the member had no way to tell it had failed.
-            void del(`/blocks/${b.member_id}`)
-              .then(() => Promise.all([blocks.refetch(), centre.refetch()]))
-              .catch((e) => setUnblockError(e as ApiError))
-              .finally(() => setUnblocking(null));
-          },
+          onPress: () => void runUnblock(b),
         },
       ],
     );
@@ -59,7 +68,13 @@ export default function SafetyCentre() {
         title="Safety centre"
         lede="Report someone, block them, or check a case. Nothing you report is shown to the person you report."
       />
-      <ErrorState error={unblockError ?? ((centre.error as ApiError) ?? null)} retry={() => centre.refetch()} />
+      <ErrorState error={(centre.error as ApiError) ?? null} retry={() => centre.refetch()} />
+      {/* The unblock error gets its own retry, because sharing the centre's meant "Try again"
+          refetched /safety while the person stayed blocked and the message stayed on screen.
+          The retry calls the unblock directly rather than reopening the confirmation: the
+          member already said yes, and asking twice because our request failed is our problem
+          to absorb, not theirs to re-answer. */}
+      <ErrorState error={unblockError} retry={failedUnblock ? () => void runUnblock(failedUnblock) : undefined} />
 
       {/* The emergency number comes first and does not depend on anything else loading. */}
       <StatusBanner
