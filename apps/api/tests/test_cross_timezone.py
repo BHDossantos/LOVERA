@@ -20,7 +20,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from app.core.windows import day_intervals, intersect, weekly_overlaps
+from app.core.windows import day_intervals, intersect, offset_minutes, weekly_overlaps
 from tests.conftest import Actor, onboard, staff, subscribe, unique_email
 
 # A Friday, and well clear of any European DST change so the offsets in the assertions are stable.
@@ -108,6 +108,26 @@ def test_an_evening_running_into_the_small_hours_is_one_stretch_not_two_short_on
     start, end = both[0]
     assert end - start == timedelta(hours=2)
     assert start.hour == 23 and start.date() == FRIDAY
+
+
+def test_the_offset_is_taken_at_the_instant_not_at_its_clock_reading():
+    """A batch running inside a DST transition hour must not score the wrong side of it.
+
+    `ZoneInfo.utcoffset(dt)` reads `dt`'s clock fields as local time and ignores its tzinfo, so handing
+    it a UTC instant answers for the wrong side of a transition for the hour either side of one. Rome
+    springs forward at 02:00 local on 2026-03-29, which is 01:00 UTC: at 01:30 UTC the offset is +2, and
+    asking the old way answered +1.
+    """
+    transition = datetime(2026, 3, 29, 1, 30, tzinfo=timezone.utc)
+    assert offset_minutes("Europe/Rome", transition) == 120
+    assert ZoneInfo("Europe/Rome").utcoffset(transition) == timedelta(hours=1), "the trap, pinned so it is not reintroduced"
+
+    # And the consequence it had: four overlapping hours scored where there are three.
+    rome_evening = [{"weekday": 4, "start": "18:00", "end": "22:00"}]
+    utc_evening = [{"weekday": 4, "start": "17:00", "end": "21:00"}]
+    assert weekly_overlaps(rome_evening, "Europe/Rome", utc_evening, "UTC", transition)[0] == 180
+    # Unchanged on an ordinary CEST day, so the fix is about the instant and not about Rome.
+    assert weekly_overlaps(rome_evening, "Europe/Rome", utc_evening, "UTC", AT)[0] == 180
 
 
 def _mutual_conversation(client) -> tuple[Actor, Actor, str]:

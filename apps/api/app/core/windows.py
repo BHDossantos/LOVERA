@@ -53,6 +53,18 @@ def hhmm(total: int) -> str:
     return f"{total // 60 % 24:02d}:{total % 60:02d}"
 
 
+def offset_minutes(tz: str, at: datetime) -> int:
+    """`tz`'s offset from UTC at the instant `at`, in minutes.
+
+    The instant is converted into the zone before the offset is asked for, which sounds like a detail
+    and is not: `ZoneInfo.utcoffset(dt)` reads `dt`'s clock fields as *local* time and ignores its
+    tzinfo, so handing it a UTC instant lands on the wrong side of a DST transition for the hour either
+    side of one. At 01:30 UTC on the morning Rome springs forward it answers +1 when the answer is +2,
+    and a batch run in that hour scored four overlapping hours where there were three.
+    """
+    return int((at.astimezone(ZoneInfo(tz)).utcoffset() or timedelta()).total_seconds() // 60)
+
+
 def day_intervals(windows: list[dict[str, Any]], tz: str, days: list[date]) -> list[Interval]:
     """Each window as an absolute interval, built on its own local date in its own zone.
 
@@ -109,7 +121,7 @@ def week_intervals(windows: list[dict[str, Any]], tz: str, at: datetime) -> list
     Used for scoring a recurring week, where there is no date to take an offset from, so the offset
     in force at `at` stands in for all of them.
     """
-    offset = int((ZoneInfo(tz).utcoffset(at) or timedelta()).total_seconds() // 60)
+    offset = offset_minutes(tz, at)
     out: list[tuple[int, int]] = []
     for w in windows:
         start, end = minutes(w["start"]), minutes(w["end"])
@@ -171,7 +183,7 @@ def weekly_overlaps(
 
     merged = [(start, end) for start, end in merged if end - start >= minimum_minutes]
 
-    offset = int((ZoneInfo(label_tz or a_tz).utcoffset(at) or timedelta()).total_seconds() // 60)
+    offset = offset_minutes(label_tz or a_tz, at)
     labelled = []
     total = 0
     for start, end in merged:
