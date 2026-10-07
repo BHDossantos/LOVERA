@@ -13,7 +13,19 @@ import type { BlueprintCurrent, CorrectionResult } from "./types";
 export function CorrectionForm({ introId, suggestedKeys = [], title = "Something wrong?" }: { introId: string; suggestedKeys?: string[]; title?: string }) {
   const qc = useQueryClient();
   const blueprint = useQuery({ queryKey: ["blueprint", "current"], queryFn: () => get<BlueprintCurrent>("/blueprint/current") });
-  const signals = useMemo(() => blueprint.data?.signals ?? [], [blueprint.data]);
+  /**
+   * Answered signals plus the ones the member never answered. The unanswered ones have to be
+   * here: `missing_signal_keys` names only signals the viewer lacks, and those have no row in
+   * `signals`, so a list built from `signals` alone silently dropped the one thing the member
+   * could usefully supply while reordering values that were fine.
+   */
+  const signals = useMemo(
+    () => [
+      ...(blueprint.data?.signals ?? []).map((s) => ({ ...s, value_label: s.value_label })),
+      ...(blueprint.data?.unanswered ?? []).map((s) => ({ ...s, value: null, value_label: "" })),
+    ],
+    [blueprint.data],
+  );
   const [signalKey, setSignalKey] = useState<string>("");
   const [value, setValue] = useState<string>("");
   const [note, setNote] = useState("");
@@ -63,7 +75,7 @@ export function CorrectionForm({ introId, suggestedKeys = [], title = "Something
               {ordered.map((s) => (
                 <option key={s.key} value={s.key}>
                   {s.label}
-                  {s.value_label ? ` (currently: ${s.value_label})` : " (not set)"}
+                  {s.value_label ? ` (currently: ${s.value_label})` : " (you haven't answered this one)"}
                 </option>
               ))}
             </Select>

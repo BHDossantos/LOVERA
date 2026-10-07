@@ -29,6 +29,20 @@ const BLUEPRINT = {
   coverage: {},
   freshness: { age_days: 2, stale: false, refresh_after_days: 180 },
   data_use: "Matching only.",
+  // A signal the member has never answered. It has no row in `signals`, which is exactly why
+  // the form could not offer it — and `missing_signal_keys` names only the viewer's own gaps.
+  unanswered: [
+    {
+      key: "life_plan.relocation",
+      category: "life_plan",
+      label: "Relocation",
+      special_category: false,
+      options: [
+        { value: "open", label: "Open to relocating" },
+        { value: "no", label: "Not relocating" },
+      ],
+    },
+  ],
   signals: [
     {
       key: "daily.sleep",
@@ -183,5 +197,39 @@ test("a correction with no value still flags the signal", async () => {
     signal_key: "daily.sleep",
     value: null,
     note: "I work nights, so this is not a preference.",
+  });
+});
+
+test("a signal the member has never answered can still be supplied", async () => {
+  // `missing_signals` is computed when either participant lacks a signal, so it used to name
+  // gaps on the other side — and when the gap was the viewer's own, the form built its list
+  // from `signals` and silently omitted the one value they could actually supply.
+  mockGet.mockImplementation(
+    routeGet({
+      "/introductions/intro_1": {
+        ...INTRO,
+        explanation: {
+          ...INTRO.explanation,
+          unknown: { ...INTRO.explanation.unknown, missing_signal_keys: ["life_plan.relocation"] },
+        },
+      },
+      "/blueprint/current": BLUEPRINT,
+    }),
+  );
+  const s = await renderScreen(<IntroductionDetail />);
+  await s.press("Correct something about me");
+
+  expect(s.hasText("Relocation")).toBe(true);
+  expect(s.joined()).toContain("You haven't answered this one");
+
+  await s.press("Relocation");
+  await s.press("Open to relocating");
+  await s.press("Correct my Blueprint");
+  await s.settle();
+
+  expect(mockPost).toHaveBeenCalledWith("/introductions/intro_1/correction", {
+    signal_key: "life_plan.relocation",
+    value: "open",
+    note: null,
   });
 });

@@ -175,9 +175,24 @@ export type BlueprintSignal = {
   options: { value: string; label: string }[];
 };
 
+/** A catalog signal the member has never answered: no value, but choosable. */
+export type UnansweredSignal = {
+  key: string;
+  category: string;
+  label: string;
+  special_category: boolean;
+  options: { value: string; label: string }[];
+};
+
 export type Blueprint = {
   version: { id: string; version_no: number; confirmed_at: string | null; model_version: string } | null;
   signals: BlueprintSignal[];
+  /**
+   * Kept separate from `signals` so `coverage` and the Blueprint screen keep their meaning,
+   * but the correction form has to include them: a signal the matcher says it is missing is
+   * precisely the one the member cannot otherwise supply.
+   */
+  unanswered: UnansweredSignal[];
   coverage: Record<string, number>;
   freshness: { age_days: number | null; stale: boolean; refresh_after_days: number };
   data_use: string;

@@ -295,9 +295,27 @@ def current_payload(db: Session, member: Member) -> dict[str, Any]:
     settings = get_settings()
     age_days = (utcnow() - version.confirmed_at).days if version and version.confirmed_at else None
     coverage = {cat: len([s for s in signals if s["category"] == cat]) for cat in ("life_plan", "daily", "values", "interaction", "readiness")}
+    # Signals the member has never answered. They are absent from `signals` because only
+    # persisted rows are serialised, which left no way to supply one: the correction form could
+    # offer only values that already existed, so the gap the matcher complained about was the
+    # one thing the member could not fill. Kept separate from `signals` so neither `coverage`
+    # nor the Blueprint screen changes meaning.
+    answered = {s["key"] for s in signals}
+    unanswered = [
+        {
+            "key": sig.key,
+            "category": sig.category,
+            "label": sig.label,
+            "special_category": sig.special_category,
+            "options": [{"value": v, "label": l} for v, l in sig.options.items()],
+        }
+        for sig in SIGNALS.values()
+        if sig.key not in answered
+    ]
     return {
         "version": {"id": version.id, "version_no": version.version_no, "confirmed_at": iso(version.confirmed_at), "model_version": version.model_version} if version else None,
         "signals": signals,
+        "unanswered": unanswered,
         "preferences": preferences_payload(db, member)["preferences"],
         "coverage": coverage,
         "freshness": {"age_days": age_days, "stale": bool(age_days is not None and age_days > settings.blueprint_freshness_days), "refresh_after_days": settings.blueprint_freshness_days},

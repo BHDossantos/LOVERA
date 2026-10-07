@@ -416,3 +416,41 @@ def test_worker_runs_weekly_batch_once_per_cohort_date(client, monkeypatch):
         db.close()
     assert first is not None and first["status"] in ("review", "published")
     assert second is None  # idempotent for the cohort date
+
+
+def test_the_explanation_only_names_gaps_the_viewer_can_fill(client):
+    """`missing_signals` is right for the uncertainty maths and wrong for a correction form.
+
+    scoring.py marks a signal missing when *either* participant lacks it. The explanation's
+    `missing_signal_keys` is read by one thing — a form asking the viewer to supply or correct
+    their own value — so naming the other person's gap sent it promoting a value of the
+    viewer's that was fine, while a gap of their own had no row in /blueprint/current and so
+    could not be chosen at all.
+    """
+    from app.catalog.signals import SIGNALS
+
+    a = Actor(client, unique_email("ana-gap"))
+    b = Actor(client, unique_email("ben-gap"))
+    onboard(a, gender="woman", seeking=["man"], name="Ana", zone="rome:prati")
+    onboard(b, gender="man", seeking=["woman"], name="Ben", zone="rome:centro", birth_year=1990)
+    subscribe(a)
+    subscribe(b)
+    run_batch(client, publish=True)
+    intro = find_intro_between(a, b.id)
+    assert intro, "the batch did not introduce the two members this test created"
+
+    current = a.get("/blueprint/current").json()
+    answered = {s["key"] for s in current["signals"]}
+    # Every catalog signal is either answered or offered as unanswered; nothing falls through.
+    assert answered | {s["key"] for s in current["unanswered"]} == set(SIGNALS)
+    assert answered.isdisjoint({s["key"] for s in current["unanswered"]})
+    # And the unanswered ones carry what a chooser needs.
+    for sig in current["unanswered"]:
+        assert sig["options"] and sig["label"] and "value" not in sig
+
+    # Every key the explanation offers as a correction target is one Ana can actually act on:
+    # either she has not answered it, or she has and it is hers to change.
+    keys = intro["explanation"]["unknown"]["missing_signal_keys"]
+    choosable = answered | {s["key"] for s in current["unanswered"]}
+    assert all(k in choosable for k in keys), keys
+    assert all(k in SIGNALS for k in keys), keys

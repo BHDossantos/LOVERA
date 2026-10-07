@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Text } from "react-native";
 import { ApiError, get, post } from "@/api/client";
-import type { Blueprint, BlueprintSignal, CorrectionResult } from "@/api/types";
+import type { Blueprint, BlueprintSignal, CorrectionResult, UnansweredSignal } from "@/api/types";
 import { Button, Card, ErrorState, Field, Options, StatusBanner, TextInput } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
 
@@ -17,6 +17,15 @@ import { color, space, type as typo } from "@/theme";
  *
  * It is never shown to the other member, and it does not change this introduction's decision.
  */
+/** One row of the chooser, from either an answered signal or an unanswered catalog one. */
+type Choice = {
+  key: string;
+  label: string;
+  valueLabel: string;
+  options: { value: string; label: string }[];
+  special_category: boolean;
+};
+
 export function CorrectionForm({ introId, suggestedKeys = [] }: { introId: string; suggestedKeys?: string[] }) {
   const qc = useQueryClient();
   const blueprint = useQuery({ queryKey: ["blueprint"], queryFn: () => get<Blueprint>("/blueprint/current") });
@@ -28,10 +37,30 @@ export function CorrectionForm({ introId, suggestedKeys = [] }: { introId: strin
   const [error, setError] = useState<ApiError | null>(null);
   const [result, setResult] = useState<CorrectionResult | null>(null);
 
-  // Signals the explanation itself flagged as unknown come first: they are the ones the
-  // matcher guessed at, so they are the likeliest to be wrong.
-  const ordered = useMemo(() => {
-    const all: BlueprintSignal[] = blueprint.data?.signals ?? [];
+  /**
+   * Everything the member could correct, with what the explanation flagged first.
+   *
+   * The unanswered signals have to be in here. `missing_signal_keys` now names only signals
+   * the *viewer* lacks, and those have no row in `signals` at all — so a list built from
+   * `signals` alone silently dropped the one thing the member could usefully supply, while
+   * showing a reordered list of values that were fine.
+   */
+  const ordered = useMemo<Choice[]>(() => {
+    const answered: Choice[] = (blueprint.data?.signals ?? []).map((s) => ({
+      key: s.key,
+      label: s.label,
+      valueLabel: s.value_label,
+      options: s.options,
+      special_category: s.special_category,
+    }));
+    const missing: Choice[] = (blueprint.data?.unanswered ?? []).map((s) => ({
+      key: s.key,
+      label: s.label,
+      valueLabel: "",
+      options: s.options,
+      special_category: s.special_category,
+    }));
+    const all = [...answered, ...missing];
     return [...all.filter((s) => suggestedKeys.includes(s.key)), ...all.filter((s) => !suggestedKeys.includes(s.key))];
   }, [blueprint.data, suggestedKeys]);
   const active = ordered.find((s) => s.key === signalKey) ?? null;
@@ -99,7 +128,7 @@ export function CorrectionForm({ introId, suggestedKeys = [] }: { introId: strin
               options={ordered.map((sig) => ({
                 value: sig.key,
                 label: sig.label,
-                body: sig.value_label ? `Currently: ${sig.value_label}` : "Not set",
+                body: sig.valueLabel ? `Currently: ${sig.valueLabel}` : "You haven't answered this one",
               }))}
             />
           </Field>
@@ -118,7 +147,7 @@ export function CorrectionForm({ introId, suggestedKeys = [] }: { introId: strin
                 options={[
                   {
                     value: "",
-                    label: "Just flag it as wrong",
+                    label: active.valueLabel ? "Just flag it as wrong" : "Skip for now",
                     body: "A reviewer sees it. Your matching does not change until you pick a value.",
                   },
                   ...active.options.map((o) => ({ value: o.value, label: o.label })),
