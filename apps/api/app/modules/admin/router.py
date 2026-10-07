@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -153,30 +153,52 @@ def list_corrections(
     notion of a correction having been dealt with, so past 50 unapplied rows the oldest disputed
     signals were permanently unreachable while still affecting matching. `total` is the size of
     the filtered set, so a caller can tell there is more behind what it asked for.
+
+    The filtering, the count and the page are all SQL. The version before this one read every
+    correction ever filed, then looked up reviews with every one of those ids in a single `IN`, and
+    only then cut the page in Python — so a queue nobody ever deletes from got slower and heavier
+    with its own history, and a long enough one would have passed more bind parameters than the
+    driver accepts and taken every page down with it.
     """
     from app.catalog.signals import SIGNALS
 
-    stmt = select(IntroCorrection).order_by(IntroCorrection.created_at.desc(), IntroCorrection.id.desc())
-    rows = db.execute(stmt).scalars().all()
-    reviews = {
-        r.correction_id: r
-        for r in db.execute(select(IntroCorrectionReview).where(IntroCorrectionReview.correction_id.in_([c.id for c in rows]))).scalars().all()
-    } if rows else {}
+    # `applied` is whether the member supplied a replacement value. `corrected_value` is JSONB and
+    # the writer always stores `{"value": <str|None>}` (introductions/service.py), so this is the
+    # same predicate as `bool(value)` — null and the empty string are the only falsy cases.
+    value = IntroCorrection.corrected_value["value"].astext
+    applied_sql = and_(value.isnot(None), value != "")
+    reviewed_sql = select(IntroCorrectionReview.id).where(IntroCorrectionReview.correction_id == IntroCorrection.id).exists()
 
-    # `applied` is derived from JSON the member supplied, so the filter cannot be a WHERE clause
-    # without reaching into the JSON column; it is applied here and the page is cut afterwards.
-    matching_rows = []
+    where = []
+    if unapplied_only:
+        where.append(~applied_sql)
+    if unresolved_only:
+        where.extend([~applied_sql, ~reviewed_sql])
+
+    total = db.execute(select(func.count()).select_from(IntroCorrection).where(*where)).scalar_one()
+    rows = (
+        db.execute(
+            select(IntroCorrection)
+            .where(*where)
+            .order_by(IntroCorrection.created_at.desc(), IntroCorrection.id.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        .scalars()
+        .all()
+    )
+    reviews = (
+        {
+            r.correction_id: r
+            for r in db.execute(select(IntroCorrectionReview).where(IntroCorrectionReview.correction_id.in_([c.id for c in rows]))).scalars().all()
+        }
+        if rows
+        else {}
+    )
+
+    out = []
     for c in rows:
         applied = bool((c.corrected_value or {}).get("value"))
-        if unapplied_only and applied:
-            continue
-        if unresolved_only and (applied or c.id in reviews):
-            continue
-        matching_rows.append((c, applied))
-
-    total = len(matching_rows)
-    out = []
-    for c, applied in matching_rows[offset : offset + limit]:
         sig = SIGNALS.get(c.signal_key)
         review = reviews.get(c.id)
         out.append(

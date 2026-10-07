@@ -159,7 +159,18 @@ function CaseInner({ caseId }: { caseId: string }) {
                           Open this attachment
                         </Button>
                       )}
-                      {file && (
+                      {file && !file.data_url.startsWith("data:") && (
+                        /* The API refuses anything but an inline data URL on the way in
+                           (app/core/datauri.py). This is the same refusal on the way out, for a row
+                           stored before that check existed: a remote URL here would make the
+                           reviewer's browser fetch it, telling whoever uploaded it that their case
+                           had just been opened, and by whom. */
+                        <p className="mt-2 text-sm text-caution">
+                          This attachment was not stored as an inline file and will not be opened. Ask the engineering
+                          team to look at it rather than following the link.
+                        </p>
+                      )}
+                      {file && file.data_url.startsWith("data:") && (
                         <div className="mt-2">
                           {/* An attachment is whatever the reporter had to hand, so the type decides
                               what can be shown. An image is rendered; anything else gets the

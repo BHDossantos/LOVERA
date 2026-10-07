@@ -82,6 +82,64 @@ def test_evidence_is_not_readable_without_a_reviewer_role_or_a_purpose(client):
     assert reviewer.get("/admin/safety/evidence/does-not-exist?purpose=case_review").status_code == 404
 
 
+def test_evidence_has_to_be_the_file_and_not_a_link_to_one(client):
+    """The one that is not a usability bug.
+
+    `EvidenceIn.data_url` was a string, stored unread beside a `content_type` the member also
+    supplied, and the reviewer page hands what is stored to an `<img>`. So a reporter could skip the
+    picker and upload `https://attacker.example/beacon.png` as an `image/png`: when the reviewer
+    opened the case about them, their browser would fetch it and tell the person being reported
+    their address, their user agent and the moment the case was opened — from inside the workflow
+    that exists to protect people from them.
+    """
+    reporter = Actor(client, unique_email("rita-evidence"))
+    subject = Actor(client, unique_email("sid-evidence"))
+    onboard(reporter, gender="woman", seeking=["man"], name="Rita", city=CITY, zone=ZONE)
+    onboard(subject, gender="man", seeking=["woman"], name="Sid", city=CITY, zone=ZONE)
+    report_id = reporter.post("/safety/reports", json={"subject_id": subject.id, "category": "harassment", "urgency": "recent", "block_now": False}).json()["id"]
+
+    def upload(**kw):
+        return reporter.post(f"/safety/reports/{report_id}/evidence", json={"content_type": "image/png", **kw})
+
+    # A link to somewhere else, which is the attack.
+    assert upload(data_url="https://attacker.example/beacon.png").status_code == 422
+    assert upload(data_url="//attacker.example/beacon.png").status_code == 422
+    # A type the upload does not admit to.
+    assert upload(data_url="data:text/html;base64,PGltZyBzcmM9eD4=").status_code == 422
+    # A type we do not accept at all, honestly declared.
+    assert upload(content_type="text/html", data_url="data:text/html;base64,PGltZyBzcmM9eD4=").status_code == 422
+    # An honest header over bytes that are not a PNG: HTML served to a reviewer as an image is a
+    # different problem from a beacon, and the signature settles it.
+    assert upload(data_url="data:image/png;base64,PGltZyBzcmM9eD4=").status_code == 422
+    # Not base64 at all.
+    assert upload(data_url="data:image/png;base64,not base64 at all!").status_code == 422
+    # And the real thing still goes through.
+    assert upload(data_url=PNG).status_code == 201
+
+
+def test_profile_media_has_the_same_check(client):
+    """Because the first version of this fix would have put it on evidence alone.
+
+    `complete_media` took the same unchecked string, and profile media is served to other members —
+    so one member could make another member's browser fetch a URL of their choosing. Same validator,
+    same refusal, a different allow-list: a photo is an image and a voice note is audio.
+    """
+    a = Actor(client, unique_email("ana-media"))
+    onboard(a, gender="woman", seeking=["man"], name="Ana", city=CITY, zone=ZONE)
+    created = a.post("/profile/media", json={"type": "photo", "content_type": "image/png", "size_bytes": 68, "checksum": None, "alt_text": "Me"})
+    assert created.status_code == 201, created.text
+    media_id = created.json()["media"]["id"]
+
+    assert a.post(f"/profile/media/{media_id}/complete", json={"data_url": "https://attacker.example/beacon.png"}).status_code == 422
+    assert a.post(f"/profile/media/{media_id}/complete", json={"data_url": "data:text/html;base64,PGk+"}).status_code == 422
+    assert a.post(f"/profile/media/{media_id}/complete", json={"data_url": PNG}).status_code == 200
+    # An audio data URL on a photo is refused, and on a voice note it is not: the allow-list is per
+    # kind rather than one list that has to contain everything.
+    voice = a.post("/profile/media", json={"type": "voice", "content_type": "audio/mpeg", "size_bytes": 10, "checksum": None, "alt_text": None}).json()["media"]["id"]
+    assert a.post(f"/profile/media/{media_id}/complete", json={"data_url": "data:audio/mpeg;base64,SUQzAwAA"}).status_code == 422
+    assert a.post(f"/profile/media/{voice}/complete", json={"data_url": "data:audio/mpeg;base64,SUQzAwAA"}).status_code == 200
+
+
 def _correction(client, actor_name: str) -> tuple[Actor, str]:
     """File one correction with no replacement value, and return the member and the correction id."""
     a = Actor(client, unique_email(f"{actor_name}-a"))
