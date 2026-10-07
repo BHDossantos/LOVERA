@@ -130,7 +130,12 @@ def test_the_unresolved_corrections_queue_can_be_drained(client):
     assert resolved["review"]["reviewer_id"]
 
     # Two reviewers on the same row: the second is told rather than silently overwriting the first.
+    # The unique constraint is what answers, not a preceding SELECT, so this is the same code path a
+    # genuinely concurrent pair of reviewers takes — where a check-then-insert gave the loser a 500.
     assert concierge.post(f"/admin/matching/corrections/{correction_id}/review", json={"decision": "actioned"}).status_code == 409
+    # And the first reviewer's decision survived the second attempt intact.
+    again = next(c for c in concierge.get("/admin/matching/corrections?unapplied_only=true&limit=200").json()["items"] if c["id"] == correction_id)
+    assert again["review"]["decision"] == "no_change" and again["review"]["note"] == "Read it; the inference stands."
     assert concierge.post("/admin/matching/corrections/nope/review", json={"decision": "actioned"}).status_code == 404
 
 

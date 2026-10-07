@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.audit import audit
@@ -203,12 +204,22 @@ def review_correction(
     correction = db.get(IntroCorrection, correction_id)
     if correction is None:
         raise ApiError("NOT_FOUND")
-    existing = db.execute(select(IntroCorrectionReview).where(IntroCorrectionReview.correction_id == correction.id)).scalar_one_or_none()
-    if existing is not None:
-        raise ApiError("CONFLICT", "Another reviewer has already resolved this correction.")
     review = IntroCorrectionReview(correction_id=correction.id, reviewer_id=principal.id, decision=data.decision, note=data.note)
-    db.add(review)
-    db.flush()
+    # The unique constraint decides this, not a preceding SELECT. Two reviewers working the same
+    # queue — which is the normal way a queue gets worked — would both pass a check-then-insert
+    # before either wrote, and the loser got a 500 from the IntegrityError instead of the conflict
+    # this endpoint promises. Now there is one path for both, and the sequential second reviewer
+    # exercises the same code as the concurrent one.
+    #
+    # The savepoint keeps the failure local: without it a caught IntegrityError leaves the whole
+    # transaction unusable, so the handler ending the request would be the only thing between this
+    # and a poisoned session for anything added after it.
+    try:
+        with db.begin_nested():
+            db.add(review)
+            db.flush()
+    except IntegrityError:
+        raise ApiError("CONFLICT", "Another reviewer has already resolved this correction.")
     audit(
         db,
         actor_type="staff",
