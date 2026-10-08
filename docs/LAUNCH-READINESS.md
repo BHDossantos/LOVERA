@@ -4,9 +4,9 @@ Audited against the code on `main`, not from memory. Every claim below names the
 endpoint it came from, so you can check any line of it.
 
 **Verdict: not ready**, and the reasons are now entirely in section A. Three things stop the
-product working at all in production and every one of them needs an account or a decision
-only you can supply. The mobile app reaches 81 of the 92 member-facing API endpoints; the web
-app reaches 84.
+product working at all in production, a fourth stops anything being validated at all, and
+every one of them needs an account or a decision only you can supply. The mobile app reaches
+81 of the 92 member-facing API endpoints; the web app reaches 84.
 
 Section B was the mobile feature gap. Most of it is closed; what is left is listed with the
 reason it is still open, and section B4 separates what is deferred by a decision you have not
@@ -73,6 +73,37 @@ there, so the code reaches members by mail or not at all, and the API refuses to
 mail host. That is a pilot posture, not a launch one: real members would be verified by nobody.
 
 No origin means no mobile build — the build guards refuse a placeholder, by design.
+
+### A4. CI has stopped running. Nothing can be validated until it is turned back on.
+
+No job in this repository has been given a runner since **22:55 UTC on 7 Oct**. Every run
+since fails in two to four seconds with `runner_id: 0`, an empty `runner_name`, and HTTP 404
+for its job log, because no step executes — there is no failing test to read. The last real
+run was #190 (`59b1539`), which took 4m20s.
+
+It is not any one branch's: run #191 is `dependabot[bot]` on a third branch, failing
+identically. That shape — several branches, two actors, no runner, no log — is an account-level
+Actions condition: a spending limit reached, or Actions disabled for the repository. Check
+Settings → Billing → *Spending limit* and Settings → Actions → *General*.
+
+While it holds, every push is locally verified and not CI-verified, which is a weaker claim
+and is stated as one. What runs locally covers everything the three failing jobs do except the
+browser journey, which needs the stack up:
+
+```
+cd apps/api && python -m pytest -q                      # 108 tests
+cd apps/mobile && npx jest && npx tsc --noEmit          # 130 tests, 17 suites
+cd apps/web && npx tsc --noEmit && npm run lint
+python tools/check_api_contract.py openapi.json apps/mobile apps/web/src
+python tools/check_safety_target.py && python tools/check_query_keys.py
+python tools/check_upload_types.py
+node apps/mobile/scripts/check-routes.js
+python apps/mobile/scripts/check-native-config.py
+```
+
+This also blocks `.github/workflows/mobile-build.yml`, which is how a signed build is meant to
+be produced, so until runners return the first build has to be made from a laptop with
+`eas build`.
 
 ---
 
@@ -157,7 +188,7 @@ unset rather than only set to Open, which still weighs it.
 2. SMTP provider plus SPF/DKIM/DMARC. Deploy the API.
 3. IAP, if you intend to charge on mobile at launch. Otherwise ship free and add it later — but then the paid tiers do not exist on mobile.
 4. Legal review of the three documents, and store screenshots.
-5. Make e2e failures readable through the API (`::error::` annotations), so a red run can be diagnosed without guessing.
+5. Turn GitHub Actions back on (A4). It is first in practice rather than fifth — until it runs, nothing above can be checked by anything but a laptop, and the EAS build workflow cannot run at all.
 
-Items 1, 2, 3 and 4 need decisions or accounts only you can supply. 5 is code, and nothing is
-waiting on it.
+Every one of these needs an account or a decision only you can supply. Nothing on this list is
+waiting on code.
