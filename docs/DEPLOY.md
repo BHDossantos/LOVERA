@@ -275,6 +275,39 @@ curl -sS -X POST https://matchmaker-api-staging.fly.dev/v1/auth/start \
 
 Then point a build at it exactly as in section 5, with the staging hostname, and rebuild.
 
+## 5b-bis. The legal pages, before anything is submitted
+
+The terms, privacy notice and community agreement state facts only you have: who the
+contracting entity is, where it is registered, which law governs, the addresses members
+write to, how long safety reports are kept. Each is declared once in
+`apps/web/src/app/legal/_facts.ts` and read from the environment, so filling them in is one
+variable each rather than a search through three documents — the entity name and the
+registered address each appeared twice, and a privacy notice naming a controller the terms
+do not is a document that contradicts itself.
+
+Check where you stand:
+
+```bash
+python tools/check_legal_facts.py              # what is still missing (always passes)
+python tools/check_legal_facts.py --require-all # fails while anything required is unset
+```
+
+Run the second before a production build or a store submission. CI runs the first on every
+push, because which facts are set belongs to a deployment and not to a commit.
+
+Five of them this repository already answers — hosting and its region, the AI provider, the
+payment provider, how long a shared check-in location is kept, and whether there is an
+identity vendor (under `MM_IDENTITY_PROVIDER=manual_review` there is not, and saying there
+is would be false). The rest are yours, and a lawyer should see all of it: the file says what
+each one is and where it comes from, not what it should say.
+
+One of them is a decision and not just a sentence. `NEXT_PUBLIC_LEGAL_SAFETY_RETENTION` is
+how long safety reports and their evidence are kept — and nothing in the code deletes them
+today, by design (`erase_member` preserves safety records). So whatever you write there has
+to be implemented too, or the notice says something the system does not do.
+
+---
+
 ## 5c. Shipping a fix without a store review
 
 `expo-updates` is installed, so a JavaScript-only fix can reach installed apps in minutes

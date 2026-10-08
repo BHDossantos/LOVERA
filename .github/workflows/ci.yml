@@ -65,6 +65,17 @@ jobs:
         env:
           MM_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/matchmaker_test
           MM_ENV: test
+      # The legal pages name operator facts — the controller, the governing law, the retention
+      # periods — from one declaration each. A page naming a fact nobody declared renders a gap
+      # labelled with the fact's own name, which is the least useful error message available, and
+      # these are the documents an app reviewer reads. `--require-all` is deliberately NOT used
+      # here: which facts are set is a property of a deployment, not of a commit. Run that before
+      # a production build (docs/DEPLOY.md).
+      - name: The legal pages name no fact that nobody declared
+        run: python ../../tools/check_legal_facts.py
+        env:
+          MM_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/matchmaker_test
+          MM_ENV: test
   web:
     runs-on: ubuntu-latest
     defaults:

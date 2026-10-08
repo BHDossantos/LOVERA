@@ -1,4 +1,4 @@
-import { DocHeader, H2, P, UL, TODO } from "../_components";
+import { DocHeader, Fact, H2, P, UL } from "../_components";
 
 export const metadata = { title: "Community Agreement · AI Matchmaker" };
 
@@ -69,7 +69,7 @@ export default function Community() {
       <P>
         Contact your local emergency services first. We are not an emergency service. The
         Safety centre in the app has the number for your market and can put a report on
-        record afterwards. For anything else: <TODO>safety@yourdomain</TODO>.
+        record afterwards. For anything else: <Fact name="safetyEmail" />.
       </P>
     </>
   );
