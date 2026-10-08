@@ -70,8 +70,10 @@ issued without it.
 
 ## 3. Point the app at the real API — **You**
 
-`apps/mobile/eas.json` carries `REPLACE-ME` values for both the API origin and the
-EAS project ID, in the `preview` and `production` profiles. Replace all four.
+Set `EXPO_PUBLIC_API_ORIGIN` and `EXPO_PUBLIC_EAS_PROJECT_ID` as EAS environment
+variables for each profile you build. `eas.json` used to carry `REPLACE-ME` values for
+both; it was standardised in #41 and no longer has `env` blocks at all, so the values
+have to come from EAS (or your shell, for a local `expo export`).
 
 You cannot forget this. Expo inlines both values at bundle time, so a binary built
 against a placeholder installs, launches, and then fails every request — or never
@@ -82,7 +84,7 @@ instead of at a reviewer's device:
 
 ```
 EXPO_PUBLIC_API_ORIGIN is not an address anyone else can reach for the
-"production" profile: https://REPLACE-ME.example.com
+"production" profile: https://your-api.example.com
 Every request in this build would fail. Set EXPO_PUBLIC_API_ORIGIN for the
 "production" profile in eas.json and build again.
 ```

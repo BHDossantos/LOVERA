@@ -275,6 +275,41 @@ curl -sS -X POST https://matchmaker-api-staging.fly.dev/v1/auth/start \
 
 Then point a build at it exactly as in section 5, with the staging hostname, and rebuild.
 
+## 5c. Shipping a fix without a store review
+
+`expo-updates` is installed, so a JavaScript-only fix can reach installed apps in minutes
+instead of waiting on App Review. From `apps/mobile`:
+
+```bash
+npx eas-cli update --branch production --message "what changed"
+```
+
+That publishes to the branch, and `eas.json` maps the `production` build profile to the
+`production` channel (and `preview` to `preview`). Builds pick it up on their next launch:
+`fallbackToCacheTimeout` is 0, so the app starts on the bundle it already has and swaps in
+what it downloaded the time after. Nobody waits on a network round trip at the splash
+screen, and nobody is more than one launch behind.
+
+**What an update must not do is reach a binary it does not fit.** A JS bundle calling a
+native module the installed app does not have crashes on launch, and the member cannot get
+out of that by themselves — no screen loads, so there is nothing to tap. The runtime version
+is what prevents it, and it is set to the `fingerprint` policy: EAS derives it from the
+native project, so any change to native code, a config plugin or a dependency with native
+code produces a different runtime version and the update is simply not offered to the old
+binaries. The alternatives (`appVersion`, `nativeVersion`) leave that as something you have
+to remember, and forgetting it once is unrecoverable on the device.
+
+So the rule is simple: **anything that changes native code needs a new store build, not an
+update.** If you are unsure whether a change is native, it is — `npx expo-doctor` and the
+build logs will tell you, and `apps/mobile/scripts/check-native-config.py` asserts the
+runtime version policy has not been loosened.
+
+Updates stay off entirely until `eas init` has created the project, because the manifest URL
+is built from the project id (`updates()` in `apps/mobile/app.config.ts`). A production build
+cannot get that far anyway — the project id guard throws first.
+
+---
+
 ## 6. A custom domain, when you have one
 
 ```bash
