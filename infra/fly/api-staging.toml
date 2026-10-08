@@ -31,6 +31,9 @@ primary_region = "fra"
   # The sign-in code is NEVER returned in a response here. This is the one setting that
   # makes a publicly reachable staging deploy safe to point a build at.
   MM_EXPOSE_DEV_OTP = "false"
+  # Identity verification. Left at the default here on purpose: "sandbox" is only refused in
+  # production, and keeping it is the whole reason a staging deploy can be pointed at a build
+  # today — the only simulated thing in this posture is the ID check.
   # Outbound mail. The host and credentials are secrets (see docs/DEPLOY.md); only the
   # non-secret shape belongs in a committed file. MM_MAIL_TRANSPORT is left unset on
   # purpose so "auto" applies and the API refuses to start without a mail host.

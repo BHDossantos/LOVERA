@@ -20,6 +20,10 @@ from app.models.account import Member
 from app.models.billing import WebhookReceipt
 from app.models.verification import Verification
 
+# No vendor at all: a person approves or rejects every member from the admin queue. Declared in
+# `MM_IDENTITY_PROVIDER` so it is a posture somebody chose, not the default nobody noticed.
+MANUAL_REVIEW = "manual_review"
+
 
 def start_session(db: Session, member: Member) -> dict[str, Any]:
     settings = get_settings()
@@ -34,9 +38,28 @@ def start_session(db: Session, member: Member) -> dict[str, Any]:
         db.flush()
     track(db, "verification_started", member.id, vendor_type=settings.identity_provider, market=member.market_id)
     audit(db, actor_type="member", actor_id=member.id, action="verification.started", resource_type="verification", resource_id=v.id)
+
+    if settings.identity_provider == MANUAL_REVIEW:
+        # There is no vendor in this mode, so there is no hosted flow to send anybody to. Handing
+        # back a `hosted_url` here would be the dishonest version of this: the member would open a
+        # capture page that cannot complete and wait at step 2 of 6 forever. Enqueue them instead,
+        # and say what is actually going to happen.
+        if v.status != "review_required":
+            v.status = "review_required"
+            v.failure_reason_code = v.failure_reason_code or MANUAL_REVIEW
+        return {
+            "session": None,
+            "mode": MANUAL_REVIEW,
+            "status": v.status,
+            "collects": ["Nothing yet — a member of our team will contact you to arrange the check"],
+            "we_keep": ["A verified / not verified result", "Over-18 result", "Who reviewed it and when", "Verification date and expiry"],
+            "alternate_path": "Every verification in this market is done by a person. You are in the queue; we acknowledge within 24 hours.",
+        }
+
     # The vendor hosted flow is represented by a URL the web app opens. The sandbox provider renders a simulated capture page.
     return {
         "session": {"provider": v.provider, "provider_ref": v.provider_ref, "hosted_url": f"/onboarding/verification/vendor?ref={v.provider_ref}", "expires_at": iso(utcnow() + timedelta(hours=1))},
+        "mode": settings.identity_provider,
         "status": v.status,
         "collects": ["Government ID (checked by the vendor, not stored by us)", "Short liveness selfie video (deleted by the vendor after the check)"],
         "we_keep": ["A verified/not verified result", "Over-18 result", "A vendor reference token", "Verification date and expiry"],
@@ -45,9 +68,10 @@ def start_session(db: Session, member: Member) -> dict[str, Any]:
 
 
 def status_payload(db: Session, member_id: str) -> dict[str, Any]:
+    mode = get_settings().identity_provider
     v = db.execute(select(Verification).where(Verification.member_id == member_id).order_by(Verification.created_at.desc())).scalars().first()
     if v is None:
-        return {"status": "not_started", "verified_at": None, "expires_at": None, "age_over_18": None, "liveness_passed": None, "failure_reason_code": None, "badges": []}
+        return {"status": "not_started", "mode": mode, "verified_at": None, "expires_at": None, "age_over_18": None, "liveness_passed": None, "failure_reason_code": None, "badges": []}
     status = v.status
     if status == "verified" and v.expires_at and v.expires_at <= utcnow():
         status = "expired"
@@ -59,6 +83,7 @@ def status_payload(db: Session, member_id: str) -> dict[str, Any]:
         ]
     return {
         "status": status,
+        "mode": mode,
         "verified_at": iso(v.verified_at),
         "expires_at": iso(v.expires_at),
         "age_over_18": v.age_over_18,
@@ -124,8 +149,15 @@ def handle_webhook(db: Session, body: bytes, timestamp: str, signature: str) -> 
 
 def request_manual_review(db: Session, member: Member, note: str | None) -> dict[str, Any]:
     v = db.execute(select(Verification).where(Verification.member_id == member.id).order_by(Verification.created_at.desc())).scalars().first()
-    if v is None or v.status == "verified":
-        raise ApiError("CONFLICT", "There is no failed verification to review.")
+    if v is not None and v.status == "verified":
+        raise ApiError("CONFLICT", "You are already verified.")
+    if v is None:
+        # Asking a person to check you is a reasonable first move, not only a fallback after a vendor
+        # said no — and in `manual_review` mode it is the only move. Refusing it for want of a failed
+        # attempt to attach to made the endpoint's name a lie.
+        v = Verification(member_id=member.id, provider=get_settings().identity_provider, provider_ref=f"ver_{secrets.token_urlsafe(12)}", status="in_progress")
+        db.add(v)
+        db.flush()
     v.status = "review_required"
     v.review_note = (note or "")[:500]
     audit(db, actor_type="member", actor_id=member.id, action="verification.review_requested", resource_type="verification", resource_id=v.id)

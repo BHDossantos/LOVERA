@@ -8,8 +8,15 @@ import { nextOnboardingPath, useAuth, useRequireMember } from "@/lib/auth";
 import { OnboardingShell } from "@/components/shell/AppShell";
 import { Button, Card, ErrorState, PageTitle, StatusBanner, TextArea } from "@/components/ui";
 
-type Status = { status: string; failure_reason_code: string | null; badges: { key: string; label: string; limits: string }[] };
-type Session = { session: { provider_ref: string; hosted_url: string } | null; status: string; collects: string[]; we_keep: string[]; alternate_path: string };
+type Status = { status: string; mode: string; failure_reason_code: string | null; badges: { key: string; label: string; limits: string }[] };
+type Session = { session: { provider_ref: string; hosted_url: string } | null; mode: string; status: string; collects: string[]; we_keep: string[]; alternate_path: string };
+
+/**
+ * In this market there is no identity vendor: a person approves every member from the admin queue
+ * (`MM_IDENTITY_PROVIDER=manual_review`). The server sends no `hosted_url` in that mode, so this
+ * screen must not promise a capture flow or describe what "the vendor" checks — there isn't one.
+ */
+const MANUAL = "manual_review";
 
 /** O03 Identity verification: why, what is collected, retention, alternate review path. */
 export default function Verification() {
@@ -58,14 +65,15 @@ export default function Verification() {
   };
 
   const s = status.data?.status ?? "not_started";
+  const manual = (session?.mode ?? status.data?.mode) === MANUAL;
   return (
     <OnboardingShell step={2}>
-      <PageTitle eyebrow="Verification" title="Prove you're a real adult, once" lede="Everyone in the introduction pool has passed the same check. It keeps fakes and minors out; it is not a background check and not a guarantee of character." />
+      <PageTitle eyebrow="Verification" title="Prove you're a real adult, once" lede={`Everyone in the introduction pool has passed the same check. It keeps fakes and minors out; it is not a background check and not a guarantee of character.${manual ? " In this market a member of our team does the check personally." : ""}`} />
       <ErrorState error={error} />
       {s === "failed" && <StatusBanner type="caution" title="Automated verification didn't pass" body={`Reason code: ${status.data?.failure_reason_code ?? "unknown"}. You can retry or ask a human to review.`} />}
       {s === "review_required" && <StatusBanner type="info" title="A human reviewer will look at your verification" body="Acknowledgment within 24 hours. You can keep setting up your profile meanwhile." />}
       <Card className="mb-4">
-        <h2 className="mb-2 font-bold">What the vendor checks</h2>
+        <h2 className="mb-2 font-bold">{manual ? "What the check involves" : "What the vendor checks"}</h2>
         <ul className="list-disc space-y-1 pl-5 text-ink-secondary">
           {(session?.collects ?? ["Government ID (checked by the vendor, not stored by us)", "Short liveness selfie (deleted by the vendor after the check)"]).map((c) => (
             <li key={c}>{c}</li>
@@ -77,11 +85,11 @@ export default function Verification() {
             <li key={c}>{c}</li>
           ))}
         </ul>
-        <p className="mt-3 text-sm text-ink-tertiary">Raw documents and biometrics never reach our servers and are never used for matching.</p>
+        <p className="mt-3 text-sm text-ink-tertiary">{manual ? "We keep the result and who decided it. No documents or biometrics are stored, and nothing here is used for matching." : "Raw documents and biometrics never reach our servers and are never used for matching."}</p>
       </Card>
       {s !== "review_required" && (
         <Button fullWidth loading={busy} onClick={start}>
-          {s === "failed" ? "Try verification again" : "Begin identity and liveness verification"}
+          {manual ? "Ask our team to verify you" : s === "failed" ? "Try verification again" : "Begin identity and liveness verification"}
         </Button>
       )}
       {(s === "failed" || s === "in_progress") && (

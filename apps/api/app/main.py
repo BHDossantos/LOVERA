@@ -80,9 +80,39 @@ def check_mail_transport() -> None:
     log.info("mail: %s", get_sender().preflight())
 
 
+def check_identity_provider() -> None:
+    """Refuse to start a production API where nobody can finish signing up.
+
+    Onboarding hard-gates on verification (`account.service.advance_onboarding`), and the sandbox
+    provider's completion endpoint is correctly refused in production. So `MM_IDENTITY_PROVIDER`
+    left at its default in production is a dead end for every member: they sign up, reach step 2
+    of 6, and stop — with every endpoint answering and every health check green. That is the same
+    shape of failure as a deploy with no mail host, and it is worth refusing to boot over for the
+    same reason.
+
+    There are two honest answers and the operator has to pick one. A real vendor, or
+    `MM_IDENTITY_PROVIDER=manual_review`, which says out loud that a person approves every signup
+    from the admin queue. The second is a workable pilot posture; what it must not be is something
+    discovered on launch day.
+    """
+    settings = get_settings()
+    if settings.is_production and settings.identity_provider == "sandbox":
+        raise RuntimeError(
+            "MM_IDENTITY_PROVIDER is 'sandbox' in production. The sandbox completion endpoint is "
+            "refused in production, and onboarding cannot be finished without a verification "
+            "result, so every signup would stop at the verification step. Configure a real "
+            "identity vendor, or set MM_IDENTITY_PROVIDER=manual_review to approve each member by "
+            "hand from the admin verification queue."
+        )
+    if settings.identity_provider == "manual_review":
+        log.warning("MM_IDENTITY_PROVIDER=manual_review: every signup waits for a person in the admin verification queue.")
+    log.info("identity: %s", settings.identity_provider)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     check_mail_transport()
+    check_identity_provider()
     create_schema()
     from app.jobs import register_handlers
 

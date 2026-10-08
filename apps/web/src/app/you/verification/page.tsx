@@ -9,10 +9,17 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Button, Card, ErrorState, KeyValue, PageTitle, Skeleton, StatusBanner, TextArea, VerificationBadge } from "@/components/ui";
 import { formatDate } from "@/lib/format";
 
-type Status = { status: string; verified_at: string | null; expires_at: string | null; age_over_18: boolean | null; liveness_passed: boolean | null; failure_reason_code: string | null; badges: { key: string; label: string; limits: string }[] };
+type Status = { status: string; mode: string; verified_at: string | null; expires_at: string | null; age_over_18: boolean | null; liveness_passed: boolean | null; failure_reason_code: string | null; badges: { key: string; label: string; limits: string }[] };
 type SessionOut = { session: { hosted_url: string } | null; status: string; message?: string };
 
 const STATUS_LABEL: Record<string, string> = { not_started: "Not started", in_progress: "In progress", verified: "Verified", failed: "Didn't pass", review_required: "Human review requested", expired: "Expired" };
+
+/**
+ * Where there is no identity vendor (`MM_IDENTITY_PROVIDER=manual_review`), a person does every
+ * check from the admin queue, so this screen must not describe documents sitting with a vendor that
+ * does not exist.
+ */
+const MANUAL = "manual_review";
 
 /** Y05 Verification center: status, expiry, what each badge means and doesn't, re-verification and human review. */
 export default function VerificationCenterPage() {
@@ -90,11 +97,11 @@ export default function VerificationCenterPage() {
                 </li>
               ))}
             </ul>
-            <p className="mt-3 text-xs text-ink-tertiary">Raw documents and biometrics stay with the vendor. We keep a result, an over-18 result, a reference token and dates.</p>
+            <p className="mt-3 text-xs text-ink-tertiary">{s.mode === MANUAL ? "A member of our team does this check personally. We keep a result, an over-18 result, who decided it and the dates — no documents and no biometrics." : "Raw documents and biometrics stay with the vendor. We keep a result, an over-18 result, a reference token and dates."}</p>
           </Card>
           {st !== "review_required" && (
             <Button fullWidth loading={busy === "start"} onClick={start}>
-              {st === "verified" ? "Re-verify my identity" : st === "failed" ? "Try verification again" : st === "in_progress" ? "Continue verification" : "Begin identity and liveness verification"}
+              {s.mode === MANUAL ? (st === "verified" ? "Ask for a fresh check" : "Ask our team to verify you") : st === "verified" ? "Re-verify my identity" : st === "failed" ? "Try verification again" : st === "in_progress" ? "Continue verification" : "Begin identity and liveness verification"}
             </Button>
           )}
           {(st === "failed" || st === "in_progress" || st === "expired") && (

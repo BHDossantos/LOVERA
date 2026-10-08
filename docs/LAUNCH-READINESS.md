@@ -23,7 +23,7 @@ python ../../tools/endpoint_coverage.py openapi.json ../../apps/web/src ../../ap
 
 ## A. Blockers — the product does not function in production
 
-### A1. Identity verification dead-ends. Nobody gets past onboarding.
+### A1. Identity verification needs a vendor, or a deliberate choice to do it by hand.
 
 `MM_IDENTITY_PROVIDER` defaults to `sandbox` (`apps/api/app/core/config.py`), and
 `infra/fly/api.toml` does not override it. The sandbox completion endpoint is correctly
@@ -48,13 +48,27 @@ So in production a member signs up, reaches step 2 of 6, and stops. There is no 
 vendor adapter in the codebase — only a webhook contract (`POST /webhooks/verification`)
 waiting for one to be wired to it.
 
-The one escape hatch is `POST /verification/review-request`, which puts the member in a
-staff queue for manual approval. That is a workable pilot posture for small numbers, but
-it means a human approves every single signup, and it must be a deliberate choice rather
-than something discovered on launch day.
+**The accidental version of this is now impossible.** The API refuses to start in production with
+`MM_IDENTITY_PROVIDER=sandbox` (`main.check_identity_provider`), because that is a deploy where
+every endpoint answers, every health check is green, and not one member can finish signing up. The
+error names both ways out.
 
-This matters beyond mechanics: "verified members" is the product's core safety claim and
-will appear in both store listings. Shipping it unverified is a claim we cannot support.
+**And the deliberate version is now a real mode.** `MM_IDENTITY_PROVIDER=manual_review` says out
+loud that a person approves every member from the admin verification queue — which was always
+possible through `POST /verification/review-request`, but was not a posture anybody had chosen and
+did not behave like one. In that mode the API hands back no vendor session (it used to hand back a
+`hosted_url` to a simulated capture page that cannot complete in production, so the member opened
+it and waited at step 2 of 6 indefinitely), the member goes straight into the queue, and both apps
+say a member of the team does the check personally rather than describing a vendor that is not
+there. `review-request` also no longer refuses for want of a failed attempt to attach itself to,
+which had made the endpoint's name a lie — and in this mode would have made it unusable.
+
+`infra/fly/api.toml` declares `manual_review`, so a production deploy from this repo boots and
+works today. What it costs you is a person in the loop for every signup, and honesty in the store
+listing: "verified members" then means verified by your team, not by a document check. That is a
+claim you can support; an automated one you cannot. Swapping in a real vendor is a one-line config
+change plus an adapter on the webhook contract that is already there.
+(`apps/api/tests/test_identity_mode.py`, 7 tests.)
 
 ### A2. Email has no provider configured.
 

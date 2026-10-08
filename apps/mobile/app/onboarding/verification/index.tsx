@@ -8,8 +8,15 @@ import { nextOnboardingPath, useAuth, useRequireMember } from "@/lib/auth";
 import { Button, Card, ErrorState, PageTitle, Screen, StatusBanner, Steps, TextInput } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
 
-type Status = { status: string; failure_reason_code?: string | null };
-type Session = { session?: { hosted_url: string }; collects?: string[]; we_keep?: string[] };
+type Status = { status: string; mode?: string; failure_reason_code?: string | null };
+type Session = { session?: { hosted_url: string } | null; mode?: string; collects?: string[]; we_keep?: string[] };
+
+/**
+ * In this market there is no identity vendor: a person approves every member from the admin queue
+ * (`MM_IDENTITY_PROVIDER=manual_review`). The server sends no `hosted_url` in that mode, so this
+ * screen must not promise a capture flow or describe what "the vendor" checks — there isn't one.
+ */
+const MANUAL = "manual_review";
 
 const DEFAULT_COLLECTS = [
   "Government ID (checked by the vendor, not stored by us)",
@@ -94,13 +101,14 @@ export default function Verification() {
   };
 
   const s = status.data?.status ?? "not_started";
+  const manual = (session?.mode ?? status.data?.mode) === MANUAL;
   return (
     <Screen>
       <Steps step={2} />
       <PageTitle
         eyebrow="Verification"
         title="Prove you're a real adult, once"
-        lede="Everyone in the introduction pool has passed the same check. It keeps fakes and minors out; it is not a background check and not a guarantee of character."
+        lede={`Everyone in the introduction pool has passed the same check. It keeps fakes and minors out; it is not a background check and not a guarantee of character.${manual ? " In this market a member of our team does the check personally." : ""}`}
       />
       <ErrorState error={error} />
       {s === "failed" && (
@@ -118,17 +126,19 @@ export default function Verification() {
         />
       )}
       <Card>
-        <Text style={{ ...typo.heading, color: color.ink }}>What the vendor checks</Text>
+        <Text style={{ ...typo.heading, color: color.ink }}>{manual ? "What the check involves" : "What the vendor checks"}</Text>
         <Bullets items={session?.collects ?? DEFAULT_COLLECTS} />
         <Text style={{ ...typo.heading, color: color.ink, marginTop: space.lg }}>What we keep</Text>
         <Bullets items={session?.we_keep ?? DEFAULT_KEEP} />
         <Text style={{ ...typo.small, color: color.inkTertiary, marginTop: space.md }}>
-          Raw documents and biometrics never reach our servers and are never used for matching.
+          {manual
+            ? "We keep the result and who decided it. No documents or biometrics are stored, and nothing here is used for matching."
+            : "Raw documents and biometrics never reach our servers and are never used for matching."}
         </Text>
       </Card>
       {s !== "review_required" && (
         <Button onPress={start} loading={busy}>
-          {s === "failed" ? "Try verification again" : "Begin identity and liveness verification"}
+          {manual ? "Ask our team to verify you" : s === "failed" ? "Try verification again" : "Begin identity and liveness verification"}
         </Button>
       )}
       {(s === "failed" || s === "in_progress") && (
