@@ -133,4 +133,21 @@ python -m app.seed --run-batch      # 30 verified members + a published batch
 cd ../web && npm install && npm run dev
 ```
 
+### Running the mobile app on a real phone
+
+```
+cd apps/api && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000   # note the host
+cd apps/mobile && npx expo start
+```
+
+`--host 0.0.0.0` is the part that is easy to miss: uvicorn binds `127.0.0.1` by default, so the
+API answers the laptop and refuses the phone, and every screen in the app fails at once. The app
+finds the right address by itself — `resolveOrigin` in `src/api/client.ts` rewrites the loopback
+default to whatever host served the bundle — so no `EXPO_PUBLIC_API_ORIGIN` is needed for this,
+and setting one still overrides it. Both devices have to be on the same network.
+
+Signing in needs no mail server: outside production the API returns the one-time code in the
+`/auth/start` response (`MM_EXPOSE_DEV_OTP`, on by default) and the welcome screen fills it in.
+The code is also printed by the console mail transport in the API's own output.
+
 Staff bootstrap emails (sandbox): `concierge@example.test`, `safety@example.test`, `admin@example.test`.
