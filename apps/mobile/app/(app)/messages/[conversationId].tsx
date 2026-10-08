@@ -5,6 +5,7 @@ import { Alert, FlatList, KeyboardAvoidingView, Platform, Pressable, Text, View 
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ApiError, get, newIdempotencyKey, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
+import { planTimeLine } from "@/lib/format";
 import { serverDriven, useAwaitingServer } from "@/lib/query";
 import type { ConversationSummary, Message } from "@/api/types";
 import { AwaitingServer, Badge, Button, ErrorState, StatusBanner, TextInput } from "@/components/ui";
@@ -289,7 +290,7 @@ export default function Conversation() {
           {conversation?.date ? (
             <Button variant="secondary" onPress={() => router.push(`/dates/${conversation?.date?.date_plan_id}` as never)}>
               {conversation.date.starts_at
-                ? `Your date · ${new Date(conversation.date.starts_at).toLocaleDateString()}`
+                ? `Your date · ${planTimeLine(conversation.date.starts_at, conversation.date.timezone)}`
                 : "See the date you're planning"}
             </Button>
           ) : (

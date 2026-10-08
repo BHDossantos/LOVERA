@@ -5,6 +5,7 @@ import { Linking, Text, View } from "react-native";
 import { ApiError, get, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
 import { serverDriven, useAwaitingServer } from "@/lib/query";
+import { planTimeLine } from "@/lib/format";
 import { telUri } from "@/components/safety";
 import type { DatePlan } from "@/api/types";
 import { AwaitingServer, Badge, Button, Card, Divider, ErrorState, PageTitle, Screen, StatusBanner } from "@/components/ui";
@@ -56,7 +57,7 @@ export default function DateDetail() {
           <PageTitle
             eyebrow={d.status}
             title={`With ${d.other_display_name}`}
-            lede={d.starts_at ? new Date(d.starts_at).toLocaleString() : "Time not settled yet"}
+            lede={d.starts_at ? planTimeLine(d.starts_at, d.timezone) : "Time not settled yet"}
           />
           {d.awaiting_your_confirmation && (
             <StatusBanner tone="context" title="They proposed this. It isn't set until you confirm." />
@@ -108,7 +109,7 @@ export default function DateDetail() {
             <Text style={s.h2}>Safety</Text>
             {d.check_in ? (
               <Text style={s.meta}>
-                Check-in set for {new Date(d.check_in.check_at).toLocaleString()} · shared as {d.check_in.share_scope}
+                Check-in set for {planTimeLine(d.check_in.check_at, d.timezone)} · shared as {d.check_in.share_scope}
                 {d.check_in.trusted_contact_name ? ` with ${d.check_in.trusted_contact_name}` : ""}
               </Text>
             ) : (

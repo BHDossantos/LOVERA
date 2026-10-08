@@ -33,6 +33,24 @@ def market_date(at: datetime | None = None) -> str:
     return moment.astimezone(ZoneInfo(get_settings().market_timezone)).date().isoformat()
 
 
+def market_timezone() -> str:
+    """The zone a date actually happens in, which is the venue's, not either member's.
+
+    `DatePlan.timezone` used to be `member.timezone` copied from whoever pressed "plan a date"
+    first. That is a value with no relationship to where the two of them are going to meet: a
+    member who moves to London and updates their setting — which the settings screen invites them
+    to do — would then propose a Rome venue and have both of them shown a London clock face for
+    it. Every venue belongs to a market, and a market has one zone, so that is the zone the agreed
+    time is written in and the one both apps label it with.
+
+    This is only the *display* zone. Each member's availability is still read in their own zone
+    (`overlaps`), because "I am free Tuesday evening" means their Tuesday evening.
+    """
+    from app.core.config import get_settings
+
+    return get_settings().market_timezone
+
+
 def iso(dt: datetime | None) -> str | None:
     return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z") if dt else None
 

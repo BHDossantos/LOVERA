@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Pressable, Text, View } from "react-native";
 import { ApiError, get } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
+import { planTimeLine } from "@/lib/format";
 import { serverDriven, useAwaitingServer } from "@/lib/query";
 import type { ConversationSummary } from "@/api/types";
 import { AwaitingServer, Badge, Card, Empty, ErrorState, PageTitle, Screen } from "@/components/ui";
@@ -68,7 +69,7 @@ export default function MessagesScreen() {
             {!!c.date && (
               <Text style={s.date}>
                 Date {c.date.status}
-                {c.date.starts_at ? ` · ${new Date(c.date.starts_at).toLocaleString()}` : ""}
+                {c.date.starts_at ? ` · ${planTimeLine(c.date.starts_at, c.date.timezone)}` : ""}
               </Text>
             )}
             {!!c.public_reason && <Text style={s.ended}>{c.public_reason}</Text>}

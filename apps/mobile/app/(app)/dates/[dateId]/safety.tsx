@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Linking, Text } from "react-native";
 import { ApiError, get, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
+import { planTimeLine } from "@/lib/format";
 import { serverDriven, useAwaitingServer } from "@/lib/query";
 import { telUri } from "@/components/safety";
 import type { DatePlan } from "@/api/types";
@@ -95,7 +96,7 @@ export default function DateCheckIn() {
         <Card>
           <Text style={s.h2}>Active</Text>
           <Text style={s.meta}>
-            {new Date(existing.check_at).toLocaleString()} · shared as {existing.share_scope}
+            {planTimeLine(existing.check_at, d?.timezone)} · shared as {existing.share_scope}
             {existing.trusted_contact_name ? ` with ${existing.trusted_contact_name}` : ""}
           </Text>
           <Text style={s.meta}>State: {existing.state}</Text>

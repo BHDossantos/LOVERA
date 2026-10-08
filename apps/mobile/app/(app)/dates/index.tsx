@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Pressable, Text, View } from "react-native";
 import { ApiError, get } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
+import { planTimeLine } from "@/lib/format";
 import type { DatePlan } from "@/api/types";
 import { Badge, Card, Empty, ErrorState, Loading, PageTitle, Screen } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
@@ -51,7 +52,7 @@ export default function DatesScreen() {
                 {d.venue.name} · {d.venue.coarse_area}
               </Text>
             )}
-            {!!d.starts_at && <Text style={s.meta}>{new Date(d.starts_at).toLocaleString()}</Text>}
+            {!!d.starts_at && <Text style={s.meta}>{planTimeLine(d.starts_at, d.timezone)}</Text>}
             {d.awaiting_your_confirmation && <Text style={s.action}>Waiting on your confirmation</Text>}
             {!!d.check_in && <Text style={s.checkin}>Check-in set · {d.check_in.share_scope}</Text>}
             {d.feedback_open && !d.feedback_submitted && <Text style={s.action}>Private feedback is open</Text>}

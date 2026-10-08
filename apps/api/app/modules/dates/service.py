@@ -14,7 +14,7 @@ from app.core.audit import audit
 from app.core.config import get_settings
 from app.core.errors import ApiError
 from app.core.events import publish
-from app.core.timeutil import iso, utcnow
+from app.core.timeutil import iso, market_timezone, utcnow
 from app.core.windows import MINIMUM_SLOT_MINUTES, WEEKDAYS, day_intervals, intersect, local_dates_covering, merge
 from app.models.account import Member
 from app.models.availability import AvailabilityVersion
@@ -63,8 +63,9 @@ def _available_parts(start: datetime, end: datetime, away: set[str | None], zone
 
 
 def _timezone_of(db: Session, member_id: str) -> str:
+    """The zone *this member's* stated availability is in — not the zone a date is shown in."""
     member = db.get(Member, member_id)
-    return (member.timezone if member else None) or get_settings().market_timezone
+    return (member.timezone if member else None) or market_timezone()
 
 
 def overlaps(db: Session, a_id: str, b_id: str, tz: str, horizon_days: int = 14) -> list[dict[str, Any]]:
@@ -157,7 +158,7 @@ def create_plan(db: Session, conv_id: str, member: Member) -> DatePlan:
     existing = db.execute(select(DatePlan).where(DatePlan.conversation_id == conv.id, DatePlan.status.in_(("draft", "proposed", "countered", "confirmed")))).scalars().first()
     if existing:
         return existing
-    plan = DatePlan(conversation_id=conv.id, member_a_id=conv.member_a_id, member_b_id=conv.member_b_id, status="draft", timezone=member.timezone, history=[{"by": member.id, "action": "created", "at": iso(utcnow())}])
+    plan = DatePlan(conversation_id=conv.id, member_a_id=conv.member_a_id, member_b_id=conv.member_b_id, status="draft", timezone=market_timezone(), history=[{"by": member.id, "action": "created", "at": iso(utcnow())}])
     db.add(plan)
     db.flush()
     return plan
@@ -411,7 +412,7 @@ def list_for(db: Session, viewer: Member) -> list[dict[str, Any]]:
 
 
 def suggest_for_draft(db: Session, conv: Conversation, member: Member) -> tuple[str | None, str | None]:
-    ov = overlaps(db, conv.member_a_id, conv.member_b_id, member.timezone)
+    ov = overlaps(db, conv.member_a_id, conv.member_b_id, market_timezone())
     plan = create_plan(db, conv.id, member)
     venues = venue_shortlist(db, plan, member, "coffee") or venue_shortlist(db, plan, member)
     venue = venues[0]["name"] if venues else None

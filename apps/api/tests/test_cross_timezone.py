@@ -327,3 +327,43 @@ def test_the_planner_offers_only_slots_inside_both_members_own_evenings(client):
                 w["start"] <= local_start.strftime("%H:%M") and local_end.strftime("%H:%M") <= w["end"]
                 for w in candidates
             ), f"{offer['starts_at']} falls outside every window {who} stated ({local_start:%A %H:%M}-{local_end:%H:%M})"
+
+def test_the_plan_is_written_in_the_venues_zone_not_the_planners(client):
+    """`DatePlan.timezone` is the zone the agreed time is *shown* in, and a date happens at a venue.
+
+    It was `member.timezone` copied from whoever opened the planner first. Both apps offer a setting
+    that changes that value, and the settings screen exists precisely so somebody who has moved can
+    change it — so a member now living in London could propose a Rome venue and have the confirmation
+    screen, the detail screen and the proposal notification all read a London clock face for it, for
+    both of them. An hour wrong in the direction that makes you late.
+
+    Every venue belongs to a market and a market has one zone, so that is the zone, and it no longer
+    depends on which of the two of them tapped first.
+    """
+    a, b, conv_id = _mutual_conversation(client)
+    assert a.patch("/me", json={"timezone": "Europe/London"}).status_code == 200
+
+    plan_id = a.post("/date-plans", json={"conversation_id": conv_id}).json()["id"]
+    for who, name in ((a, "the planner, now in London"), (b, "the other member")):
+        assert who.get(f"/date-plans/{plan_id}").json()["timezone"] == "Europe/Rome", name
+
+    # The consequence, through the endpoint. A moves back so that both members' windows are a Rome
+    # evening and the arithmetic is out of the way — what is left is purely which zone the result is
+    # *written* in. The plan keeps the zone it was created with, so under the old rule these labels
+    # read 17:00–21:00: an evening neither of them ever offered.
+    #
+    # (`PUT /availability`'s own `timezone` does not move `member.timezone` — it records the zone the
+    # version was saved with and stays an audit column — so this has to be the account setting.)
+    assert a.patch("/me", json={"timezone": "Europe/Rome"}).status_code == 200
+    for who in (a, b):
+        r = who.put("/availability", json={"recurring_windows": EVENING, "date_styles": ["drinks"], "timezone": "Europe/Rome"})
+        assert r.status_code in (200, 201), r.text
+
+    labels = {}
+    for who, key in ((a, "a"), (b, "b")):
+        offers = who.get(f"/date-plans/{plan_id}/overlaps").json()["items"]
+        assert offers, "a shared Friday evening is the whole setup"
+        labels[key] = [(o["date"], o["start"], o["end"]) for o in offers]
+        assert all(o["start"] == "18:00" and o["end"] == "22:00" for o in offers), offers
+
+    assert labels["a"] == labels["b"], "both members read the same clock face for the same date"

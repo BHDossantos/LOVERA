@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { get } from "@/lib/api";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, planTimeLine } from "@/lib/format";
 import { Card, cx } from "@/components/ui";
 import type { DatePlan, Venue } from "@/lib/types";
 
@@ -84,7 +84,7 @@ export function PlanHistory({ plan, meId }: { plan: DatePlan; meId: string | nul
               {changed}
             </span>
             <time dateTime={h.at} className="shrink-0 text-ink-tertiary">
-              {formatDateTime(h.at, plan.timezone)}
+              {formatDateTime(h.at)}
             </time>
           </li>
         );
@@ -94,7 +94,7 @@ export function PlanHistory({ plan, meId }: { plan: DatePlan; meId: string | nul
 }
 
 export function DatePlanCard({ plan }: { plan: DatePlan }) {
-  const when = plan.starts_at ? formatDateTime(plan.starts_at, plan.timezone) : "Time not chosen yet";
+  const when = plan.starts_at ? planTimeLine(plan.starts_at, plan.timezone) : "Time not chosen yet";
   return (
     <Card as="li" className="p-0">
       <Link href={`/dates/${plan.id}`} className="block p-5">

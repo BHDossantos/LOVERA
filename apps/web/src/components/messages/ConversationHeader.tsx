@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
 import { ApiError, post } from "@/lib/api";
-import { formatDateTime } from "@/lib/format";
+import { planTimeLine } from "@/lib/format";
 import type { ConversationSummary } from "@/lib/types";
 import { Avatar, Button, ErrorState, Modal, VerificationBadge, cx } from "@/components/ui";
 import { CONVERSATION_STATUS_LABEL } from "./types";
@@ -14,7 +14,7 @@ export const DATE_STATUS_LABEL: Record<string, string> = { proposed: "Date propo
 export function dateContext(c: ConversationSummary) {
   if (!c.date) return null;
   const label = DATE_STATUS_LABEL[c.date.status] ?? c.date.status;
-  return c.date.starts_at ? `${label} · ${formatDateTime(c.date.starts_at)}` : label;
+  return c.date.starts_at ? `${label} · ${planTimeLine(c.date.starts_at, c.date.timezone)}` : label;
 }
 
 /** Verified header with the block/report route always within two taps. */

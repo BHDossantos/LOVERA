@@ -77,7 +77,7 @@ def get_plan(plan_id: str, principal: Principal = Depends(current_principal), db
 def get_overlaps(plan_id: str, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     plan = service.get_plan(db, plan_id, principal.id)
     ent = entitlements_for(db, principal.member)
-    windows = service.overlaps(db, plan.member_a_id, plan.member_b_id, plan.timezone)
+    windows = service.overlaps(db, plan.member_a_id, plan.member_b_id, plan.timezone)  # the plan's zone: the venue's, so both members read the same clock face
     return {"items": windows if ent["date_concierge"] else windows[:3], "concierge": ent["date_concierge"], "note": "Only overlapping coarse windows are shown. Nobody sees the other person's full availability."}
 
 

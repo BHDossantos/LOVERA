@@ -45,7 +45,10 @@ def date_status(db: Session, conv: Conversation) -> dict[str, Any] | None:
     plan = db.execute(select(DatePlan).where(DatePlan.conversation_id == conv.id, DatePlan.status.in_(("proposed", "countered", "confirmed", "completed"))).order_by(DatePlan.created_at.desc())).scalars().first()
     if plan is None:
         return None
-    return {"date_plan_id": plan.id, "status": plan.status, "starts_at": iso(plan.starts_at)}
+    # `timezone` is the venue's, and it is here because both apps show this date on the conversation
+    # screen and in the Messages list. Without it those two places could only render it on the
+    # reader's own clock -- a different time from the one the date detail screen has them agree to.
+    return {"date_plan_id": plan.id, "status": plan.status, "starts_at": iso(plan.starts_at), "timezone": plan.timezone}
 
 
 def summary(db: Session, conv: Conversation, viewer: Member) -> dict[str, Any]:

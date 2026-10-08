@@ -103,7 +103,8 @@ export type ConversationSummary = {
   other: ProfileSnapshot;
   last_message: { text: string; sent_at: string; mine: boolean } | null;
   unread: number;
-  date: { date_plan_id: string; status: string; starts_at: string | null } | null;
+  /** `timezone` is the venue's, so this list and the thread show the same clock face as the date screen. */
+  date: { date_plan_id: string; status: string; starts_at: string | null; timezone: string } | null;
   opened_at: string;
   safety_hold: boolean;
   /**

@@ -7,7 +7,7 @@ import { ApiError, post } from "@/lib/api";
 import { useRequireMember } from "@/lib/auth";
 import { AppShell } from "@/components/shell/AppShell";
 import { Button, Card, ErrorState, KeyValue, LinkButton, Modal, PageTitle, Select, Skeleton, StatusBanner } from "@/components/ui";
-import { formatDateTime } from "@/lib/format";
+import { formatPlanTime, planTimeLine } from "@/lib/format";
 import { CANCEL_REASONS, CalendarDownload, PlanHistory, StatusChip, shortWhen, useDatePlan } from "@/components/dates/shared";
 import type { DatePlan } from "@/lib/types";
 
@@ -49,15 +49,19 @@ export default function DateDetailPage({ params }: { params: Promise<{ dateId: s
 
   const p = plan.data;
   const open = p && ["draft", "proposed", "countered", "confirmed"].includes(p.status);
+  // Null whenever the reader is already in the venue's zone, which is the ordinary case.
+  const yourTime = p?.starts_at ? formatPlanTime(p.starts_at, p.timezone).alsoYours : null;
   return (
     <AppShell>
       {plan.isLoading && <Skeleton lines={6} label="Loading the date" />}
       {plan.error && <ErrorState error={plan.error as ApiError} retry={() => plan.refetch()} />}
       {p && (
         <>
-          <PageTitle eyebrow={`Date with ${p.other_display_name}`} title={p.starts_at ? formatDateTime(p.starts_at, p.timezone) : "Time not chosen yet"} lede={p.venue ? `${p.venue.name} · ${p.venue.coarse_area} · public place` : "No venue chosen yet."} />
-          <div className="mb-4">
+          <PageTitle eyebrow={`Date with ${p.other_display_name}`} title={p.starts_at ? formatPlanTime(p.starts_at, p.timezone).at : "Time not chosen yet"} lede={p.venue ? `${p.venue.name} · ${p.venue.coarse_area} · public place` : "No venue chosen yet."} />
+          <div className="mb-4 flex flex-wrap items-center gap-3">
             <StatusChip plan={p} />
+            {/* The venue's clock is what they turn up by; this is what their alarm needs to be set to. */}
+            {yourTime && <span className="text-sm text-ink-secondary">That is {yourTime}.</span>}
           </div>
           <ErrorState error={error} retry={error?.code === "VERSION_MISMATCH" ? () => plan.refetch() : undefined} />
 
@@ -91,12 +95,12 @@ export default function DateDetailPage({ params }: { params: Promise<{ dateId: s
             <h2 className="mb-2 font-bold">Details</h2>
             <KeyValue
               items={[
-                { k: "When", v: p.starts_at ? `${formatDateTime(p.starts_at, p.timezone)}${p.ends_at ? ` – ${shortWhen(p.ends_at, p.timezone).replace(/^\S+\s/, "")}` : ""}` : "—" },
+                { k: "When", v: p.starts_at ? `${formatPlanTime(p.starts_at, p.timezone).at}${p.ends_at ? ` – ${shortWhen(p.ends_at, p.timezone).replace(/^\S+\s/, "")}` : ""}` : "—" },
                 { k: "Where", v: p.venue ? `${p.venue.name}, ${p.venue.coarse_area}` : "—" },
                 { k: "Style", v: p.date_style ? p.date_style.replace(/_/g, " ") : "—" },
                 { k: "Price", v: p.venue?.price_band ?? "—" },
                 { k: "Accessibility", v: p.venue ? Object.entries(p.venue.accessibility).filter(([, v]) => v).map(([k]) => k.replace(/_/g, " ")).join(", ") || "none listed" : "—" },
-                { k: "Time zone", v: p.timezone },
+                { k: "Times shown in", v: `${p.timezone} — the venue's, not either of yours` },
               ]}
             />
             {p.venue && <p className="mt-2 text-xs text-ink-tertiary">Directions: search the venue name in your maps app. We share the area, never an exact address or coordinates.</p>}
@@ -119,7 +123,7 @@ export default function DateDetailPage({ params }: { params: Promise<{ dateId: s
             </ul>
             {p.check_in ? (
               <p className="mb-3 text-sm text-ink">
-                Check-in with <strong>{p.check_in.trusted_contact_name}</strong> at {formatDateTime(p.check_in.check_at, p.timezone)} · state: {p.check_in.state.replace(/_/g, " ")}
+                Check-in with <strong>{p.check_in.trusted_contact_name}</strong> at {planTimeLine(p.check_in.check_at, p.timezone)} · state: {p.check_in.state.replace(/_/g, " ")}
               </p>
             ) : (
               <p className="mb-3 text-sm text-ink-secondary">No trusted contact set up yet. Optional, free, and never tracked silently.</p>
