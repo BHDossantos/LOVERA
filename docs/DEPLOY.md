@@ -211,14 +211,69 @@ so members see "try again in a moment" instead of watching an empty inbox.
 
 ## 5. Point the mobile app at it
 
-Replace the placeholders in `apps/mobile/eas.json`:
+`apps/mobile/eas.json` carries no `env` blocks — they were removed when the release config
+was standardised — so the origin has to be supplied, either by putting the block back:
 
 ```json
-"production": { "env": { "EXPO_PUBLIC_API_ORIGIN": "https://matchmaker-api.fly.dev" } }
+"production": {
+  "autoIncrement": true,
+  "env": {
+    "EXPO_PUBLIC_API_ORIGIN": "https://matchmaker-api.fly.dev",
+    "EXPO_PUBLIC_EAS_PROJECT_ID": "<the id from `npx eas-cli init`>"
+  }
+}
 ```
 
-Then rebuild. Until this is done, a store build installs and fails every
-request, which is an immediate App Review rejection.
+or by setting the same two as EAS environment variables for the profile (`npx eas-cli env
+--help`), which keeps them out of the repository.
+
+**Then rebuild.** Expo inlines the origin into the bundle at build time and `expo-updates`
+is not installed, so an existing build cannot be repointed at a different API by any means
+short of a new build. A build made before the API existed will keep failing every request
+no matter what you deploy afterwards.
+
+Both values are required for a `preview` or `production` build and `app.config.ts` refuses
+the build without them, with the reason. The `development` profile is exempt from both
+checks, which is worth knowing: a development build with no origin set silently falls back
+to `http://127.0.0.1:8000`, and on a phone that is the phone. The app recovers from that on
+its own now — `resolveOrigin` in `src/api/client.ts` rewrites a loopback origin to whatever
+host served the bundle — but only for a build that loads JS from a dev server.
+
+## 5b. Staging: a real API for a signed build, before an identity vendor exists
+
+A `production` deploy dead-ends every signup, including yours. `/verification/sandbox/complete`
+is refused when `MM_ENV` is production, and nothing else can verify a member until an identity
+vendor is wired up, so onboarding stops at the verification step. Deploy as **staging** instead
+and the only simulated thing is the ID check:
+
+```bash
+fly apps create matchmaker-api-staging
+# Postgres as in section 1, then the secrets from section 2 against the staging app, plus:
+fly secrets set --app matchmaker-api-staging \
+  MM_SMTP_HOST='smtp.yourprovider.com' \
+  MM_SMTP_USERNAME='...' MM_SMTP_PASSWORD='...' \
+  MM_MAIL_FROM='AI Matchmaker <no-reply@yourdomain>'
+
+fly deploy --config infra/fly/api-staging.toml --app matchmaker-api-staging
+```
+
+`infra/fly/api-staging.toml` sets `MM_ENV=staging` and `MM_EXPOSE_DEV_OTP=false`. That second
+one is the setting that makes a publicly reachable staging deploy safe to point a build at: the
+sign-in code is never returned in a response, so knowing somebody's address is not enough to
+sign in as them. It also means **real mail is required** — the API refuses to boot without a mail
+host rather than running healthy while nobody can get in (`check_mail_transport` in
+`apps/api/app/main.py` covers staging for exactly this reason).
+
+Verify the same way as section 4, and check the two things that distinguish this posture:
+
+```bash
+curl -sS https://matchmaker-api-staging.fly.dev/healthz        # {"ok":true,"env":"staging"}
+# dev_code MUST be null here too.
+curl -sS -X POST https://matchmaker-api-staging.fly.dev/v1/auth/start \
+  -H 'content-type: application/json' -d '{"email":"you@yourdomain"}'
+```
+
+Then point a build at it exactly as in section 5, with the staging hostname, and rebuild.
 
 ## 6. A custom domain, when you have one
 
