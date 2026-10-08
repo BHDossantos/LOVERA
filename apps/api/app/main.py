@@ -45,27 +45,38 @@ def create_schema() -> None:
 
 
 def check_mail_transport() -> None:
-    """Refuse to start a production API that cannot send a sign-in code.
+    """Refuse to start an API that gives a member no way to receive a sign-in code.
 
-    Sign-in is a one-time code sent by email, and outside production the API also
-    returns that code in the response body. So a production deploy with no mail host
-    looks perfectly healthy — every endpoint answers, every check is green — while
-    every single member who asks to sign in waits for a mail that will never arrive.
-    That is a failure worth refusing to boot over, because the alternative is finding
-    it from the first member who cannot get in.
+    Sign-in is a one-time code sent by email, and some deployments also return that code
+    in the response body. A deploy where *neither* is true looks perfectly healthy — every
+    endpoint answers, every check is green — while every single member who asks to sign in
+    waits for a mail that will never arrive. That is worth refusing to boot over, because
+    the alternative is finding it from the first member who cannot get in.
 
-    An operator who really wants to run without mail can say so with
-    MM_MAIL_TRANSPORT=console, which boots and complains instead.
+    The condition is "no member could get the code", not "this is production". It used to be
+    the latter, on the reasoning that outside production the code comes back in the response
+    — which stops being true the moment `MM_EXPOSE_DEV_OTP` is turned off, and turning it off
+    is exactly what a reachable staging deploy has to do, since a public API that hands the
+    code to whoever asks lets anyone sign in as anyone. So staging fell through the gap this
+    guard exists to close: no mail, no code in the response, and a clean boot.
+
+    An operator who really wants to run without mail can say so with MM_MAIL_TRANSPORT=console,
+    which boots and complains instead.
     """
     settings = get_settings()
-    if settings.is_production and settings.resolved_mail_transport == "console":
+    # The two ways a code can reach somebody. Either is enough; neither is a dead end.
+    mailed = settings.resolved_mail_transport != "console"
+    in_response = settings.expose_dev_otp and not settings.is_production
+    if not mailed and not in_response:
+        where = "in production" if settings.is_production else f'with MM_EXPOSE_DEV_OTP off in "{settings.env}"'
         if settings.mail_transport == "auto":
             raise RuntimeError(
-                "No mail host is configured, so no member could receive a sign-in code. "
-                "Set MM_SMTP_HOST (plus MM_SMTP_USERNAME, MM_SMTP_PASSWORD and MM_MAIL_FROM), "
-                "or set MM_MAIL_TRANSPORT=console to start without mail on purpose."
+                "No mail host is configured and the sign-in code is not returned in the response "
+                f"({where}), so no member could receive one. Set MM_SMTP_HOST (plus "
+                "MM_SMTP_USERNAME, MM_SMTP_PASSWORD and MM_MAIL_FROM), or set "
+                "MM_MAIL_TRANSPORT=console to start without mail on purpose."
             )
-        log.critical("MM_MAIL_TRANSPORT=console in production: sign-in codes are written to this log and delivered to nobody.")
+        log.critical("MM_MAIL_TRANSPORT=console %s: sign-in codes are written to this log and delivered to nobody.", where)
     log.info("mail: %s", get_sender().preflight())
 
 
