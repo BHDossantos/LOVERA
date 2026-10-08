@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { ApiError, clearSession, get, hasStoredSession, onAuthChange, post, refreshSession, setTokens } from "./api";
+import { ApiError, clearSession, deviceId, get, hasStoredSession, onAuthChange, post, refreshSession, setTokens } from "./api";
 import type { Me } from "./types";
 
 type AuthState = {
@@ -89,19 +89,6 @@ export function useAuth() {
   const ctx = useContext(Ctx);
   if (!ctx) throw new Error("useAuth outside AuthProvider");
   return ctx;
-}
-
-function deviceId() {
-  try {
-    let id = window.localStorage.getItem("mm.device");
-    if (!id) {
-      id = crypto.randomUUID();
-      window.localStorage.setItem("mm.device", id);
-    }
-    return id;
-  } catch {
-    return "web";
-  }
 }
 
 export const ONBOARDING_PATHS: Record<string, string> = {

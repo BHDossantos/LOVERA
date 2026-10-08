@@ -25,6 +25,7 @@ jest.mock("@/api/client", () => ({
   onAuthChange: jest.fn(() => () => {}),
   refreshSession: jest.fn().mockResolvedValue(false),
   newIdempotencyKey: () => "idem_test",
+  deviceId: jest.fn().mockResolvedValue("dev_1"),
   ApiError: class extends Error {},
 }));
 jest.mock("@/lib/push", () => ({ registerForPush: jest.fn(), unregisterPush: jest.fn().mockResolvedValue(undefined) }));

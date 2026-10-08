@@ -141,7 +141,10 @@ export async function refreshSession(): Promise<boolean> {
       const res = await fetch(`${baseUrl()}/auth/refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refresh_token: refresh }),
+        // The device id goes with it so the server can tell this retry from a replay of a token that
+        // leaked: a refresh interrupted by a cold start is retried with a token the server has already
+        // seen, and without something tying the request to this handset the two look identical.
+        body: JSON.stringify({ refresh_token: refresh, device_id: await deviceId() }),
       });
       if (!res.ok) {
         await clearSession();
@@ -158,6 +161,29 @@ export async function refreshSession(): Promise<boolean> {
     }
   })();
   return refreshing;
+}
+
+const DEVICE_KEY = "mm.device";
+
+/**
+ * A stable id for this installation, kept in the keychain.
+ *
+ * It lives here rather than beside the sign-in screen because the transport needs it too: a refresh
+ * sends it so the server can tell a retry of an interrupted refresh from a replay of a token that
+ * leaked. It is not a secret and is not meant to be one — the point is only that it is not carried
+ * *in* the token, so a token that escapes on its own does not bring it along.
+ */
+export async function deviceId() {
+  try {
+    let id = await SecureStore.getItemAsync(DEVICE_KEY);
+    if (!id) {
+      id = newIdempotencyKey();
+      await SecureStore.setItemAsync(DEVICE_KEY, id);
+    }
+    return id;
+  } catch {
+    return "mobile";
+  }
 }
 
 export function newIdempotencyKey() {

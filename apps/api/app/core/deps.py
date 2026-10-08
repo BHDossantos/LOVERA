@@ -12,6 +12,7 @@ from app.core.errors import ApiError
 from app.core.security import decode_access_token
 from app.core.timeutil import utcnow
 from app.models.account import Member
+from app.core.sessions import mark_session_used, session_is_live
 from app.models.account import Session as MemberSession
 
 
@@ -49,13 +50,19 @@ def current_principal(
     if not payload:
         raise ApiError("AUTH_REQUIRED", "Sign in to continue.")
     session = db.get(MemberSession, payload["sid"])
-    if session is None or session.revoked_at is not None or session.expires_at <= utcnow():
+    # `session_is_live` rather than a bare revoked/expired check, because a session that has just been
+    # rotated away from stays usable for a moment — long enough for requests already in flight with the
+    # previous access token, and long enough for an interrupted refresh to be retried.
+    if session is None or not session_is_live(db, session):
         raise ApiError("AUTH_REQUIRED", "Your session has ended. Sign in again.")
     member = db.get(Member, payload["sub"])
     if member is None or member.status == "deleted":
         raise ApiError("AUTH_REQUIRED", "Sign in to continue.")
     member.last_active_at = utcnow()
     session.last_seen_at = utcnow()
+    # Using this session's own token is the client proving it stored what the last rotation handed it,
+    # which is what closes the overlap window on the token it replaced.
+    mark_session_used(db, session)
     return Principal(member=member, session_id=session.id, roles=list(member.roles or ["member"]), request_id=getattr(request.state, "request_id", ""))
 
 

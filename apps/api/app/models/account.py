@@ -75,6 +75,44 @@ class Session(Base):
     created_at: Mapped[datetime] = created_at_column()
 
 
+class SessionLineage(Base):
+    """Which session a session was rotated from, and whether its own token has been used yet.
+
+    Refresh rotation is single-use, and the cost of that is a member being signed out for no reason:
+    the server retires the presented token before the client can store its replacement, so a page
+    reload or an app cold start inside that one round trip leaves the client holding a dead token.
+    Softening it by answering a replayed token from its replacement was tried and reverted, because
+    it hands whoever holds a copy the live session.
+
+    What this table buys instead is the ability to defer the retirement. A rotated-from session is
+    *superseded*, not revoked: it keeps working until its successor's own token is used for the first
+    time, or until a short grace period runs out, whichever comes first. The legitimate client's retry
+    therefore succeeds, because the token it is retrying with was never invalidated, and nothing is
+    handed over to a second holder — the retry mints a fresh successor rather than re-serving one.
+
+    `chain_id` is what makes replay detection worth having: once a token that has genuinely been
+    retired comes back, every session descended from the same sign-in is revoked at once, which is the
+    OAuth 2.0 Security BCP answer (§4.13.2) and the only honest response to "two parties hold this".
+
+    It is a side table rather than columns on `sessions` because the schema is created with
+    `Base.metadata.create_all` under an advisory lock — it creates missing tables and never alters an
+    existing one — so every schema change here has to be a new table.
+    """
+
+    __tablename__ = "session_lineage"
+
+    session_id: Mapped[str] = mapped_column(ForeignKey("sessions.id", ondelete="CASCADE"), primary_key=True)
+    # The id of the session the chain started at, which is the sign-in. A chain's first row points at itself.
+    chain_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    parent_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # Set when this session is rotated away from. Until its successor is used, it still works.
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    successor_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # Set the first time *this* session's own token is presented, which is what retires its parent.
+    first_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = created_at_column()
+
+
 class AuthChallenge(Base):
     __tablename__ = "auth_challenges"
 

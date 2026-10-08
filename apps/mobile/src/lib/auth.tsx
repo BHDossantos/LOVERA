@@ -1,14 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
-import * as SecureStore from "expo-secure-store";
 import { registerForPush, unregisterPush } from "@/lib/push";
 import {
   ApiError,
   clearSession,
+  deviceId,
   get,
   hasStoredSession,
-  newIdempotencyKey,
   onAuthChange,
   post,
   refreshSession,
@@ -27,21 +26,6 @@ type AuthState = {
 };
 
 const Ctx = createContext<AuthState | null>(null);
-const DEVICE_KEY = "mm.device";
-
-export async function deviceId() {
-  try {
-    let id = await SecureStore.getItemAsync(DEVICE_KEY);
-    if (!id) {
-      id = newIdempotencyKey();
-      await SecureStore.setItemAsync(DEVICE_KEY, id);
-    }
-    return id;
-  } catch {
-    return "mobile";
-  }
-}
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Reachable because QueryClientProvider wraps this provider in app/_layout.tsx.
   const qc = useQueryClient();

@@ -35,6 +35,9 @@ class TokenOut(BaseModel):
 
 class RefreshIn(BaseModel):
     refresh_token: str
+    # Optional so a client that predates this still refreshes. It is what separates a retry of an
+    # interrupted refresh from a replay of a token that leaked: see `rotate_session`.
+    device_id: str | None = None
 
 
 class ConsentIn(BaseModel):

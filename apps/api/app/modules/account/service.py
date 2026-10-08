@@ -15,9 +15,11 @@ from app.core.errors import ApiError
 from app.core.mail import MailError
 from app.core.mail import send as send_mail
 from app.core.security import create_access_token, hash_secret, new_opaque_token, new_otp
+from app.core.sessions import lineage_of, revoke_chain, session_is_live
 from app.core.timeutil import iso, utcnow
 from app.models.account import AuthChallenge, ConsentRecord, Member
 from app.models.account import Session as MemberSession
+from app.models.account import SessionLineage
 from app.models.availability import AvailabilityVersion
 from app.models.blueprint import BlueprintVersion
 from app.models.profile import Profile
@@ -126,7 +128,7 @@ def verify_challenge(db: Session, challenge_id: str, code: str, device_id: str |
     return member, session, access, refresh
 
 
-def create_session(db: Session, member: Member, device_id: str | None) -> tuple[MemberSession, str]:
+def create_session(db: Session, member: Member, device_id: str | None, parent: MemberSession | None = None) -> tuple[MemberSession, str]:
     settings = get_settings()
     refresh = new_opaque_token()
     session = MemberSession(
@@ -138,27 +140,120 @@ def create_session(db: Session, member: Member, device_id: str | None) -> tuple[
     )
     db.add(session)
     db.flush()
+    # A sign-in starts its own chain; a rotation continues the one it came from, which is what makes
+    # a replayed token revocable across every session descended from the same sign-in.
+    chain = lineage_of(db, parent).chain_id if parent is not None else session.id
+    db.add(SessionLineage(session_id=session.id, chain_id=chain, parent_id=parent.id if parent else None))
+    db.flush()
     return session, refresh
 
 
-def rotate_session(db: Session, refresh_token: str) -> tuple[Member, MemberSession, str, str]:
+def rotate_session(db: Session, refresh_token: str, device_id: str | None = None) -> tuple[Member, MemberSession, str, str]:
+    """Exchange a refresh token for the next one, and treat a genuinely spent token as a theft.
+
+    Rotation used to retire the presented token immediately, which is the textbook single-use rule
+    and cost members their session for no reason: the server commits before the client can store the
+    reply, so a page reload or an app cold start inside that round trip left the client holding a dead
+    token. Handing a replayed token its replacement was tried and reverted — it gives whoever holds a
+    copy the live session.
+
+    So the presented token is *superseded* rather than revoked, and stays usable for the moment it
+    takes the client to store what came back (see `session_is_live`). A retry inside that moment gets a
+    fresh replacement, not a second copy of the same one. Past it, or once the replacement has been
+    used, the token is retired for good — and a retired token coming back means two parties have held
+    it, so every session descended from that sign-in is revoked at once. That is the OAuth 2.0 Security
+    BCP answer (§4.13.2), and the member re-authenticates with a one-time code.
+
+    That leaves one window the overlap opens up and the old rule did not have: between a rotation and
+    the client using its replacement, the superseded token still works, so a thief holding a copy could
+    spend it while the real client is the one that is absent. `device_id` closes it. The session
+    already carries the hash of the device it was issued to, both clients send it, and it is not
+    carried inside the token — so a token that leaks on its own (a log line, a crash dump, a backup)
+    does not bring it along. A refresh whose device does not match the session's is not a retry by
+    anybody, so it is treated as the replay it is. It is a sender constraint, not proof of possession,
+    and a thief who has the device id as well as the token still gets through; the claim is only that a
+    leaked token is no longer sufficient on its own.
+    """
     session = db.execute(select(MemberSession).where(MemberSession.refresh_token_hash == hash_secret(refresh_token))).scalar_one_or_none()
-    if session is None or session.revoked_at is not None or session.expires_at <= utcnow():
+    if session is None:
         raise ApiError("AUTH_REQUIRED", "Session expired. Sign in again.")
+
+    if not session_is_live(db, session):
+        # Retired, not merely unknown: this exact token was issued to somebody. If it is still inside
+        # its absolute lifetime then it was spent and has come back, which is the shape of a replay.
+        if session.expires_at > utcnow():
+            row = lineage_of(db, session)
+            revoked = revoke_chain(db, row.chain_id)
+            audit(
+                db,
+                actor_type="member",
+                actor_id=session.member_id,
+                action="auth.refresh_replayed",
+                resource_type="session",
+                resource_id=session.id,
+                metadata={"chain_id": row.chain_id, "sessions_revoked": revoked},
+            )
+            log.warning("refresh token replayed; revoked %s session(s) in chain %s", revoked, row.chain_id)
+            # The refusal is an exception, and `get_db` rolls the transaction back on one — so without
+            # committing here the revocation and its audit row are discarded and the "response" to a
+            # detected replay is nothing at all. Found by the test asserting the chain was down; the
+            # UPDATE had run and the log line printed, and the next request still succeeded.
+            db.commit()
+        raise ApiError("AUTH_REQUIRED", "Session expired. Sign in again.")
+
     member = db.get(Member, session.member_id)
     if member is None or member.status == "deleted":
         raise ApiError("AUTH_REQUIRED")
-    session.revoked_at = utcnow()
-    new_session, refresh = create_session(db, member, None)
+
+    row = lineage_of(db, session)
+    if row.successor_id:
+        # Still live but already rotated once, so the client never received that reply. Only the device
+        # the session was issued to may retry: anybody else presenting a token that has already been
+        # spent is replaying it, whatever the grace period says.
+        if session.device_id_hash and hash_secret(device_id or "") != session.device_id_hash:
+            revoked = revoke_chain(db, row.chain_id)
+            audit(
+                db,
+                actor_type="member",
+                actor_id=session.member_id,
+                action="auth.refresh_replayed",
+                resource_type="session",
+                resource_id=session.id,
+                metadata={"chain_id": row.chain_id, "sessions_revoked": revoked, "reason": "device_mismatch"},
+            )
+            log.warning("spent refresh token presented from another device; revoked %s session(s) in chain %s", revoked, row.chain_id)
+            # The refusal is an exception, and `get_db` rolls the transaction back on one — so without
+            # committing here the revocation and its audit row are discarded and the "response" to a
+            # detected replay is nothing at all. Found by the test asserting the chain was down; the
+            # UPDATE had run and the log line printed, and the next request still succeeded.
+            db.commit()
+            raise ApiError("AUTH_REQUIRED", "Session expired. Sign in again.")
+        # Retire the replacement nobody has rather than re-serving it: re-serving is what makes a
+        # replay indistinguishable from a retry, and it is the thing that cannot be allowed.
+        stale = db.get(MemberSession, row.successor_id)
+        if stale is not None and stale.revoked_at is None:
+            stale.revoked_at = utcnow()
+
+    new_session, refresh = create_session(db, member, None, parent=session)
+    # The chain keeps the device it was issued to, so the check above still has something to compare.
     new_session.device_id_hash = session.device_id_hash
+    row.superseded_at, row.successor_id = utcnow(), new_session.id
     access = create_access_token(member.id, new_session.id, list(member.roles or ["member"]))
     return member, new_session, access, refresh
 
 
 def revoke_session(db: Session, session_id: str) -> None:
+    """Sign out. This ends the sign-in, not just the current link in its chain.
+
+    Revoking only this session would leave the one it was rotated from alive for the rest of its grace
+    period, and that session's refresh token is one a client may still be holding — so "sign me out"
+    would not have signed them out.
+    """
     session = db.get(MemberSession, session_id)
-    if session and session.revoked_at is None:
-        session.revoked_at = utcnow()
+    if session is None:
+        return
+    row = db.get(SessionLineage, session.id)
+    revoke_chain(db, row.chain_id if row is not None else session.id)
 
 
 def record_consent(db: Session, member: Member, purpose: str, status: str, policy_version: str, source: str = "app") -> ConsentRecord:

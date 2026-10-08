@@ -67,6 +67,26 @@ export function clearSession() {
   setTokens(null, null);
 }
 
+/**
+ * A stable id for this browser, kept in localStorage.
+ *
+ * It lives beside the token storage rather than beside the sign-in screen because the refresh path
+ * needs it too. It is not a secret and is not meant to be one — the point is only that it is not
+ * carried *in* the token, so a token that escapes on its own does not bring it along.
+ */
+export function deviceId() {
+  try {
+    let id = window.localStorage.getItem("mm.device");
+    if (!id) {
+      id = crypto.randomUUID();
+      window.localStorage.setItem("mm.device", id);
+    }
+    return id;
+  } catch {
+    return "web";
+  }
+}
+
 export async function refreshSession(): Promise<boolean> {
   if (refreshing) return refreshing;
   refreshing = (async () => {
@@ -76,7 +96,10 @@ export async function refreshSession(): Promise<boolean> {
       const res = await fetch(`${BASE}/auth/refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refresh_token: refresh }),
+        // The device id goes with it so the server can tell this retry from a replay of a token that
+        // leaked: a refresh interrupted by a full page load is retried with a token the server has
+        // already seen, and without something tying the request to this browser the two look identical.
+        body: JSON.stringify({ refresh_token: refresh, device_id: deviceId() }),
       });
       if (!res.ok) {
         clearSession();
