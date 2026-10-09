@@ -16,8 +16,9 @@ import type { ExpoConfig, ConfigContext } from "expo/config";
  */
 const BUNDLE_ID = process.env.EXPO_PUBLIC_BUNDLE_ID ?? "com.aimatchmaker.app";
 
-const BRAND_BACKGROUND = "#faf7f1";
-const BRAND_TEAL = "#0f766e";
+const BRAND_BACKGROUND = "#fdf7f4";
+/** The action colour from the shared tokens. Keep in step with `src/theme.ts` and `globals.css`. */
+const BRAND_ROSE = "#b42d55";
 
 /**
  * Where the app sends every request. There is no sensible default for a real build:
@@ -143,7 +144,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   orientation: "portrait",
   userInterfaceStyle: "light",
   icon: "./assets/icon.png",
-  primaryColor: BRAND_TEAL,
+  primaryColor: BRAND_ROSE,
   extra: {
     apiOrigin: apiOrigin(),
     eas: { projectId: easProjectId() },
@@ -236,7 +237,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     [
       "expo-notifications",
       {
-        color: BRAND_TEAL,
+        color: BRAND_ROSE,
         defaultChannel: "introductions",
       },
     ],

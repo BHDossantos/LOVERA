@@ -6,7 +6,7 @@ import { useRequireMember } from "@/lib/auth";
 import { planTimeLine } from "@/lib/format";
 import { serverDriven, useAwaitingServer } from "@/lib/query";
 import type { ConversationSummary } from "@/api/types";
-import { AwaitingServer, Badge, Card, Empty, ErrorState, PageTitle, Screen } from "@/components/ui";
+import { Avatar, AwaitingServer, Badge, Card, Empty, ErrorState, PageTitle, Screen } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
 
 /** M01 Conversations: only people who both said yes. No inbox of strangers. */
@@ -55,17 +55,29 @@ export default function MessagesScreen() {
         <Pressable key={c.id} onPress={() => router.push(`/messages/${c.id}` as never)} accessibilityRole="button">
           <Card>
             <View style={s.row}>
-              <Text style={s.name}>{c.other.display_name}</Text>
+              {/* A conversation list with no faces in it is a list of strings. `other` is
+                  neutralised once a conversation closes — no name, no photo — and `Avatar` renders
+                  the initials of whatever name is left, so a closed row degrades rather than
+                  breaking. */}
+              <Avatar
+                url={c.other.media?.find((m) => m.type === "photo" && m.url)?.url ?? null}
+                name={c.other.display_name}
+                verified={c.other.verified}
+                size={52}
+              />
+              <View style={s.rowBody}>
+                <Text style={s.name}>{c.other.display_name}</Text>
+                {c.safety_hold && <Text style={s.hold}>Paused during a safety review</Text>}
+                {!!c.last_message && (
+                  <Text style={s.preview} numberOfLines={2}>
+                    {c.last_message.mine ? "You: " : ""}
+                    {c.last_message.text}
+                  </Text>
+                )}
+                {!c.last_message && <Text style={s.preview}>Say hello when you're ready.</Text>}
+              </View>
               {c.unread > 0 && <Badge label={`${c.unread} new`} tone="context" />}
             </View>
-            {c.safety_hold && <Text style={s.hold}>Paused during a safety review</Text>}
-            {!!c.last_message && (
-              <Text style={s.preview} numberOfLines={2}>
-                {c.last_message.mine ? "You: " : ""}
-                {c.last_message.text}
-              </Text>
-            )}
-            {!c.last_message && <Text style={s.preview}>Say hello when you're ready.</Text>}
             {!!c.date && (
               <Text style={s.date}>
                 Date {c.date.status}
@@ -81,8 +93,9 @@ export default function MessagesScreen() {
 }
 
 const s = {
-  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  name: { ...typo.heading, color: color.ink, flex: 1, paddingRight: space.sm },
+  row: { flexDirection: "row", alignItems: "center", gap: space.md },
+  rowBody: { flex: 1 },
+  name: { ...typo.heading, color: color.ink },
   preview: { ...typo.small, color: color.inkSecondary, marginTop: space.xs },
   date: { ...typo.caption, color: color.action, marginTop: space.sm },
   hold: { ...typo.caption, color: color.caution, marginTop: space.xs },

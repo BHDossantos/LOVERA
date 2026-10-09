@@ -29,7 +29,7 @@ export function IntroductionHeader({ intro, active, showExtend }: { intro: Intro
         ← All introductions
       </Link>
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <h1 className="text-2xl font-bold leading-tight text-ink sm:text-3xl">{name}</h1>
+        <h1 className="display text-3xl font-bold leading-tight text-ink sm:text-4xl">{name}</h1>
         {intro.profile && <VerificationBadge verified={intro.profile.verified} small />}
       </div>
       <p className="mt-1 text-sm text-ink-secondary">{INTRO_STATUS_LABEL[intro.status] ?? intro.status}</p>
@@ -38,7 +38,7 @@ export function IntroductionHeader({ intro, active, showExtend }: { intro: Intro
       {intro.profile && (
         <nav aria-label="Introduction sections" className="mt-4 flex gap-1 overflow-x-auto rounded-[var(--radius-lg)] border border-border bg-surface p-1">
           {SECTIONS.map((s) => (
-            <Link key={s.key} href={`/introductions/${intro.id}${s.path}`} aria-current={active === s.key ? "page" : undefined} className={cx("min-h-11 flex-1 whitespace-nowrap rounded-[var(--radius-md)] px-3 py-2 text-center text-sm font-semibold", active === s.key ? "bg-action-soft text-action" : "text-ink-secondary hover:bg-surface-muted")}>
+            <Link key={s.key} href={`/introductions/${intro.id}${s.path}`} aria-current={active === s.key ? "page" : undefined} className={cx("min-h-11 shrink-0 grow basis-0 whitespace-nowrap rounded-[var(--radius-md)] px-2.5 py-2 text-center text-sm font-semibold", active === s.key ? "bg-action-soft text-action" : "text-ink-secondary hover:bg-surface-muted")}>
               {s.label}
             </Link>
           ))}

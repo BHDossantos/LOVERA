@@ -1,6 +1,7 @@
-import { ReactNode } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Image,
   Pressable,
   Switch,
   ScrollView,
@@ -11,12 +12,13 @@ import {
   type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
+  type ImageStyle,
   type TextInputProps,
   type ViewStyle,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { color, radius, space, type as typo } from "@/theme";
-import { ApiError } from "@/api/client";
+import { color, radius, shadow, space, type as typo } from "@/theme";
+import { ApiError, mediaDataUrl } from "@/api/client";
 
 export function Screen({
   children,
@@ -45,6 +47,198 @@ export function Screen({
         inner
       )}
     </SafeAreaView>
+  );
+}
+
+/**
+ * The warm wash behind a hero, built out of stacked views.
+ *
+ * There is no gradient library here, and adding one would mean a native module, a new development
+ * build and another entry in the native-config guard — for a decoration. Three bands of the warm
+ * ramp, each taking a share of the height, read as a gradient at the sizes this is used at and
+ * cost nothing. Decorative, so it is hidden from assistive technology.
+ */
+export function Wash({ height, children, style }: { height: number; children?: ReactNode; style?: ViewStyle }) {
+  return (
+    <View style={[{ height, overflow: "hidden" }, style]}>
+      <View style={StyleSheet.absoluteFill} accessibilityElementsHidden importantForAccessibility="no">
+        <View style={{ flex: 3, backgroundColor: color.wash3 }} />
+        <View style={{ flex: 4, backgroundColor: color.wash2 }} />
+        <View style={{ flex: 5, backgroundColor: color.wash1 }} />
+      </View>
+      {children}
+    </View>
+  );
+}
+
+/**
+ * A member's photo.
+ *
+ * `GET /v1/media/{id}` is authorized per viewer and answers with a `data:` URL in a text body, so
+ * the path the API hands us cannot go straight into `<Image source>` — see `mediaDataUrl`. Until
+ * this existed, the one screen on the phone that rendered a photo rendered nothing.
+ *
+ * A photo that will not load leaves the warm placeholder rather than an error: a card with a blank
+ * square in it is still a usable card, and a banner about a failed image across a screen that is
+ * otherwise fine is worse than the missing photo.
+ */
+export function MediaImage({
+  url,
+  alt,
+  style,
+  radius: r = radius.lg,
+}: {
+  url: string | null | undefined;
+  alt: string;
+  /** `ImageStyle` rather than `ViewStyle`: the placeholder is a View, but the loaded photo is not. */
+  style?: ImageStyle;
+  radius?: number;
+}) {
+  const [uri, setUri] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    setUri(null);
+    setFailed(false);
+    if (!url) return;
+    void mediaDataUrl(url).then((d) => {
+      if (!alive) return;
+      if (d) setUri(d);
+      else setFailed(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [url]);
+  const box: ImageStyle = { backgroundColor: color.surfaceSunk, borderRadius: r, overflow: "hidden" };
+  if (!uri)
+    return (
+      <View
+        style={[box, style]}
+        accessibilityElementsHidden={!failed}
+        importantForAccessibility={failed ? "yes" : "no"}
+        accessibilityLabel={failed ? `${alt} — this photo could not be loaded` : undefined}
+      />
+    );
+  return <Image source={{ uri }} style={[box, style]} accessibilityLabel={alt} resizeMode="cover" />;
+}
+
+/**
+ * A round photo with initials behind it, for lists.
+ *
+ * The initials are not a decorative fallback — on a list of conversations they are what a member
+ * reads when a photo is still in flight, which on a cold open is every row at once.
+ */
+export function Avatar({
+  url,
+  name,
+  size = 56,
+  verified = false,
+}: {
+  url?: string | null;
+  name: string;
+  size?: number;
+  verified?: boolean;
+}) {
+  const initials = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? "")
+    .join("");
+  return (
+    <View style={{ width: size, height: size }}>
+      <View
+        style={{
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: color.wash2,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Text style={{ ...typo.heading, fontSize: size * 0.34, color: color.actionStrong }} accessibilityElementsHidden importantForAccessibility="no">
+          {initials}
+        </Text>
+      </View>
+      {!!url && (
+        <MediaImage
+          url={url}
+          alt={`Photo of ${name}`}
+          radius={size / 2}
+          style={{ position: "absolute", width: size, height: size, backgroundColor: "transparent" }}
+        />
+      )}
+      {verified && (
+        <View
+          style={{
+            position: "absolute",
+            right: -2,
+            bottom: -2,
+            width: 20,
+            height: 20,
+            borderRadius: 10,
+            backgroundColor: color.success,
+            borderWidth: 2,
+            borderColor: color.surface,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+          accessibilityLabel="Identity verified"
+        >
+          <Text style={{ color: color.inkInverse, fontSize: 11, fontWeight: "700", lineHeight: 13 }}>✓</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+/**
+ * A full-bleed warm hero, for the top of a screen that has to make a first impression.
+ *
+ * `Screen` pads its content, which is right everywhere except here: a wash that stops 16px short
+ * of the edge reads as a mistake. The negative margins undo exactly that padding, which is why
+ * this belongs beside `Screen` rather than in a screen file where the two numbers could drift.
+ *
+ * The title is the serif display face at hero size. That is the whole visual difference between
+ * "a product" and "a form with a heading above it", and it costs one font name.
+ */
+export function Hero({
+  eyebrow,
+  title,
+  lede,
+  height = 300,
+}: {
+  eyebrow?: string;
+  title: string;
+  lede?: string;
+  height?: number;
+}) {
+  return (
+    <Wash
+      height={height}
+      style={{ marginHorizontal: -space.lg, marginTop: -space.lg, marginBottom: space.xl, borderBottomLeftRadius: radius.xl, borderBottomRightRadius: radius.xl }}
+    >
+      {/* Two soft discs, so the wash has somewhere for the eye to rest. Decorative only. */}
+      <View
+        style={{ position: "absolute", top: -60, right: -50, width: 220, height: 220, borderRadius: 110, backgroundColor: "rgba(255,255,255,0.35)" }}
+        accessibilityElementsHidden
+        importantForAccessibility="no"
+      />
+      <View
+        style={{ position: "absolute", bottom: -70, left: -60, width: 200, height: 200, borderRadius: 100, backgroundColor: "rgba(255,255,255,0.25)" }}
+        accessibilityElementsHidden
+        importantForAccessibility="no"
+      />
+      <View style={{ flex: 1, justifyContent: "flex-end", padding: space.xl }}>
+        {!!eyebrow && <Text style={[s.eyebrow, { color: color.actionStrong }]}>{eyebrow.toUpperCase()}</Text>}
+        <Text style={{ ...typo.hero, color: color.ink }} accessibilityRole="header">
+          {title}
+        </Text>
+        {!!lede && <Text style={{ ...typo.body, color: color.inkSecondary, marginTop: space.sm }}>{lede}</Text>}
+      </View>
+    </Wash>
   );
 }
 
@@ -186,7 +380,10 @@ export function StatusBanner({ tone = "context", title, body }: { tone?: "contex
   const bg = tone === "caution" ? color.cautionSoft : tone === "success" ? color.successSoft : color.contextSoft;
   const fg = tone === "caution" ? color.caution : tone === "success" ? color.success : color.context;
   return (
-    <View style={[s.banner, { backgroundColor: bg, borderColor: fg }]} accessibilityRole="alert">
+    // The accent is the left edge; the rest is the ordinary hairline. All four sides in the tone
+    // colour framed every banner in a heavy box, which is a lot of shouting for a sentence that
+    // is usually just context.
+    <View style={[s.banner, { backgroundColor: bg, borderLeftColor: fg }]} accessibilityRole="alert">
       <Text style={[s.bannerTitle, { color: fg }]}>{title}</Text>
       {!!body && <Text style={s.bannerBody}>{body}</Text>}
     </View>
@@ -425,35 +622,40 @@ const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: color.canvas },
   scroll: { flexGrow: 1 },
   screenInner: { padding: space.lg, paddingBottom: space.xxl, flex: 1 },
-  eyebrow: { ...typo.caption, color: color.context, letterSpacing: 0.8, marginBottom: space.xs },
+  // Rose rather than the gold it was. The gold gave 2.9:1 on the canvas at 12px — a WCAG AA
+  // failure on the line above the title of every screen — and the brand colour is both legible
+  // and the thing a member should see first.
+  eyebrow: { ...typo.caption, color: color.action, marginBottom: space.sm },
   title: { ...typo.display, color: color.ink },
   lede: { ...typo.body, color: color.inkSecondary, marginTop: space.sm },
   card: {
     backgroundColor: color.surface,
-    borderRadius: radius.lg,
+    borderRadius: radius.xl,
     borderWidth: 1,
     borderColor: color.border,
     padding: space.lg,
     marginBottom: space.md,
+    ...shadow.raised,
   },
   btn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: space.sm,
-    borderRadius: radius.lg,
-    paddingVertical: 14,
+    borderRadius: radius.pill,
+    paddingVertical: 15,
     paddingHorizontal: space.xl,
     borderWidth: 1,
     borderColor: "transparent",
     marginBottom: space.sm,
   },
-  btnPrimary: { backgroundColor: color.action },
-  btnSecondary: { backgroundColor: color.surface, borderColor: color.border },
+  btnPrimary: { backgroundColor: color.action, ...shadow.raised, shadowColor: color.actionStrong, shadowOpacity: 0.3 },
+  btnSecondary: { backgroundColor: color.surface, borderColor: color.borderStrong },
   btnGhost: { backgroundColor: "transparent" },
   btnDanger: { backgroundColor: color.caution },
+  // 17px, not the 16px of body text. A button is the thing on the screen that is meant to be hit.
   btnOff: { opacity: 0.55 },
-  btnLabel: { ...typo.body, fontWeight: "700" },
+  btnLabel: { ...typo.body, fontSize: 17, fontWeight: "700" },
   choice: {
     flexDirection: "row",
     gap: space.md,
@@ -464,6 +666,7 @@ const s = StyleSheet.create({
     borderRadius: radius.lg,
     padding: space.lg,
     marginBottom: space.sm,
+    ...shadow.raised,
   },
   dot: {
     width: 20,
@@ -480,7 +683,7 @@ const s = StyleSheet.create({
   choiceBody: { ...typo.small, color: color.inkSecondary, marginTop: 2 },
   chip: {
     borderWidth: 1,
-    borderColor: color.border,
+    borderColor: color.borderStrong,
     backgroundColor: color.surface,
     borderRadius: 999,
     paddingVertical: 10,
@@ -497,15 +700,15 @@ const s = StyleSheet.create({
     color: color.ink,
     backgroundColor: color.surface,
     borderWidth: 1,
-    borderColor: color.border,
+    borderColor: color.borderStrong,
     borderRadius: radius.md,
-    paddingVertical: 12,
+    paddingVertical: 14,
     paddingHorizontal: space.md,
   },
-  banner: { borderWidth: 1, borderRadius: radius.md, padding: space.md, marginBottom: space.md },
+  banner: { borderWidth: 1, borderColor: color.border, borderLeftWidth: 4, borderRadius: radius.lg, padding: space.md, marginBottom: space.md },
   bannerTitle: { ...typo.small, fontWeight: "700" },
   bannerBody: { ...typo.small, color: color.inkSecondary, marginTop: 2 },
-  badge: { borderRadius: 999, paddingVertical: 4, paddingHorizontal: 10, alignSelf: "flex-start" },
+  badge: { borderRadius: radius.pill, paddingVertical: 5, paddingHorizontal: 11, alignSelf: "flex-start" },
   badgeLabel: { ...typo.caption },
   loading: { paddingVertical: space.xxl, alignItems: "center" },
   toggleRow: {
@@ -517,7 +720,7 @@ const s = StyleSheet.create({
   },
   toggleLabel: { ...typo.body, fontWeight: "600", color: color.ink },
   steps: { flexDirection: "row", gap: 6, marginBottom: space.lg },
-  stepDot: { flex: 1, height: 4, borderRadius: 2, backgroundColor: color.border },
+  stepDot: { flex: 1, height: 4, borderRadius: 2, backgroundColor: color.borderStrong },
   stepper: {
     flexDirection: "row",
     alignItems: "center",

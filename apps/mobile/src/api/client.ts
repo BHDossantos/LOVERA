@@ -236,6 +236,42 @@ export async function api<T = unknown>(path: string, opts: Options = {}): Promis
   return data as T;
 }
 
+/**
+ * A photo, as something `<Image>` can actually display.
+ *
+ * `GET /v1/media/{id}` is authorized per viewer — the owner, or somebody with a live introduction
+ * or conversation with them — so it needs the access token, and it answers with the image as a
+ * `data:` URL in a `text/plain` body rather than with image bytes.
+ *
+ * Neither of those survives being handed to `<Image source={{ uri }}>`, and the introduction screen
+ * was doing exactly that with the relative path the API returns. React Native has no document to
+ * resolve `/v1/media/...` against and sends no Authorization header, so **no photo has ever loaded
+ * on the phone**: the request never left the handset, and `<Image>` fails silently, so it looked
+ * like members simply had no photos. The web app has had its own fetch-then-render component for
+ * this since the beginning; this is its counterpart.
+ *
+ * Returns null rather than throwing. A photo that will not load is a degraded card, not an error
+ * banner across a screen that is otherwise fine.
+ */
+export async function mediaDataUrl(path: string, retry = true): Promise<string | null> {
+  const url = `${baseUrl()}${path.replace(/^\/v1/, "")}`;
+  try {
+    const res = await fetch(url, {
+      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+    });
+    if (res.status === 401 && retry) {
+      const ok = await refreshSession();
+      if (ok) return mediaDataUrl(path, false);
+      return null;
+    }
+    if (!res.ok) return null;
+    const body = (await res.text()).trim();
+    return body.startsWith("data:") ? body : null;
+  } catch {
+    return null;
+  }
+}
+
 export const get = <T,>(path: string) => api<T>(path);
 export const post = <T,>(path: string, body?: unknown, extra?: Omit<Options, "method" | "body">) =>
   api<T>(path, { method: "POST", body: body ?? {}, ...extra });

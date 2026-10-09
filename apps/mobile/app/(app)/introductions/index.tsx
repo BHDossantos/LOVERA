@@ -6,28 +6,42 @@ import { useRequireMember } from "@/lib/auth";
 import { serverDriven, useAwaitingServer } from "@/lib/query";
 import type { Introduction } from "@/api/types";
 import { INTRO_STATUS_LABEL, type IntroductionList } from "@/components/intro";
-import { AwaitingServer, Badge, Card, Empty, ErrorState, PageTitle, Screen } from "@/components/ui";
+import { Avatar, AwaitingServer, Badge, Card, Empty, ErrorState, PageTitle, Screen } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
 
+/**
+ * One introduction in the list, with a face on it.
+ *
+ * The detail screen deliberately puts the reasons *above* the photo, because that is where the
+ * decision is made and leading a decision with a face is how you get people deciding on the face.
+ * This is not that screen. Here the photo is identity — which of the three introductions am I
+ * looking at — and a list of names with no faces at all is what made this app read as a directory
+ * of strangers rather than as somewhere people are. The reason still rides along underneath.
+ */
 function IntroRow({ intro, onPress }: { intro: Introduction; onPress: () => void }) {
   const p = intro.profile;
+  const name = p?.display_name ?? "An introduction";
+  const photo = p?.media?.find((m) => m.type === "photo" && m.url)?.url ?? null;
   return (
     <Pressable onPress={onPress} accessibilityRole="button">
       <Card>
         <View style={s.row}>
-          <Text style={s.name}>
-            {p?.display_name ?? "An introduction"}
-            {p?.age ? `, ${p.age}` : ""}
-          </Text>
+          <Avatar url={photo} name={name} verified={!!p?.verified} size={56} />
+          <View style={s.rowBody}>
+            <Text style={s.name}>
+              {name}
+              {p?.age ? `, ${p.age}` : ""}
+            </Text>
+            {!!p?.city && (
+              <Text style={s.meta}>
+                {p.city}
+                {p.distance_band_km ? ` · ${p.distance_band_km}` : ""}
+              </Text>
+            )}
+            <Text style={s.status}>{INTRO_STATUS_LABEL[intro.status] ?? intro.status}</Text>
+          </View>
           {!!p?.verified && <Badge label="Verified" tone="success" />}
         </View>
-        {!!p?.city && (
-          <Text style={s.meta}>
-            {p.city}
-            {p.distance_band_km ? ` · ${p.distance_band_km}` : ""}
-          </Text>
-        )}
-        <Text style={s.status}>{INTRO_STATUS_LABEL[intro.status] ?? intro.status}</Text>
         {!!intro.explanation?.reasons?.length && (
           <Text style={s.reason} numberOfLines={2}>
             {intro.explanation.reasons[0].text}
@@ -138,11 +152,12 @@ export default function IntroductionsScreen() {
 }
 
 const s = {
-  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  name: { ...typo.heading, color: color.ink, flex: 1, paddingRight: space.sm },
+  row: { flexDirection: "row", alignItems: "center", gap: space.md },
+  rowBody: { flex: 1 },
+  name: { ...typo.heading, color: color.ink },
   meta: { ...typo.small, color: color.inkSecondary, marginTop: 2 },
-  status: { ...typo.caption, color: color.context, marginTop: space.sm },
-  reason: { ...typo.small, color: color.inkSecondary, marginTop: space.xs },
+  status: { ...typo.caption, color: color.action, marginTop: space.xs },
+  reason: { ...typo.small, color: color.inkSecondary, marginTop: space.md },
   section: { ...typo.title, color: color.ink, marginTop: space.lg, marginBottom: space.sm },
   sectionInline: { ...typo.heading, color: color.ink, marginBottom: space.xs },
 } as const;

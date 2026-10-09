@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ApiError, post } from "@/lib/api";
 import { nextOnboardingPath, useAuth } from "@/lib/auth";
-import { Button, Card, ErrorState, Field, TextInput } from "@/components/ui";
+import { Button, Card, ErrorState, Field, Hero, TextInput } from "@/components/ui";
 
 /** O01 Welcome + sign-in. No profiles or pricing before the member understands the outcome and method. */
 export default function Welcome() {
@@ -52,11 +52,17 @@ export default function Welcome() {
 
   return (
     <div className="min-h-dvh bg-canvas">
-      <main className="mx-auto max-w-xl px-4 py-10">
-        <p className="mb-2 text-sm font-semibold uppercase tracking-wide text-context">Invite-only pilot · Rome</p>
-        <h1 className="text-3xl font-bold leading-tight text-ink sm:text-4xl">A matchmaker, not a feed.</h1>
-        <p className="mt-3 text-lg text-ink-secondary">One to three verified, reciprocal introductions a week. Each comes with three plain reasons, one honest friction, and what only a real date can tell you.</p>
-        <ul className="mt-6 space-y-3 text-ink">
+      {/* The first page anybody sees. It used to be four ticked bullets above a form on a flat
+          cream background, with no colour or image anywhere in it — an honest description of the
+          product that read as a terms-of-service page. The words are unchanged; what they sit on
+          is not. */}
+      <main className="mx-auto max-w-xl px-4 py-4">
+        <Hero
+          eyebrow="Invite-only pilot · Rome"
+          title="A matchmaker, not a feed."
+          lede="One to three verified, reciprocal introductions a week — each with three plain reasons it was made."
+        />
+        <ul className="space-y-5 text-ink">
           {[
             ["Verified people only", "Identity and 18+ checks before anyone enters the pool. No swiping, no likes, no popularity score."],
             ["Private decisions", "Chat opens only after you both say yes. A pass is never shown to the other person."],
@@ -64,7 +70,7 @@ export default function Welcome() {
             ["AI assists, you speak", "Drafts and translations are suggestions. Nothing is sent as your words without you."],
           ].map(([t, b]) => (
             <li key={t} className="flex gap-3">
-              <span aria-hidden className="mt-1 text-action">
+              <span aria-hidden className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-action-soft text-sm font-bold text-action">
                 ✓
               </span>
               <span>
@@ -74,7 +80,7 @@ export default function Welcome() {
           ))}
         </ul>
         <Card className="mt-8">
-          <h2 className="mb-1 text-lg font-bold">Start your Dating Blueprint</h2>
+          <h2 className="display mb-1 text-2xl font-bold">Start your Dating Blueprint</h2>
           <p className="mb-4 text-sm text-ink-secondary">Sign in with a one-time code. Verification and the Blueprint take about ten minutes.</p>
           <ErrorState error={error} />
           {!challenge ? (

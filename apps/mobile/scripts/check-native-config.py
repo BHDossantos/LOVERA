@@ -45,7 +45,7 @@ IOS_MUST_NOT_DECLARE = {
     "NSFaceIDUsageDescription": "SecureStore is never asked to gate the token behind biometrics",
 }
 IOS_MEMBER_FACING = ("NSCameraUsageDescription", "NSPhotoLibraryUsageDescription")
-BRAND_BACKGROUND = "#faf7f1"
+BRAND_BACKGROUND = "#fdf7f4"
 
 failures: list[str] = []
 # Counted as they run. The total used to be a hand-maintained sum of the table lengths plus a

@@ -13,8 +13,8 @@ export function cx(...parts: (string | false | null | undefined)[]) {
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & { loading?: boolean; fullWidth?: boolean; variant?: "primary" | "secondary" | "ghost" | "danger"; size?: "md" | "sm" };
 
 const VARIANT: Record<NonNullable<ButtonProps["variant"]>, string> = {
-  primary: "bg-action text-white hover:bg-action-strong border border-transparent",
-  secondary: "bg-surface text-ink border border-border hover:bg-surface-muted",
+  primary: "bg-action text-ink-inverse hover:bg-action-strong border border-transparent shadow-[0_4px_12px_rgba(143,34,68,0.28)]",
+  secondary: "bg-surface text-ink border border-border-strong hover:bg-surface-muted",
   ghost: "bg-transparent text-action hover:bg-action-soft border border-transparent",
   danger: "bg-surface text-caution border border-caution hover:bg-caution-soft",
 };
@@ -25,7 +25,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       ref={ref}
       aria-busy={loading || undefined}
       disabled={disabled || loading}
-      className={cx("inline-flex items-center justify-center gap-2 rounded-[var(--radius-lg)] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60", size === "md" ? "px-5 py-3 text-base" : "px-3 py-2 text-sm min-h-11", VARIANT[variant], fullWidth && "w-full", className)}
+      className={cx("inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[var(--radius-pill)] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60", size === "md" ? "px-5 py-3 text-base" : "px-3 py-2 text-sm min-h-11", VARIANT[variant], fullWidth && "w-full", className)}
       {...rest}
     >
       {loading && <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden />}
@@ -36,16 +36,38 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
 
 export function LinkButton({ href, children, variant = "primary", fullWidth, className }: { href: string; children: ReactNode; variant?: ButtonProps["variant"]; fullWidth?: boolean; className?: string }) {
   return (
-    <Link href={href} className={cx("inline-flex items-center justify-center gap-2 rounded-[var(--radius-lg)] px-5 py-3 text-base font-semibold transition-colors", VARIANT[variant ?? "primary"], fullWidth && "w-full", className)}>
+    <Link href={href} className={cx("inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[var(--radius-pill)] px-5 py-3 text-base font-semibold transition-colors", VARIANT[variant ?? "primary"], fullWidth && "w-full", className)}>
       {children}
     </Link>
   );
 }
 
 /* ---------- Layout ---------- */
+
+/**
+ * The warm hero band, for the top of a page that has to make a first impression.
+ *
+ * It bleeds past the page gutter on purpose — a wash that stops short of the edge reads as a
+ * mistake — so it takes negative margins matching the shell's padding. The title is the serif
+ * display face, which is most of the difference between "a product" and "a form with a heading
+ * above it", and costs one font name.
+ */
+export function Hero({ eyebrow, title, lede, children }: { eyebrow?: string; title: string; lede?: ReactNode; children?: ReactNode }) {
+  return (
+    <div className="hero-wash -mx-4 -mt-4 mb-8 rounded-b-[var(--radius-xl)] px-6 py-12 sm:-mx-6 sm:-mt-6 sm:px-10 sm:py-16">
+      <div className="relative">
+        {eyebrow && <p className="mb-3 text-xs font-bold uppercase tracking-[0.09em] text-action-strong">{eyebrow}</p>}
+        <h1 className="display max-w-2xl text-4xl font-bold leading-[1.08] text-ink sm:text-5xl">{title}</h1>
+        {lede && <p className="mt-4 max-w-xl text-lg text-ink-secondary">{lede}</p>}
+        {children && <div className="mt-6">{children}</div>}
+      </div>
+    </div>
+  );
+}
+
 export function Card({ children, className, as: Tag = "section", ...rest }: { children: ReactNode; className?: string; as?: "section" | "article" | "div" | "li" } & Record<string, unknown>) {
   return (
-    <Tag className={cx("rounded-[var(--radius-xl)] border border-border bg-surface p-5", className)} {...rest}>
+    <Tag className={cx("rounded-[var(--radius-xl)] border border-border bg-surface p-5 shadow-[var(--shadow-raised)]", className)} {...rest}>
       {children}
     </Tag>
   );
@@ -54,8 +76,11 @@ export function Card({ children, className, as: Tag = "section", ...rest }: { ch
 export function PageTitle({ eyebrow, title, lede }: { eyebrow?: string; title: string; lede?: ReactNode }) {
   return (
     <header className="mb-6">
-      {eyebrow && <p className="mb-1 text-sm font-semibold uppercase tracking-wide text-context">{eyebrow}</p>}
-      <h1 className="text-2xl font-bold leading-tight text-ink sm:text-3xl">{title}</h1>
+      {/* Rose, not the gold it was: gold on the canvas gave 2.9:1 at this size, a WCAG AA failure
+          on the line above the title of every screen, and the brand colour is the thing a member
+          should see first anyway. */}
+      {eyebrow && <p className="mb-2 text-xs font-bold uppercase tracking-[0.09em] text-action">{eyebrow}</p>}
+      <h1 className="display text-3xl font-bold leading-tight text-ink sm:text-4xl">{title}</h1>
       {lede && <p className="mt-2 text-base text-ink-secondary">{lede}</p>}
     </header>
   );
@@ -118,10 +143,13 @@ export function ChoiceCard({ title, body, badge, selected, disabled, onSelect, n
 
 /* ---------- Status banner: one action, never hides safety ---------- */
 export function StatusBanner({ type = "info", title, body, action }: { type?: "info" | "caution" | "error" | "success"; title: string; body?: ReactNode; action?: ReactNode }) {
-  const tone = { info: "bg-action-soft border-action text-ink", caution: "bg-context-soft border-context text-ink", error: "bg-caution-soft border-caution text-ink", success: "bg-success-soft border-success text-ink" }[type];
+  // The accent is the 4px left edge; the other three sides are the ordinary hairline. Drawing
+  // all four in the tone colour framed every banner in a heavy box, which is a lot of shouting
+  // for a sentence that is usually just context.
+  const tone = { info: "bg-action-soft border-l-action", caution: "bg-context-soft border-l-context", error: "bg-caution-soft border-l-caution", success: "bg-success-soft border-l-success" }[type];
   const icon = { info: "ℹ", caution: "⚠", error: "✕", success: "✓" }[type];
   return (
-    <div role={type === "error" ? "alert" : "status"} className={cx("mb-4 flex gap-3 rounded-[var(--radius-lg)] border-l-4 border p-4", tone)}>
+    <div role={type === "error" ? "alert" : "status"} className={cx("mb-4 flex gap-3 rounded-[var(--radius-lg)] border border-border border-l-4 p-4 text-ink", tone)}>
       <span aria-hidden className="text-lg leading-none">{icon}</span>
       <div className="flex-1">
         <p className="font-semibold">{title}</p>
@@ -229,7 +257,7 @@ export function Avatar({ name, url, size = 48 }: { name: string; url?: string | 
     .slice(0, 2)
     .toUpperCase();
   return (
-    <span className="inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-context-soft font-semibold text-context" style={{ width: size, height: size }} aria-label={`${name}'s photo`}>
+    <span className="inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--wash-2)] font-semibold text-action-strong" style={{ width: size, height: size, fontSize: Math.round(size * 0.34) }} aria-label={`${name}'s photo`}>
       {url ? <MediaImage url={url} alt={`${name}'s photo`} /> : initials}
     </span>
   );

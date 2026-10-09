@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Image, Text, View, useWindowDimensions, type LayoutChangeEvent } from "react-native";
+import { Text, View, useWindowDimensions, type LayoutChangeEvent } from "react-native";
 import { ApiError, get, newIdempotencyKey, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
 import { serverDriven, useAwaitingServer } from "@/lib/query";
@@ -16,6 +16,7 @@ import {
   ChipGroup,
   Divider,
   ErrorState,
+  MediaImage,
   Options,
   PageTitle,
   Screen,
@@ -230,12 +231,17 @@ export default function IntroductionDetail() {
             title={`${p?.display_name ?? "An introduction"}${p?.age ? `, ${p.age}` : ""}`}
             lede={p?.city ? `${p.city}${p.distance_band_km ? ` · ${p.distance_band_km}` : ""}` : null}
           />
+          {/* `MediaImage`, not `<Image source={{ uri: photo }}>`, which is what this was.
+              `/v1/media/{id}` is a relative path on an endpoint that requires the access token, and
+              React Native has neither a document to resolve the path against nor any reason to send
+              the header — so this photo, the only one anywhere in the app, silently never loaded.
+              It looked exactly like members not having photos. */}
           {!!photo && (
-            <Image
-              source={{ uri: photo }}
-              style={{ width: "100%", height: 380, borderRadius: radius.lg, marginBottom: space.md }}
-              accessibilityLabel={`Photo of ${p?.display_name ?? "this person"}`}
-              resizeMode="cover"
+            <MediaImage
+              url={photo}
+              alt={`Photo of ${p?.display_name ?? "this person"}`}
+              radius={radius.xl}
+              style={{ width: "100%", height: 420, marginBottom: space.md }}
             />
           )}
           {!!p?.verified && <Badge label="Identity verified" tone="success" />}

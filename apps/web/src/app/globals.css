@@ -1,39 +1,68 @@
 @import "tailwindcss";
 
-/* Design tokens (specification Section 3). Warm ivory canvas, deep navy ink, teal action, coral caution, muted gold context. */
+/*
+ * Design tokens, shared value-for-value with apps/mobile/src/theme.ts. Change one, change both in
+ * the same commit — a member who signs up here and opens the phone should not feel they moved.
+ *
+ * The first palette was a teal action on navy ink over a yellow-cream canvas. Every value in it
+ * was defensible and the whole of it read as a bank: teal belongs to insurance portals and dental
+ * practices, and navy-on-cream is a quarterly report. For an app whose proposition is that a
+ * person is going to meet another person, that is the wrong promise before a word is read.
+ *
+ * So: a warm rose action, a warm near-black ink with a plum cast rather than a blue one, and pink
+ * in the canvas instead of yellow. Deep saturated rose rather than bubblegum, because this is a
+ * matchmaker and not a party.
+ *
+ * Two of these are accessibility fixes rather than taste. `--context` was #b98a2e, which at the
+ * caption size it is used for gave 2.9:1 on the canvas — a WCAG AA failure on the eyebrow above
+ * the title of every screen. `--ink-tertiary` was #7a8598 for 4.3:1, also short. Both are darker
+ * than they look like they need to be, and that is why.
+ */
 :root {
-  --canvas: #faf7f1;
+  --canvas: #fdf7f4;
   --surface: #ffffff;
-  --surface-muted: #f3efe6;
-  --ink: #16243a;
-  --ink-secondary: #4b586d;
-  --ink-tertiary: #7a8598;
-  --action: #0f766e;
-  --action-strong: #0b5f59;
-  --action-soft: #e0f2f0;
-  --caution: #d9553f;
-  --caution-soft: #fbe9e5;
-  --context: #b98a2e;
-  --context-soft: #f8efd9;
+  --surface-muted: #f9edea;
+  --surface-sunk: #f3e2de;
+  --ink: #2a1a21;
+  --ink-secondary: #6a5560;
+  --ink-tertiary: #7d6872;
+  --ink-inverse: #fffaf8;
+  --action: #b42d55;
+  --action-strong: #8f2244;
+  --action-soft: #fceaef;
+  --caution: #b3301c;
+  --caution-soft: #fceae4;
+  --context: #8a5a0f;
+  --context-soft: #fbf0dc;
   --success: #2f7d4f;
   --success-soft: #e3f2e8;
-  --border: #e3ddd1;
+  --border: #f0e2de;
+  --border-strong: #e4cdc7;
   --focus: #1d4ed8;
-  --disabled: #b9bfc9;
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 24px;
-  --shadow-raised: 0 1px 2px rgba(22, 36, 58, 0.06), 0 4px 12px rgba(22, 36, 58, 0.06);
+  --disabled: #c6b7bb;
+  --wash-1: #fdeaee;
+  --wash-2: #fbd8dc;
+  --wash-3: #f7c2c6;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+  --radius-pill: 999px;
+  --shadow-raised: 0 1px 2px rgba(42, 26, 33, 0.04), 0 4px 12px rgba(42, 26, 33, 0.06);
+  --shadow-lifted: 0 2px 4px rgba(42, 26, 33, 0.05), 0 10px 24px rgba(42, 26, 33, 0.12);
+  /* The warm band behind a hero. Both apps have one; this is the real gradient, the phone stacks views. */
+  --wash: linear-gradient(170deg, var(--wash-3) 0%, var(--wash-2) 38%, var(--wash-1) 72%, var(--canvas) 100%);
 }
 
 @theme inline {
   --color-canvas: var(--canvas);
   --color-surface: var(--surface);
   --color-surface-muted: var(--surface-muted);
+  --color-surface-sunk: var(--surface-sunk);
   --color-ink: var(--ink);
   --color-ink-secondary: var(--ink-secondary);
   --color-ink-tertiary: var(--ink-tertiary);
+  --color-ink-inverse: var(--ink-inverse);
   --color-action: var(--action);
   --color-action-strong: var(--action-strong);
   --color-action-soft: var(--action-soft);
@@ -44,13 +73,21 @@
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-focus: var(--focus);
   --color-disabled: var(--disabled);
   --radius-sm: var(--radius-sm);
   --radius-md: var(--radius-md);
   --radius-lg: var(--radius-lg);
   --radius-xl: var(--radius-xl);
+  --radius-pill: var(--radius-pill);
   --font-sans: "Source Sans 3", "Segoe UI", "Helvetica Neue", Arial, system-ui, sans-serif;
+  /*
+   * The display face, by platform name rather than a web font. A downloaded font would be better
+   * typography and a worse trade here: it blocks or flashes the first paint of the one screen that
+   * has to make an impression, and both platforms already ship a serif that is good large.
+   */
+  --font-serif: Georgia, "Iowan Old Style", "Palatino Linotype", Palatino, "Times New Roman", serif;
 }
 
 html {
@@ -110,4 +147,48 @@ input[type="radio"] {
 
 .prose-tight p + p {
   margin-top: 0.5rem;
+}
+
+/* The display face belongs to page and section titles, not to body copy or UI labels. */
+.display {
+  font-family: var(--font-serif);
+  letter-spacing: -0.02em;
+}
+
+.wash {
+  background: var(--wash);
+}
+
+/*
+ * The soft discs behind a hero, so the wash has somewhere for the eye to rest. Purely decorative,
+ * which is why they are pseudo-elements rather than markup.
+ */
+.hero-wash {
+  position: relative;
+  overflow: hidden;
+  background: var(--wash);
+}
+
+.hero-wash::before,
+.hero-wash::after {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+}
+
+.hero-wash::before {
+  top: -6rem;
+  right: -4rem;
+  width: 20rem;
+  height: 20rem;
+}
+
+.hero-wash::after {
+  bottom: -8rem;
+  left: -5rem;
+  width: 16rem;
+  height: 16rem;
+  background: rgba(255, 255, 255, 0.25);
 }

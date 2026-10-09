@@ -3,8 +3,8 @@ import { useRouter } from "expo-router";
 import { Text, View, StyleSheet } from "react-native";
 import { ApiError, post } from "@/api/client";
 import { nextOnboardingPath, useAuth } from "@/lib/auth";
-import { Button, Card, ErrorState, Field, PageTitle, Screen, TextInput } from "@/components/ui";
-import { color, space, type as typo } from "@/theme";
+import { Button, Card, ErrorState, Field, Hero, Screen, TextInput } from "@/components/ui";
+import { color, radius, space, type as typo } from "@/theme";
 
 const PROMISES: [string, string][] = [
   ["Verified people only", "Identity and 18+ checks before anyone enters the pool. No swiping, no likes, no popularity score."],
@@ -57,17 +57,21 @@ export default function Welcome() {
 
   return (
     <Screen>
-      <PageTitle
+      {/* The first screen anybody sees. It used to be four ticked bullets above a form, on a flat
+          cream background, with no image or colour anywhere in it — which is an honest description
+          of the product and reads as a terms-of-service page. The words are unchanged; what they
+          sit on is not. */}
+      <Hero
         eyebrow="Invite-only pilot · Rome"
         title="A matchmaker, not a feed."
-        lede="One to three verified, reciprocal introductions a week. Each comes with three plain reasons, one honest friction, and what only a real date can tell you."
+        lede="One to three verified, reciprocal introductions a week — each with three plain reasons it was made."
       />
       <View style={{ marginBottom: space.xl }}>
         {PROMISES.map(([t, b]) => (
           <View key={t} style={s.promise}>
-            <Text style={s.tick} accessibilityElementsHidden importantForAccessibility="no">
-              ✓
-            </Text>
+            <View style={s.tickWell} accessibilityElementsHidden importantForAccessibility="no">
+              <Text style={s.tick}>✓</Text>
+            </View>
             <Text style={s.promiseText}>
               <Text style={{ fontWeight: "700" }}>{t}. </Text>
               <Text style={{ color: color.inkSecondary }}>{b}</Text>
@@ -141,9 +145,17 @@ export default function Welcome() {
 }
 
 const s = StyleSheet.create({
-  promise: { flexDirection: "row", gap: space.md, marginBottom: space.md },
-  tick: { ...typo.body, color: color.action, fontWeight: "700" },
-  promiseText: { ...typo.body, color: color.ink, flex: 1 },
+  promise: { flexDirection: "row", gap: space.md, marginBottom: space.lg, alignItems: "flex-start" },
+  tickWell: {
+    width: 28,
+    height: 28,
+    borderRadius: radius.pill,
+    backgroundColor: color.actionSoft,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tick: { ...typo.small, color: color.action, fontWeight: "700" },
+  promiseText: { ...typo.body, color: color.ink, flex: 1, paddingTop: 3 },
   cardTitle: { ...typo.title, color: color.ink, marginBottom: space.xs },
   cardBody: { ...typo.small, color: color.inkSecondary, marginBottom: space.lg },
 });
