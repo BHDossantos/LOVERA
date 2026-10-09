@@ -282,6 +282,17 @@ export default function Conversation() {
         </View>
       )}
 
+      {/* Hearing a voice before meeting a stranger is a reasonable thing to want, and so is not
+          wanting to. The screen exists on web and had no way in from the phone at all, which left
+          the second group with no explicit "this is normal either way" anywhere in the app. */}
+      {!onHold && !ended && (
+        <View style={{ paddingHorizontal: space.lg, paddingBottom: space.sm }}>
+          <Button variant="ghost" onPress={() => router.push(`/messages/${id}/readiness` as never)}>
+            Voice or video before we meet
+          </Button>
+        </View>
+      )}
+
       {/* The only route into the planner: a date belongs to a conversation, and the API
           creates at most one plan per conversation, so this either opens the existing plan
           or starts the first one. Hidden while a safety hold or an ending is in force. */}

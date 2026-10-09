@@ -99,13 +99,23 @@ export default function YouScreen() {
           <Text style={s.label}>Open to introductions</Text>
           <Badge label={me?.date_ready ? "Yes" : "Paused"} tone={me?.date_ready ? "success" : "muted"} />
         </View>
-        {/* The badge used to be the end of it: a member whose readiness was off could read that
-            it was off and do nothing about it, while Today kept asking them to fix it. */}
+        {/* A badge used to be the end of each of these: a member whose readiness was off could read
+            that it was off and do nothing about it, while Today kept asking them to fix it. The same
+            was true of identity, which is worse — verification expires on a timer, and reading
+            "expired" with nothing to press is being shown a locked door. Both are reachable now, and
+            the identity row is always reachable rather than only when something is wrong, because
+            "what does this badge actually claim about me" is a fair question on a good day too. */}
         {!me?.date_ready && (
           <Button variant="secondary" onPress={() => router.push("/you/availability" as never)}>
             Open myself to introductions again
           </Button>
         )}
+        <Button variant="secondary" onPress={() => router.push("/you/verification" as never)}>
+          {me?.verification_status === "verified" ? "Verification and badges" : "Finish verification"}
+        </Button>
+        <Button variant="secondary" onPress={() => router.push("/you/membership" as never)}>
+          Membership and credits
+        </Button>
       </Card>
 
       <Card>
