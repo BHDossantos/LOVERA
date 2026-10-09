@@ -131,6 +131,15 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   slug: "ai-matchmaker",
   scheme: "aimatchmaker",
   version: "1.0.0",
+  /**
+   * Declared, because the default is not what it looks like: Expo adds "web" to this list whenever
+   * `react-dom` is installed, and it is — pulled in through the toolchain, not by us. There is no
+   * `react-native-web` here and no web layout, so web is a platform this app cannot build, and
+   * leaving it in the list is not cosmetic. Anything that bundles "every platform in the config"
+   * then fails: `expo export --platform all` does, and so would `eas update`, which is the publish
+   * step the whole over-the-air story depends on. Found by running the export.
+   */
+  platforms: ["ios", "android"],
   orientation: "portrait",
   userInterfaceStyle: "light",
   icon: "./assets/icon.png",

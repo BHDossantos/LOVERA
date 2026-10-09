@@ -148,6 +148,17 @@ def create_session(db: Session, member: Member, device_id: str | None, parent: M
     return session, refresh
 
 
+def _another_device(session: MemberSession, device_id: str | None) -> bool:
+    """Whether this request cannot be coming from the client the session was issued to.
+
+    False when the session carries no device binding: there is nothing to compare, and escalating
+    to "revoke the whole sign-in" on a guess is worse than refusing the one request.
+    """
+    if not session.device_id_hash:
+        return False
+    return hash_secret(device_id or "") != session.device_id_hash
+
+
 def rotate_session(db: Session, refresh_token: str, device_id: str | None = None) -> tuple[Member, MemberSession, str, str]:
     """Exchange a refresh token for the next one, and treat a genuinely spent token as a theft.
 
@@ -179,9 +190,18 @@ def rotate_session(db: Session, refresh_token: str, device_id: str | None = None
         raise ApiError("AUTH_REQUIRED", "Session expired. Sign in again.")
 
     if not session_is_live(db, session):
-        # Retired, not merely unknown: this exact token was issued to somebody. If it is still inside
-        # its absolute lifetime then it was spent and has come back, which is the shape of a replay.
-        if session.expires_at > utcnow():
+        # Retired, not merely unknown: this exact token was issued to somebody, and it has come back.
+        #
+        # Whether that is a theft or a straggler depends on where from. Two browser tabs share one
+        # refresh token in localStorage while the single-flight refresh in apps/web/src/lib/api.ts is
+        # per tab, so two tabs whose access tokens expire together both refresh with the same token;
+        # the quicker one rotates and uses what it got, and then the slower one's request lands with a
+        # token that is now spent. Revoking the chain there signs out the tab that did nothing wrong —
+        # which the single-use rule never did, so it would be this change making things worse.
+        #
+        # Chain revocation answers "two parties hold this". It is the wrong answer to "one party holds
+        # this twice", and the device the session was issued to is what separates them.
+        if session.expires_at > utcnow() and _another_device(session, device_id):
             row = lineage_of(db, session)
             revoked = revoke_chain(db, row.chain_id)
             audit(
@@ -210,7 +230,7 @@ def rotate_session(db: Session, refresh_token: str, device_id: str | None = None
         # Still live but already rotated once, so the client never received that reply. Only the device
         # the session was issued to may retry: anybody else presenting a token that has already been
         # spent is replaying it, whatever the grace period says.
-        if session.device_id_hash and hash_secret(device_id or "") != session.device_id_hash:
+        if _another_device(session, device_id):
             revoked = revoke_chain(db, row.chain_id)
             audit(
                 db,

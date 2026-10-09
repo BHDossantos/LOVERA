@@ -92,12 +92,16 @@ def test_the_overlap_closes_as_soon_as_the_replacement_is_used(client):
     assert _refresh(client, first).status_code == 401, "the superseded token is spent the moment its replacement is live"
 
 
-def test_a_replayed_token_takes_the_whole_chain_down(client):
+def test_a_replayed_token_from_elsewhere_takes_the_whole_chain_down(client):
     """Two parties hold this token, and there is no way to tell which one is the member.
 
     The BCP answer is to end the sign-in: both are signed out and the member re-authenticates with a
     one-time code. Leaving the newer session alive would mean a thief who replays an old token simply
     confirms the real client's session for them.
+
+    The device is what makes this distinguishable from the same client's own straggling request (see
+    the two-tab test below). Where a session carries no device binding at all, neither can be told
+    from the other and only the one request is refused — escalating on a guess would be worse.
     """
     a, first = _signed_in(client)
     r = _refresh(client, first)
@@ -105,7 +109,7 @@ def test_a_replayed_token_takes_the_whole_chain_down(client):
     a.token = r.json()["access_token"]
     assert a.get("/me").status_code == 200
 
-    assert _refresh(client, first).status_code == 401, "the replay itself"
+    assert _refresh(client, first, device="a-machine-this-session-never-saw").status_code == 401, "the replay itself"
     assert _refresh(client, second).status_code == 401, "and the session it was replayed against"
     assert a.get("/me").status_code == 401, "including the access token already in the client's hands"
 
@@ -151,3 +155,33 @@ def test_signing_out_ends_the_whole_chain(client):
 
 def test_a_token_that_was_never_issued_is_refused(client):
     assert _refresh(client, "not-a-token").status_code == 401
+
+
+def test_a_second_tab_refreshing_the_same_token_does_not_sign_both_out(client):
+    """Two tabs share one refresh token, and one of them is slower than the other.
+
+    localStorage is shared across tabs but the single-flight refresh in `apps/web/src/lib/api.ts`
+    is per tab, so two tabs whose access tokens expire together both refresh with the same token.
+    The faster one rotates and uses what it got, which retires the token — and then the slower
+    one's request arrives with it.
+
+    That slow request has to fail: the token is spent. What it must not do is end the session for
+    the tab that did nothing wrong. Chain revocation is the right answer to "two parties hold this"
+    and the wrong answer to "one party holds this twice", and the device the session was issued to
+    is what tells those apart.
+    """
+    a, first = _signed_in(client)
+
+    quick = _refresh(client, first)
+    assert quick.status_code == 200
+    survivor = quick.json()["refresh_token"]
+    a.token = quick.json()["access_token"]
+    assert a.get("/me").status_code == 200, "the quick tab stores and uses what it got"
+
+    # The slow tab's refresh finally lands, with the token it read before any of that happened.
+    slow = _refresh(client, first)
+    assert slow.status_code == 401, "a spent token is spent"
+
+    # And the tab that did nothing wrong is still signed in.
+    assert a.get("/me").status_code == 200, "the quick tab's session must survive the slow tab"
+    assert _refresh(client, survivor).status_code == 200, "and can still rotate"
