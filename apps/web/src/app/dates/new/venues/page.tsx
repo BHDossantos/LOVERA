@@ -7,7 +7,7 @@ import { ApiError, get, newIdempotencyKey, post } from "@/lib/api";
 import { useRequireMember } from "@/lib/auth";
 import { AppShell } from "@/components/shell/AppShell";
 import { Button, Card, EmptyState, ErrorState, LinkButton, PageTitle, Select, Skeleton, StatusBanner, cx } from "@/components/ui";
-import { formatDateTime } from "@/lib/format";
+import { planTimeLine } from "@/lib/format";
 import { DATE_STYLES, VenueCard, shortWhen, useDatePlan, type VenuesOut } from "@/components/dates/shared";
 import type { DatePlan } from "@/lib/types";
 
@@ -59,7 +59,7 @@ function VenuesInner() {
 
   return (
     <AppShell>
-      <PageTitle eyebrow="Plan a date · venue" title="Pick a public place" lede={plan.data && startsAt ? `For ${formatDateTime(startsAt, plan.data.timezone)} with ${plan.data.other_display_name}.` : undefined} />
+      <PageTitle eyebrow="Plan a date · venue" title="Pick a public place" lede={plan.data && startsAt ? `For ${planTimeLine(startsAt, plan.data.timezone)} with ${plan.data.other_display_name}.` : undefined} />
       {plan.isLoading && <Skeleton lines={4} label="Loading your plan" />}
       {plan.error && <ErrorState error={plan.error as ApiError} retry={() => plan.refetch()} />}
       <ErrorState error={error} retry={error?.code === "VERSION_MISMATCH" ? () => plan.refetch() : undefined} />

@@ -45,33 +45,74 @@ def create_schema() -> None:
 
 
 def check_mail_transport() -> None:
-    """Refuse to start a production API that cannot send a sign-in code.
+    """Refuse to start an API that gives a member no way to receive a sign-in code.
 
-    Sign-in is a one-time code sent by email, and outside production the API also
-    returns that code in the response body. So a production deploy with no mail host
-    looks perfectly healthy — every endpoint answers, every check is green — while
-    every single member who asks to sign in waits for a mail that will never arrive.
-    That is a failure worth refusing to boot over, because the alternative is finding
-    it from the first member who cannot get in.
+    Sign-in is a one-time code sent by email, and some deployments also return that code
+    in the response body. A deploy where *neither* is true looks perfectly healthy — every
+    endpoint answers, every check is green — while every single member who asks to sign in
+    waits for a mail that will never arrive. That is worth refusing to boot over, because
+    the alternative is finding it from the first member who cannot get in.
 
-    An operator who really wants to run without mail can say so with
-    MM_MAIL_TRANSPORT=console, which boots and complains instead.
+    The condition is "no member could get the code", not "this is production". It used to be
+    the latter, on the reasoning that outside production the code comes back in the response
+    — which stops being true the moment `MM_EXPOSE_DEV_OTP` is turned off, and turning it off
+    is exactly what a reachable staging deploy has to do, since a public API that hands the
+    code to whoever asks lets anyone sign in as anyone. So staging fell through the gap this
+    guard exists to close: no mail, no code in the response, and a clean boot.
+
+    An operator who really wants to run without mail can say so with MM_MAIL_TRANSPORT=console,
+    which boots and complains instead.
     """
     settings = get_settings()
-    if settings.is_production and settings.resolved_mail_transport == "console":
+    # The two ways a code can reach somebody. Either is enough; neither is a dead end.
+    mailed = settings.resolved_mail_transport != "console"
+    in_response = settings.expose_dev_otp and not settings.is_production
+    if not mailed and not in_response:
+        where = "in production" if settings.is_production else f'with MM_EXPOSE_DEV_OTP off in "{settings.env}"'
         if settings.mail_transport == "auto":
             raise RuntimeError(
-                "No mail host is configured, so no member could receive a sign-in code. "
-                "Set MM_SMTP_HOST (plus MM_SMTP_USERNAME, MM_SMTP_PASSWORD and MM_MAIL_FROM), "
-                "or set MM_MAIL_TRANSPORT=console to start without mail on purpose."
+                "No mail host is configured and the sign-in code is not returned in the response "
+                f"({where}), so no member could receive one. Set MM_SMTP_HOST (plus "
+                "MM_SMTP_USERNAME, MM_SMTP_PASSWORD and MM_MAIL_FROM), or set "
+                "MM_MAIL_TRANSPORT=console to start without mail on purpose."
             )
-        log.critical("MM_MAIL_TRANSPORT=console in production: sign-in codes are written to this log and delivered to nobody.")
+        log.critical("MM_MAIL_TRANSPORT=console %s: sign-in codes are written to this log and delivered to nobody.", where)
     log.info("mail: %s", get_sender().preflight())
+
+
+def check_identity_provider() -> None:
+    """Refuse to start a production API where nobody can finish signing up.
+
+    Onboarding hard-gates on verification (`account.service.advance_onboarding`), and the sandbox
+    provider's completion endpoint is correctly refused in production. So `MM_IDENTITY_PROVIDER`
+    left at its default in production is a dead end for every member: they sign up, reach step 2
+    of 6, and stop — with every endpoint answering and every health check green. That is the same
+    shape of failure as a deploy with no mail host, and it is worth refusing to boot over for the
+    same reason.
+
+    There are two honest answers and the operator has to pick one. A real vendor, or
+    `MM_IDENTITY_PROVIDER=manual_review`, which says out loud that a person approves every signup
+    from the admin queue. The second is a workable pilot posture; what it must not be is something
+    discovered on launch day.
+    """
+    settings = get_settings()
+    if settings.is_production and settings.identity_provider == "sandbox":
+        raise RuntimeError(
+            "MM_IDENTITY_PROVIDER is 'sandbox' in production. The sandbox completion endpoint is "
+            "refused in production, and onboarding cannot be finished without a verification "
+            "result, so every signup would stop at the verification step. Configure a real "
+            "identity vendor, or set MM_IDENTITY_PROVIDER=manual_review to approve each member by "
+            "hand from the admin verification queue."
+        )
+    if settings.identity_provider == "manual_review":
+        log.warning("MM_IDENTITY_PROVIDER=manual_review: every signup waits for a person in the admin verification queue.")
+    log.info("identity: %s", settings.identity_provider)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     check_mail_transport()
+    check_identity_provider()
     create_schema()
     from app.jobs import register_handlers
 

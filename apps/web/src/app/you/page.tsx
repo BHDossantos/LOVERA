@@ -12,6 +12,10 @@ const LINKS: { href: string; label: string; body: string }[] = [
   { href: "/you/profile", label: "Profile", body: "Exactly what introductions see, and what stays private." },
   { href: "/you/blueprint", label: "Dating Blueprint", body: "Every inference, its evidence and how to correct it." },
   { href: "/you/preferences", label: "Preferences & dealbreakers", body: "Must, Prefer and Open, with the trade-off shown first." },
+  // Without this row the only way in was Today's readiness task, which appears once readiness
+  // is already off — so a member who is ready could not change their meeting windows, or pause
+  // introductions in the first place, without typing the URL.
+  { href: "/you/availability", label: "Availability & readiness", body: "When you could realistically meet, and whether you are open to introductions." },
   { href: "/you/travel", label: "Travel mode", body: "Time-bounded matching in another city (after the pilot)." },
   { href: "/you/verification", label: "Verification", body: "Status, expiry and what each badge does and doesn't mean." },
   { href: "/you/membership", label: "Membership & credits", body: "One transparent price, protected credits, cancel in-app." },

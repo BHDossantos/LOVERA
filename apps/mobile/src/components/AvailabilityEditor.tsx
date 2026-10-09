@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Text, View } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, get, put } from "@/api/client";
-import { Button, Card, ChipGroup, ErrorState, Field, Loading, Options, Toggle } from "@/components/ui";
+import { AwaitingServer, Button, Card, ChipGroup, ErrorState, Field, Options, Toggle } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
 
 type Window = { weekday: number; start: string; end: string };
@@ -11,6 +11,7 @@ type Availability = {
   recurring_windows: Window[];
   date_styles: string[];
   date_ready: boolean;
+  updated_at: string | null;
   policy: string;
 };
 
@@ -35,17 +36,23 @@ export function AvailabilityEditor({ onSaved, cta = "Save availability" }: { onS
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
 
+  // `updated_at` is the only thing that tells "never saved" from "saved as empty": GET /availability
+  // returns date_styles: [] for both, so seeding a default off `length` re-added a style the member
+  // had deliberately removed, every visit, on the next save of anything else. date_styles gates and
+  // scores nothing — it is only carried in the feature snapshot — so an empty list is a choice to
+  // respect, not a gap to fill.
   useEffect(() => {
     if (q.data && !loaded) {
+      const first = q.data.updated_at === null;
       setWindows(
-        q.data.recurring_windows.length
-          ? q.data.recurring_windows
-          : [
+        first
+          ? [
               { weekday: 3, start: "18:00", end: "22:00" },
               { weekday: 5, start: "11:00", end: "17:00" },
-            ],
+            ]
+          : q.data.recurring_windows,
       );
-      setStyles(q.data.date_styles.length ? q.data.date_styles : ["coffee"]);
+      setStyles(first ? ["coffee"] : q.data.date_styles);
       setReady(q.data.date_ready);
       setLoaded(true);
     }
@@ -72,7 +79,11 @@ export function AvailabilityEditor({ onSaved, cta = "Save availability" }: { onS
   const set = (i: number, patch: Partial<Window>) =>
     setWindows(windows.map((w, j) => (j === i ? { ...w, ...patch } : w)));
 
-  if (!q.data) return <Loading label="Loading your availability" />;
+  // Not an unconditional spinner: a first load that fails has no data, so returning the loader here
+  // meant a transient failure left this screen loading for ever, with no error and nothing to press
+  // — on the one screen a member goes to when they want to stop being introduced to people.
+  // `AwaitingServer` is the same two states the server-driven screens show, and it exists already.
+  if (!q.data) return <AwaitingServer label="Loading your availability" query={q} />;
 
   return (
     <View>

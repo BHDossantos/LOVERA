@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Text, View } from "react-native";
 import { ApiError, get, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
+import type { Blueprint, BlueprintSignal } from "@/api/types";
 import { Badge, Button, Card, Divider, ErrorState, Loading, Options, PageTitle, Screen, StatusBanner } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
 
@@ -18,27 +19,6 @@ import { color, space, type as typo } from "@/theme";
  * Special-category signals (orientation, faith) are marked, because a member should be able
  * to tell at a glance which of these are the sensitive ones.
  */
-type Signal = {
-  key: string;
-  category: string;
-  label: string;
-  value: string | null;
-  value_label: string;
-  confidence: string;
-  evidence: string | null;
-  member_corrected: boolean;
-  freshness_at: string | null;
-  special_category: boolean;
-  options: { value: string; label: string }[];
-};
-type Blueprint = {
-  version: { id: string; version_no: number; confirmed_at: string | null; model_version: string } | null;
-  signals: Signal[];
-  coverage: Record<string, number>;
-  freshness: { age_days: number | null; stale: boolean; refresh_after_days: number };
-  data_use: string;
-};
-
 const CATEGORY_LABEL: Record<string, string> = {
   life_plan: "Life plans",
   daily: "Day to day",
@@ -51,7 +31,7 @@ export default function YouBlueprint() {
   const { me } = useRequireMember();
   const router = useRouter();
   const qc = useQueryClient();
-  const [editing, setEditing] = useState<Signal | null>(null);
+  const [editing, setEditing] = useState<BlueprintSignal | null>(null);
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
@@ -101,7 +81,7 @@ export default function YouBlueprint() {
       </Screen>
     );
 
-  const byCategory = (q.data?.signals ?? []).reduce<Record<string, Signal[]>>((acc, sig) => {
+  const byCategory = (q.data?.signals ?? []).reduce<Record<string, BlueprintSignal[]>>((acc, sig) => {
     (acc[sig.category] ??= []).push(sig);
     return acc;
   }, {});
@@ -144,17 +124,28 @@ export default function YouBlueprint() {
               <Text style={s.body}>{sig.value_label || sig.value || "—"}</Text>
               {!!sig.evidence && <Text style={s.meta}>{sig.evidence}</Text>}
               <Text style={s.fine}>Confidence: {sig.confidence}</Text>
-              {sig.options.length > 0 && (
-                <Button
-                  variant="ghost"
-                  onPress={() => {
-                    setEditing(sig);
-                    setValue(sig.value ?? "");
-                    setError(null);
-                  }}
-                >
-                  That's not right
-                </Button>
+              {/* A sensitive signal answered before consent was withdrawn still shows here —
+                  a member is entitled to see what we hold about them — but changing it needs the
+                  consent that was withdrawn, so the only honest thing is to say so rather than
+                  offer a button whose one outcome is a refusal. */}
+              {sig.correctable === false ? (
+                <Text style={s.meta}>
+                  You withdrew consent for sensitive data, so this is no longer used for matching and cannot be
+                  changed here. Granting that consent again in Privacy makes it editable.
+                </Text>
+              ) : (
+                sig.options.length > 0 && (
+                  <Button
+                    variant="ghost"
+                    onPress={() => {
+                      setEditing(sig);
+                      setValue(sig.value ?? "");
+                      setError(null);
+                    }}
+                  >
+                    That's not right
+                  </Button>
+                )
               )}
             </Card>
           ))}

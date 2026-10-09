@@ -111,6 +111,19 @@ def correct_signal(key: str, data: PreferenceIn, principal: Principal = Depends(
 
     if key not in SIGNALS or data.value.get("value") not in SIGNALS[key].options:
         raise ApiError("VALIDATION_ERROR", "Unknown signal or value.")
+    # The interview path refuses a special-category question without explicit consent
+    # (blueprint/service.py). This path never did — it only validated the key and the value —
+    # so anything that could POST here could write sensitive-category data for a member who had
+    # declined or withdrawn that consent. The correction form reaching it made that live.
+    if SIGNALS[key].special_category:
+        from app.modules.account.service import has_consent
+
+        if not has_consent(db, principal.id, "special_category"):
+            raise ApiError(
+                "FORBIDDEN",
+                "This is a sensitive category, and it needs your explicit consent before we store it.",
+                extra={"consent_required": "special_category"},
+            )
     current_version = db.execute(select(BlueprintVersion).where(BlueprintVersion.member_id == principal.id, BlueprintVersion.status == "confirmed")).scalar_one_or_none()
     if current_version is None:
         raise ApiError("CONFLICT", "Confirm a Blueprint first.")

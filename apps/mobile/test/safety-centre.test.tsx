@@ -19,8 +19,25 @@ const SAFETY = {
   open_cases: 1,
   blocks: 2,
 };
+/** GET /safety/cases -> {"items": [case_payload(...)]}. Every field here is one the API sends. */
 const CASES = {
-  items: [{ id: "case_1", category: "harassment", state: "triaged", opened_at: "2026-10-01T10:00:00Z" }],
+  items: [
+    {
+      id: "case_1",
+      receipt_code: "SR-7Q2F",
+      category: "harassment",
+      severity: "P2",
+      status: "triaged",
+      submitted_at: "2026-10-01T10:00:00Z",
+      updated_at: "2026-10-02T10:00:00Z",
+      protection_applied: ["contact_separated"],
+      response_target: "Same-day review during staffed hours",
+      evidence_count: 0,
+      updates: [],
+      resolution_code: null,
+      support: { emergency: { number: "112", note: "Italy: 112." }, note: "We never contact the reported member with your identity." },
+    },
+  ],
 };
 const BLOCKS = {
   items: [
@@ -39,6 +56,10 @@ jest.mock("@/api/client", () => ({
 }));
 jest.mock("@/lib/auth", () => ({ useRequireMember: () => ({ me: { id: "mem_me" } }) }));
 jest.mock("expo-router", () => ({
+  // The screens in the Tabs navigator are focused rather than remounted when a member comes
+  // back to them, so the freshness clock resets on focus. The harness runs the callback once, as a
+  // first focus would, and `refocus()` runs it again.
+  useFocusEffect: (cb: () => void | (() => void)) => (require("./render") as { mockUseFocusEffect: (c: () => void | (() => void)) => void }).mockUseFocusEffect(cb),
   useRouter: () => ({ push: jest.fn(), back: jest.fn(), replace: jest.fn() }),
 }));
 
@@ -75,6 +96,11 @@ test("the emergency button dials a usable tel: URI, not the emergency object", a
 test("lists cases from /safety/cases and blocks from /blocks", async () => {
   const s = await renderScreen(<SafetyCentre />);
   expect(s.hasText("Harassment or unwanted contact")).toBe(true);
+  // The list read `state` and `opened_at`, which case_payload() does not return, so it showed
+  // an empty badge and the literal text "Invalid Date".
+  expect(s.hasText("Received and triaged")).toBe(true);
+  expect(s.joined()).toContain("SR-7Q2F");
+  expect(s.joined()).not.toContain("Invalid Date");
   expect(s.hasText("Ana")).toBe(true);
   expect(s.hasText("Ben")).toBe(true);
   expect(s.texts().filter((t) => t === "Unblock")).toHaveLength(2);
@@ -88,7 +114,7 @@ test("unblocking sends the blocked member's id, not the block row id", async () 
   // The confirmation is a native Alert, so invoke the action the member would choose.
   const buttons = alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[];
   await s.settle();
-  buttons.find((b) => b.text === "Unblock")?.onPress?.();
+  await s.run(() => buttons.find((b) => b.text === "Unblock")?.onPress?.());
   await s.settle();
   expect(mockDel).toHaveBeenCalledWith(expect.stringMatching(/^\/blocks\/mem_[ab]$/));
 });
@@ -107,7 +133,7 @@ test("a failed unblock is shown to the member, not swallowed", async () => {
   const s = await renderScreen(<SafetyCentre />);
   await s.press("Unblock");
   const buttons = alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[];
-  buttons.find((b) => b.text === "Unblock")?.onPress?.();
+  await s.run(() => buttons.find((b) => b.text === "Unblock")?.onPress?.());
   await s.settle();
   expect(s.joined()).toContain("You appear to be offline");
   // And the member can try again rather than being stuck on a spinner.
@@ -125,7 +151,7 @@ test("retrying a failed unblock retries the unblock, not the safety query", asyn
   mockDel.mockRejectedValueOnce(offline);
   const s = await renderScreen(<SafetyCentre />);
   await s.press("Unblock");
-  (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Unblock")?.onPress?.();
+  await s.run(() => (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Unblock")?.onPress?.());
   await s.settle();
   expect(s.joined()).toContain("You appear to be offline");
 
@@ -157,15 +183,15 @@ test("one unblock succeeding does not strand another's failure", async () => {
 
   const s = await renderScreen(<SafetyCentre />);
   const confirmLast = () =>
-    (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Unblock")?.onPress?.();
+    s.run(() => (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Unblock")?.onPress?.());
 
   // Ana's row first, and her request stays in flight.
   await s.press("Unblock", 0);
-  confirmLast();
+  await confirmLast();
   await s.settle();
   // Then Ben's, which fails while Ana's is still open.
   await s.press("Unblock", 1);
-  confirmLast();
+  await confirmLast();
   await s.settle();
   expect(s.joined()).toContain("You appear to be offline");
 
@@ -178,29 +204,26 @@ test("one unblock succeeding does not strand another's failure", async () => {
   expect(mockDel.mock.calls.map(([p]) => p)).toEqual(["/blocks/mem_a", "/blocks/mem_b"]);
 });
 
-test("two unblocks failing keeps both failures, each with its own retry", async () => {
-  // A single error slot meant the second failure overwrote the first, so one member's block
-  // silently stayed with nothing on screen about it. Failures are per member now, and each
-  // one is rendered in the row it belongs to.
+test("two unblocks failing on the shared list component keeps both failures", async () => {
+  // Same bug as above, in the extracted BlockList: this branch carried the earlier
+  // single-value fix, not the per-member one, so a second failure overwrote the first.
   const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
   const offline = (who: string) =>
-    Object.assign(new Error(`Could not unblock ${who}. You appear to be offline.`), {
+    Object.assign(new Error(`Could not unblock ${who}.`), {
       status: 0,
-      body: { code: "OFFLINE", message: `Could not unblock ${who}. You appear to be offline.`, retryable: true },
+      body: { code: "OFFLINE", message: `Could not unblock ${who}.`, retryable: true },
     });
-  mockDel.mockImplementation((path: string) =>
-    Promise.reject(offline(path === "/blocks/mem_a" ? "Ana" : "Ben")),
-  );
+  mockDel.mockImplementation((path: string) => Promise.reject(offline(path === "/blocks/mem_a" ? "Ana" : "Ben")));
 
   const s = await renderScreen(<SafetyCentre />);
   const confirmLast = () =>
-    (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Unblock")?.onPress?.();
+    s.run(() => (alert.mock.calls.at(-1)![2] as { text: string; onPress?: () => void }[]).find((b) => b.text === "Unblock")?.onPress?.());
 
   await s.press("Unblock", 0);
-  confirmLast();
+  await confirmLast();
   await s.settle();
   await s.press("Unblock", 1);
-  confirmLast();
+  await confirmLast();
   await s.settle();
 
   expect(s.joined()).toContain("Could not unblock Ana");

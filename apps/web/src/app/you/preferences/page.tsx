@@ -2,14 +2,19 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError, get, patch, post } from "@/lib/api";
+import { ApiError, del, get, patch, post } from "@/lib/api";
 import { useRequireMember } from "@/lib/auth";
 import { AppShell } from "@/components/shell/AppShell";
-import { Button, Card, EmptyState, ErrorState, Field, PageTitle, Skeleton, StatusBanner, TextInput, TierPill, TierSelect, cx } from "@/components/ui";
+import { Button, Card, EmptyState, ErrorState, Field, Modal, PageTitle, Skeleton, StatusBanner, TextInput, TierPill, TierSelect, cx } from "@/components/ui";
 import { LANG_LABEL } from "@/lib/format";
 
 type Option = { value: string; label: string };
-type Pref = { id: string; key: string; label: string; description: string; tier: string; operator: string; value: Record<string, unknown>; options: Option[] | null; updated_at: string | null };
+/**
+ * `active` is false when the matcher is ignoring a stored criterion — today, a sensitive
+ * preference whose special-category consent was withdrawn. The tier pill has to stop claiming
+ * "Must", because the one thing a Must promises is that it is being enforced.
+ */
+type Pref = { id: string; key: string; label: string; description: string; tier: string; operator: string; value: Record<string, unknown>; options: Option[] | null; active: boolean; inactive_reason: string | null; updated_at: string | null };
 type Available = { key: string; label: string; description: string; default_tier: string; operator: string; options: Option[] | null };
 type PrefsOut = { preferences: Pref[]; available: Available[]; tier_meaning: Record<string, string> };
 type Impact = { key: string; tier: string; eligible_now: number; eligible_after: number; pool_size: number; message: string };
@@ -33,6 +38,10 @@ export default function PreferencesPage() {
   const q = useQuery({ queryKey: ["preferences"], queryFn: () => get<PrefsOut>("/preferences"), enabled: !!me });
   const [editing, setEditing] = useState<Editing | null>(null);
   const [impact, setImpact] = useState<Impact | null>(null);
+  // Deleting a criterion is not undoable: the tier and the values are gone, and getting them back
+  // means reconstructing them and running the impact preview again. The mobile app has always
+  // asked first; this one deleted on the first click, one button away from Adjust.
+  const [confirmRemove, setConfirmRemove] = useState<{ key: string; label: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
 
@@ -58,6 +67,38 @@ export default function PreferencesPage() {
       setBusy(null);
     }
   };
+  /**
+   * Clear a preference back to unset.
+   *
+   * Open is not the same thing — it still weighs the criterion — so a member who wants one to
+   * play no part at all had no way to say so, and `DELETE /preferences/{key}` was called by
+   * neither app. It needs no sensitive-data consent, which matters for a criterion whose
+   * consent has just been withdrawn: that member is the likeliest to want it gone, and
+   * re-granting the consent must not be the price of deleting it.
+   */
+  const remove = async (key: string) => {
+    setBusy(`remove:${key}`);
+    setError(null);
+    try {
+      await del(`/preferences/${key}`);
+      // `/blueprint/current` embeds the preference list (`current_payload` in
+      // blueprint/service.py), so a preference write has to refresh that query too — otherwise a
+      // Blueprint screen left mounted behind this one keeps showing the criterion that was just
+      // changed or deleted. The web save already did this; nothing else did.
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["preferences"] }),
+        qc.invalidateQueries({ queryKey: ["blueprint"] }),
+      ]);
+      setEditing(null);
+      setImpact(null);
+      setConfirmRemove(null);
+    } catch (e) {
+      setError(e as ApiError);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const save = async () => {
     if (!editing) return;
     setBusy("save");
@@ -100,14 +141,42 @@ export default function PreferencesPage() {
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-semibold text-ink">{p.label}</span>
-                      <TierPill tier={p.tier} />
+                      {p.active !== false ? <TierPill tier={p.tier} /> : <span className="rounded-full border border-border px-2 py-0.5 text-xs text-ink-tertiary">not in use</span>}
                       {CORE.has(p.key) && <span className="text-xs text-ink-tertiary">core · set to Open rather than remove</span>}
                     </div>
                     <p className="text-sm text-ink-secondary">{describe(p)}</p>
+                    {p.active === false && (
+                      <p className="mt-1 text-sm text-ink-secondary">
+                        You withdrew consent for sensitive data, so this is not being applied to your introductions. Your
+                        setting is kept — granting that consent again in <a className="underline" href="/you/privacy">Privacy</a> puts
+                        it back in use.
+                      </p>
+                    )}
                   </div>
-                  <Button size="sm" variant="secondary" onClick={() => startEdit(p)} aria-label={`Adjust ${p.label}`}>
-                    Adjust
-                  </Button>
+                  <div className="flex shrink-0 flex-col items-end gap-1">
+                    {p.active !== false ? (
+                      <Button size="sm" variant="secondary" onClick={() => startEdit(p)} aria-label={`Adjust ${p.label}`}>
+                        Adjust
+                      </Button>
+                    ) : (
+                      <a className="text-sm underline text-ink-secondary" href="/you/privacy">
+                        Review consents
+                      </a>
+                    )}
+                    {/* The four eligibility criteria are a 409 from `delete_preference`: they are
+                        set to Open, never removed, so no button offers it. */}
+                    {!CORE.has(p.key) && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        loading={busy === `remove:${p.key}`}
+                        onClick={() => setConfirmRemove({ key: p.key, label: p.label })}
+                        aria-label={`Delete ${p.label}`}
+                      >
+                        Delete
+                      </Button>
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>
@@ -192,6 +261,23 @@ export default function PreferencesPage() {
           </div>
         </Card>
       )}
+      {/* The same wording as the mobile dialog, including the part that matters most: this is not
+          Open. A member who meant to loosen a criterion and deleted it instead has lost the tier
+          and the values, and is matched on neither. */}
+      <Modal open={!!confirmRemove} title={confirmRemove ? `Stop using ${confirmRemove.label} entirely?` : ""} onClose={() => setConfirmRemove(null)}>
+        <p className="mb-3 text-sm text-ink-secondary">
+          It will play no part in your matches until you set it again. This is not the same as Open, which still weighs it
+          lightly.
+        </p>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button variant="danger" loading={!!confirmRemove && busy === `remove:${confirmRemove.key}`} onClick={() => confirmRemove && remove(confirmRemove.key)}>
+            Stop using it
+          </Button>
+          <Button variant="secondary" onClick={() => setConfirmRemove(null)}>
+            Keep it
+          </Button>
+        </div>
+      </Modal>
     </AppShell>
   );
 }

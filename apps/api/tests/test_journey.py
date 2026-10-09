@@ -416,3 +416,149 @@ def test_worker_runs_weekly_batch_once_per_cohort_date(client, monkeypatch):
         db.close()
     assert first is not None and first["status"] in ("review", "published")
     assert second is None  # idempotent for the cohort date
+
+
+def test_the_explanation_only_names_gaps_the_viewer_can_fill(client):
+    """`missing_signals` is right for the uncertainty maths and wrong for a correction form.
+
+    scoring.py marks a signal missing when *either* participant lacks it. The explanation's
+    `missing_signal_keys` is read by one thing — a form asking the viewer to supply or correct
+    their own value — so naming the other person's gap sent it promoting a value of the
+    viewer's that was fine, while a gap of their own had no row in /blueprint/current and so
+    could not be chosen at all.
+    """
+    from app.catalog.signals import SIGNALS
+
+    a = Actor(client, unique_email("ana-gap"))
+    b = Actor(client, unique_email("ben-gap"))
+    onboard(a, gender="woman", seeking=["man"], name="Ana", zone="rome:prati")
+    onboard(b, gender="man", seeking=["woman"], name="Ben", zone="rome:centro", birth_year=1990)
+    subscribe(a)
+    subscribe(b)
+    run_batch(client, publish=True)
+    intro = find_intro_between(a, b.id)
+    assert intro, "the batch did not introduce the two members this test created"
+
+    current = a.get("/blueprint/current").json()
+    answered = {s["key"] for s in current["signals"]}
+    # Every catalog signal is either answered, offered as unanswered, or withheld because it is
+    # special-category and this member did not consent to that category. Nothing else falls
+    # through — a signal that is neither answered nor offered is one nobody can ever supply.
+    withheld = {k for k, s in SIGNALS.items() if s.special_category}
+    assert answered | {s["key"] for s in current["unanswered"]} | withheld == set(SIGNALS)
+    assert answered.isdisjoint({s["key"] for s in current["unanswered"]})
+    # onboard() leaves special-category consent off, so the sensitive ones really are withheld.
+    assert withheld.isdisjoint({s["key"] for s in current["unanswered"]})
+    # And the unanswered ones carry what a chooser needs.
+    for sig in current["unanswered"]:
+        assert sig["options"] and sig["label"] and "value" not in sig
+
+    # Every key the explanation offers as a correction target is one Ana can actually act on:
+    # either she has not answered it, or she has and it is hers to change.
+    keys = intro["explanation"]["unknown"]["missing_signal_keys"]
+    choosable = answered | {s["key"] for s in current["unanswered"]}
+    assert all(k in choosable for k in keys), keys
+    assert all(k in SIGNALS for k in keys), keys
+
+
+def test_a_sensitive_signal_needs_consent_before_it_can_be_corrected(client):
+    """GDPR Art. 9 data is declared, never collected by a side door.
+
+    The interview path refuses a special-category question without explicit consent. The
+    correction path (`POST /blueprint/signals/{key}`) only validated the key and the value, so
+    anything that could reach it could write faith data for a member who had declined. Exposing
+    unanswered catalog signals to the correction form made that reachable from the UI.
+    """
+    from app.catalog.signals import SIGNALS
+
+    sensitive = [k for k, s in SIGNALS.items() if s.special_category]
+    assert sensitive, "this test is about special-category signals; the catalog has none"
+    key = sensitive[0]
+
+    declined = Actor(client, unique_email("ana-noconsent"))
+    onboard(declined, gender="woman", seeking=["man"], name="Ana", zone="rome:prati", faith_consent=False)
+
+    # Not offered: a control that is going to be refused is its own kind of wrong.
+    current = declined.get("/blueprint/current").json()
+    assert key not in {s["key"] for s in current["unanswered"]}
+    assert key not in {s["key"] for s in current["signals"]}
+
+    # And refused if asked for anyway, because the client is not what enforces this.
+    r = declined.post(f"/blueprint/signals/{key}", json={"tier": "open", "value": {"value": next(iter(SIGNALS[key].options))}})
+    assert r.status_code == 403, r.text
+    # error_payload merges `extra` into the error object rather than nesting it.
+    assert r.json()["error"]["consent_required"] == "special_category"
+
+    # A member who did consent is offered it and can set it.
+    consented = Actor(client, unique_email("ben-consent"))
+    onboard(consented, gender="man", seeking=["woman"], name="Ben", zone="rome:centro", birth_year=1990, faith_consent=True)
+    offered = consented.get("/blueprint/current").json()
+    assert key in {s["key"] for s in offered["unanswered"]} | {s["key"] for s in offered["signals"]}
+    value = next(iter(SIGNALS[key].options))
+    r = consented.post(f"/blueprint/signals/{key}", json={"tier": "open", "value": {"value": value}})
+    assert r.status_code == 200, r.text
+    assert next(s for s in consented.get("/blueprint/current").json()["signals"] if s["key"] == key)["correctable"] is True
+
+    # Withdrawing consent afterwards: the answer stays visible, stops being editable, and stops
+    # being matched on. Consent is the lawful basis, so withdrawing it has to end the processing
+    # and not only the collection — this used to set a flag on the snapshot that nothing read.
+    from app.core.db import session_factory
+    from app.models.account import Member
+    from app.modules.matching.snapshot import build_snapshot
+
+    consented.put("/consents/special_category", json={"status": "revoked", "policy_version": "2026-01-01"})
+    after = consented.get("/blueprint/current").json()
+    row = next((s for s in after["signals"] if s["key"] == key), None)
+    assert row is not None, "the member must still see what we hold about them"
+    assert row["correctable"] is False, "and must not be offered an edit that correct_signal refuses"
+    assert key not in {s["key"] for s in after["unanswered"]}
+    r = consented.post(f"/blueprint/signals/{key}", json={"tier": "open", "value": {"value": value}})
+    assert r.status_code == 403, r.text
+
+    db = session_factory()()
+    try:
+        snap = build_snapshot(db, db.get(Member, consented.id))
+        assert snap is not None
+        assert key not in snap.signals, "a signal whose consent was withdrawn must not be scored"
+        assert key not in snap.confidences
+        assert snap.special_category_consent is False
+    finally:
+        db.close()
+
+
+def test_a_sensitive_preference_stops_being_applied_when_consent_is_withdrawn(client):
+    """The other half of the same rule.
+
+    Dropping the member's own faith signal stops them being ranked on it. A faith *preference*
+    they set while consented keeps ranking and gating other people by theirs, because
+    directional_fit() and hard_gate() both iterate viewer.preferences — so withdrawing consent
+    has to end that too.
+    """
+    from app.catalog.signals import PREFERENCES, SIGNALS
+    from app.core.db import session_factory
+    from app.models.account import Member
+    from app.modules.matching.snapshot import build_snapshot
+
+    pref_key = next(k for k, p in PREFERENCES.items() if (SIGNALS.get(p.target) and SIGNALS[p.target].special_category))
+    value = next(iter(SIGNALS[PREFERENCES[pref_key].target].options))
+
+    a = Actor(client, unique_email("ana-pref"))
+    onboard(a, gender="woman", seeking=["man"], name="Ana", zone="rome:prati", faith_consent=True)
+    r = a.patch(f"/preferences/{pref_key}", json={"tier": "prefer", "value": {"in": [value]}})
+    assert r.status_code == 200, r.text
+
+    db = session_factory()()
+    try:
+        snap = build_snapshot(db, db.get(Member, a.id))
+        assert snap and pref_key in {p.key for p in snap.preferences}, "set while consented, so it applies"
+    finally:
+        db.close()
+
+    a.put("/consents/special_category", json={"status": "revoked", "policy_version": "2026-01-01"})
+    db = session_factory()()
+    try:
+        snap = build_snapshot(db, db.get(Member, a.id))
+        assert snap is not None
+        assert pref_key not in {p.key for p in snap.preferences}, "withdrawn, so it must not rank or gate anybody"
+    finally:
+        db.close()

@@ -13,7 +13,21 @@ import type { BlueprintCurrent, CorrectionResult } from "./types";
 export function CorrectionForm({ introId, suggestedKeys = [], title = "Something wrong?" }: { introId: string; suggestedKeys?: string[]; title?: string }) {
   const qc = useQueryClient();
   const blueprint = useQuery({ queryKey: ["blueprint", "current"], queryFn: () => get<BlueprintCurrent>("/blueprint/current") });
-  const signals = useMemo(() => blueprint.data?.signals ?? [], [blueprint.data]);
+  /**
+   * Answered signals plus the ones the member never answered. The unanswered ones have to be
+   * here: `missing_signal_keys` names only signals the viewer lacks, and those have no row in
+   * `signals`, so a list built from `signals` alone silently dropped the one thing the member
+   * could usefully supply while reordering values that were fine.
+   */
+  const signals = useMemo(
+    () => [
+      // `correctable` is false for a sensitive signal answered before consent was withdrawn: the
+      // row is still shown on the Blueprint screen, but correct_signal refuses to change it.
+      ...(blueprint.data?.signals ?? []).filter((s) => s.correctable).map((s) => ({ ...s, value_label: s.value_label })),
+      ...(blueprint.data?.unanswered ?? []).map((s) => ({ ...s, value: null, value_label: "", correctable: true })),
+    ],
+    [blueprint.data],
+  );
   const [signalKey, setSignalKey] = useState<string>("");
   const [value, setValue] = useState<string>("");
   const [note, setNote] = useState("");
@@ -53,7 +67,7 @@ export function CorrectionForm({ introId, suggestedKeys = [], title = "Something
       </h2>
       <p className="mt-1 text-sm text-ink-secondary">If an assumption about you is off, correct it here. Corrections update your own Blueprint only; they are never shown to the other member.</p>
       {result ? (
-        <StatusBanner type="success" title="Correction recorded" body={result.message} />
+        <StatusBanner type={result.applied ? "success" : "info"} title={result.applied ? "Your Blueprint is corrected" : "On record, but nothing changed yet"} body={result.message} />
       ) : (
         <form onSubmit={submit} className="mt-4">
           <ErrorState error={error} />
@@ -63,15 +77,15 @@ export function CorrectionForm({ introId, suggestedKeys = [], title = "Something
               {ordered.map((s) => (
                 <option key={s.key} value={s.key}>
                   {s.label}
-                  {s.value_label ? ` (currently: ${s.value_label})` : " (not set)"}
+                  {s.value_label ? ` (currently: ${s.value_label})` : " (you haven't answered this one)"}
                 </option>
               ))}
             </Select>
           </Field>
           {active && (
-            <Field label="Correct value" htmlFor="correction-value" help={active.special_category ? "This is a sensitive category. It is only ever used because you declared it, never inferred." : "Optional. Leave blank to flag the signal without changing it."}>
+            <Field label="Correct value" htmlFor="correction-value" help={active.special_category ? "This is a sensitive category. It is only ever used because you declared it, never inferred." : "Pick the right value to change what you are matched on. Flagging alone only tells a reviewer."}>
               <Select id="correction-value" value={value} onChange={(e) => setValue(e.target.value)}>
-                <option value="">Just flag it as wrong</option>
+                <option value="">Just flag it as wrong (does not change matching)</option>
                 {active.options.map((o) => (
                   <option key={o.value} value={o.value}>
                     {o.label}

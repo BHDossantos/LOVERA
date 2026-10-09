@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -10,10 +11,35 @@ from app.catalog.cities import CITIES, ZONES, distance_band, zone_distance_km
 from app.catalog.prompts import PROFILE_PROMPTS
 from app.core.analytics import track
 from app.core.audit import audit
+from app.core.datauri import MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL, PHOTO_TYPES, VOICE_TYPES, decode_data_url
 from app.core.errors import ApiError
 from app.core.timeutil import iso, utcnow
 from app.models.account import Member
 from app.models.profile import Profile, ProfileMedia
+
+# How long a created-but-never-completed upload is given before it counts as abandoned. Longer
+# than any single upload can take — the field it carries is capped at 11 MB, which is minutes on a
+# bad mobile connection — so a slow upload is never swept while it is still running.
+ABANDONED_UPLOAD_AFTER = timedelta(minutes=30)
+
+PHOTO_LIMIT = 6
+PHOTO_LIMIT_MESSAGE = "You can have up to six photos."
+
+
+def photo_count(media: list[ProfileMedia]) -> int:
+    """How many photos the member actually has.
+
+    An upload that was created and never completed is not a photo: it carries no bytes,
+    `media_payload` gives it no URL, so neither app shows it, and the member cannot delete what
+    they cannot see. Counting those toward the limit meant a few interrupted uploads — a connection
+    lost partway through an 11 MB photo will do it — told the member they already had six photos
+    while their profile showed two, with nothing to remove to get out of it.
+
+    One function, used by both gates below, so the thing that is limited and the thing that is
+    counted cannot drift apart.
+    """
+    return len([m for m in media if m.type == "photo" and m.upload_state == "complete"])
+
 
 VISIBILITY = {
     "display_name": "public",
@@ -152,12 +178,24 @@ def update_profile(db: Session, member: Member, data: dict[str, Any]) -> Profile
 def create_media(db: Session, member: Member, media_type: str, content_type: str, size_bytes: int, checksum: str | None, alt_text: str | None) -> ProfileMedia:
     if media_type not in ("photo", "voice"):
         raise ApiError("VALIDATION_ERROR", "Unsupported media type.", field_errors={"type": "photo or voice"})
-    if size_bytes > 15 * 1024 * 1024:
-        raise ApiError("VALIDATION_ERROR", "File is too large (max 15 MB).", field_errors={"size_bytes": "too_large"})
-    existing = media_for(db, member.id)
-    if media_type == "photo" and len([m for m in existing if m.type == "photo"]) >= 6:
-        raise ApiError("CONFLICT", "You can have up to six photos.")
-    position = max([m.position for m in existing], default=-1) + 1
+    # The same limit `complete_media` enforces on the bytes themselves, so an honest client is
+    # refused here — before a row exists — rather than after one has been created.
+    if size_bytes > MAX_UPLOAD_BYTES:
+        raise ApiError("VALIDATION_ERROR", f"File is too large (max {MAX_UPLOAD_LABEL}).", field_errors={"size_bytes": "too_large"})
+    # Abandoned rows are swept rather than left to accumulate. The grace period keeps an upload
+    # still in flight from being pulled out from under itself, so it is longer than any single
+    # upload can take; it is only housekeeping, because `photo_count` already ignores them.
+    cutoff = utcnow() - ABANDONED_UPLOAD_AFTER
+    live, abandoned = [], []
+    for m in media_for(db, member.id):
+        (abandoned if m.upload_state == "created" and m.created_at < cutoff else live).append(m)
+    for m in abandoned:
+        m.deleted_at = utcnow()
+    # Refused here so the member hears it before uploading anything. The limit is enforced again at
+    # completion, which is where a photo actually becomes one — this gate is about the message.
+    if media_type == "photo" and photo_count(live) >= PHOTO_LIMIT:
+        raise ApiError("CONFLICT", PHOTO_LIMIT_MESSAGE)
+    position = max([m.position for m in live], default=-1) + 1
     media = ProfileMedia(member_id=member.id, type=media_type, storage_key=f"profile/{member.id}/{hashlib.sha256((checksum or str(position)).encode()).hexdigest()[:24]}", content_type=content_type, size_bytes=size_bytes, checksum=checksum, position=position, alt_text=alt_text, upload_state="created", moderation_status="pending")
     db.add(media)
     db.flush()
@@ -170,6 +208,22 @@ def complete_media(db: Session, member: Member, media_id: str, checksum: str | N
         raise ApiError("NOT_FOUND")
     if checksum and media.checksum and checksum != media.checksum:
         raise ApiError("VALIDATION_ERROR", "Checksum mismatch. Upload again.", field_errors={"checksum": "mismatch"})
+    # The limit on photos is a statement about photos, so it is enforced where a row becomes one.
+    # Checked at creation too, for the message, but only this gate holds: nothing stops a client
+    # creating seven rows before completing any of them, and each create saw six that were not yet
+    # photos.
+    if media.type == "photo" and photo_count([m for m in media_for(db, member.id) if m.id != media.id]) >= PHOTO_LIMIT:
+        raise ApiError("CONFLICT", PHOTO_LIMIT_MESSAGE)
+    # The same validation as safety evidence, and for the same reason from the other side: this
+    # media is served to other members as an image or audio source, so an unchecked string here is
+    # a URL one member can make another member's browser fetch — see app/core/datauri.py.
+    if data_url:
+        raw = decode_data_url(data_url, media.content_type, VOICE_TYPES if media.type == "voice" else PHOTO_TYPES)
+        # `size_bytes` was the member's own claim until now, and the clients do not all mean the
+        # same thing by it: mobile sends the size of the asset the picker handed it while uploading
+        # a re-encoded JPEG, so the number on the row described a file nobody has. Now that the
+        # bytes are here, record the bytes.
+        media.size_bytes = len(raw)
     media.upload_state = "complete"
     # Pilot storage: small data URLs are kept in the local object store adapter; a real deployment uses signed bucket uploads.
     from app.modules.profile.storage import put_object

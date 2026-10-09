@@ -1,11 +1,12 @@
-import { useState } from "react";
 import { useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Linking, Pressable, Text, View } from "react-native";
-import { ApiError, del, get } from "@/api/client";
+import { Linking, Text } from "react-native";
+import { ApiError, get } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
-import { CATEGORY_LABEL, telUri, type Block, type SafetyCase, type SafetyCenter } from "@/components/safety";
-import { Badge, Button, Card, Divider, Empty, ErrorState, Loading, PageTitle, Screen, StatusBanner } from "@/components/ui";
+import { telUri, type SafetyCenter } from "@/components/safety";
+import { BlockList } from "@/components/BlockList";
+import { CaseList } from "@/components/CaseList";
+import { Button, Card, Divider, ErrorState, Loading, PageTitle, Screen, StatusBanner } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
 
 /**
@@ -14,56 +15,16 @@ import { color, space, type as typo } from "@/theme";
  * Three requests, because the API splits them that way: /safety carries the emergency
  * number, the guidance and two counts; the case list is /safety/cases and the block list is
  * /blocks. The previous version read all of it off /safety, which does not return it.
+ *
+ * The lists are components rather than inline markup because the API's own safety-centre
+ * actions link to /safety/cases and /safety/blocks as pages in their own right.
  */
 export default function SafetyCentre() {
   const { me } = useRequireMember({ allowRestricted: true, allowOnboarding: true });
   const router = useRouter();
-  // Both are keyed by member, because rows other than the one spinning stay pressable and so
-  // several unblocks really can be in flight at once. Anything held as a single value here is
-  // stomped on by whichever request finishes last, and a lost failure is a block that silently
-  // stayed — which is the bug this error handling exists for in the first place.
-  const [unblocking, setUnblocking] = useState<string[]>([]);
-  const [failures, setFailures] = useState<Record<string, ApiError>>({});
 
   const centre = useQuery({ queryKey: ["safety"], queryFn: () => get<SafetyCenter>("/safety"), enabled: !!me });
-  const cases = useQuery({
-    queryKey: ["safety", "cases"],
-    queryFn: () => get<{ items: SafetyCase[] }>("/safety/cases"),
-    enabled: !!me,
-  });
-  const blocks = useQuery({ queryKey: ["blocks"], queryFn: () => get<{ items: Block[] }>("/blocks"), enabled: !!me });
-
   const emergency = centre.data?.emergency;
-  const forget = (memberId: string) => setFailures(({ [memberId]: _cleared, ...rest }) => rest);
-
-  const runUnblock = async (b: Block) => {
-    setUnblocking((u) => [...u, b.member_id]);
-    forget(b.member_id);
-    try {
-      await del(`/blocks/${b.member_id}`);
-      forget(b.member_id);
-      await Promise.all([blocks.refetch(), centre.refetch()]);
-    } catch (e) {
-      // An offline device used to leave this as an unhandled rejection: the block stayed,
-      // nothing was said, and the member had no way to tell it had failed.
-      setFailures((f) => ({ ...f, [b.member_id]: e as ApiError }));
-    } finally {
-      setUnblocking((u) => u.filter((id) => id !== b.member_id));
-    }
-  };
-
-  const unblock = (b: Block) =>
-    Alert.alert(
-      `Unblock ${b.display_name}?`,
-      "They are never told you blocked them, or that you stopped. A conversation that ended stays ended.",
-      [
-        { text: "Keep blocked", style: "cancel" },
-        {
-          text: "Unblock",
-          onPress: () => void runUnblock(b),
-        },
-      ],
-    );
 
   return (
     <Screen>
@@ -80,10 +41,7 @@ export default function SafetyCentre() {
         title="In immediate danger, call emergency services"
         body={emergency?.note ?? "We are not an emergency service."}
       />
-      <Button
-        variant="danger"
-        onPress={() => void Linking.openURL(telUri(emergency))}
-      >
+      <Button variant="danger" onPress={() => void Linking.openURL(telUri(emergency))}>
         {`Call ${emergency?.number ?? "112"}`}
       </Button>
 
@@ -104,57 +62,16 @@ export default function SafetyCentre() {
 
       <Divider />
       <Text style={s.section}>Your cases</Text>
-      {cases.isLoading && <Loading label="Loading your cases" />}
-      <ErrorState error={(cases.error as ApiError) ?? null} retry={() => cases.refetch()} />
-      {cases.data?.items.length === 0 && (
-        <Empty title="No cases" body="Anything you report shows up here with its status." />
-      )}
-      {cases.data?.items.map((c) => (
-        <Pressable key={c.id} onPress={() => router.push(`/safety/cases/${c.id}` as never)} accessibilityRole="button">
-          <Card>
-            <View style={s.row}>
-              <Text style={s.name}>{CATEGORY_LABEL[c.category]?.label ?? c.category}</Text>
-              <Badge label={c.state} tone="muted" />
-            </View>
-            <Text style={s.meta}>Opened {new Date(c.opened_at).toLocaleDateString()}</Text>
-          </Card>
-        </Pressable>
-      ))}
+      <CaseList />
 
       <Divider />
       <Text style={s.section}>People you've blocked</Text>
-      {blocks.isLoading && <Loading label="Loading your blocks" />}
-      <ErrorState error={(blocks.error as ApiError) ?? null} retry={() => blocks.refetch()} />
-      {blocks.data?.items.length === 0 && (
-        <Empty title="Nobody blocked" body="Blocking is immediate and silent. They are never told." />
-      )}
-      {blocks.data?.items.map((b) => (
-        <Card key={b.member_id}>
-          <Text style={s.name}>{b.display_name}</Text>
-          <Text style={s.meta}>Blocked {new Date(b.created_at).toLocaleDateString()}</Text>
-          {/* A failure belongs in the row it happened to, not in a banner at the top of the
-              page. A banner has to pick one when several fail, and whichever it drops becomes a
-              block that silently stayed. Here the message sits next to the person it is about
-              and its retry cannot be ambiguous.
-
-              The retry repeats the DELETE rather than reopening the confirmation: the member
-              already said yes, and asking twice because our request failed is our problem to
-              absorb, not theirs to re-answer. */}
-          <ErrorState error={failures[b.member_id] ?? null} retry={() => void runUnblock(b)} />
-          {/* A block you cannot lift is a decision made for you. */}
-          <Button variant="ghost" loading={unblocking.includes(b.member_id)} onPress={() => unblock(b)}>
-            Unblock
-          </Button>
-        </Card>
-      ))}
+      <BlockList onChanged={() => centre.refetch()} />
     </Screen>
   );
 }
 
 const s = {
-  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  name: { ...typo.heading, color: color.ink, flex: 1, paddingRight: space.sm },
-  meta: { ...typo.small, color: color.inkSecondary, marginTop: 2 },
   section: { ...typo.title, color: color.ink, marginTop: space.lg, marginBottom: space.sm },
   edu: { ...typo.small, color: color.inkSecondary, marginTop: 2 },
 } as const;

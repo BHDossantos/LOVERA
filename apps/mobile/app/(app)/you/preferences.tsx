@@ -1,7 +1,8 @@
 import { useState } from "react";
+import { useRouter } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Text, View } from "react-native";
-import { ApiError, get, patch, post } from "@/api/client";
+import { Alert, Text, View } from "react-native";
+import { ApiError, del, get, patch, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
 import { Badge, Button, Card, Chip, ChipGroup, Divider, ErrorState, Loading, Options, PageTitle, Screen, StatusBanner } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
@@ -19,7 +20,24 @@ import { color, space, type as typo } from "@/theme";
  * shown; the choice stays the member's.
  */
 type Option = { value: string; label: string };
-type Pref = { id: string; key: string; label: string; description: string; tier: string; operator: string; value: Record<string, unknown>; options: Option[] | null; updated_at: string | null };
+type Pref = {
+  id: string;
+  key: string;
+  label: string;
+  description: string;
+  tier: string;
+  operator: string;
+  value: Record<string, unknown>;
+  options: Option[] | null;
+  /**
+   * False when the matcher is ignoring this criterion even though it is still stored — today
+   * that means a sensitive preference whose special-category consent was withdrawn. The badge
+   * has to stop saying "Must", because the one thing a Must promises is that it is enforced.
+   */
+  active: boolean;
+  inactive_reason: string | null;
+  updated_at: string | null;
+};
 type Available = { key: string; label: string; description: string; default_tier: string; operator: string; options: Option[] | null };
 type PrefsOut = { preferences: Pref[]; available: Available[]; tier_meaning: Record<string, string> };
 type Impact = { key: string; tier: string; eligible_now: number; eligible_after: number; pool_size: number; message: string };
@@ -61,6 +79,14 @@ const TIERS = [
   { value: "open", label: "Open", body: "Used lightly, mostly to explain a match." },
 ];
 
+/**
+ * The four the API refuses to delete (`delete_preference` in blueprint/router.py): age,
+ * distance, children and relationship structure are eligibility, so they are set to Open
+ * rather than removed. Offering a Remove button that always 409s would be worse than offering
+ * none, so these do not get one.
+ */
+const CANNOT_REMOVE = ["age_range", "distance_km", "children", "relationship_structure"];
+
 /** Identifies an edit by exactly the values the impact preview is computed from. */
 const signature = (e: Editing) => JSON.stringify([e.key, e.tier, e.value]);
 
@@ -75,6 +101,7 @@ function describe(p: { value: Record<string, unknown>; options: Option[] | null 
 
 export default function YouPreferences() {
   const { me } = useRequireMember();
+  const router = useRouter();
   const qc = useQueryClient();
   const [editing, setEditing] = useState<Editing | null>(null);
   // The preview is stored with a signature of the values it was computed for. Clearing it on
@@ -135,13 +162,55 @@ export default function YouPreferences() {
     }
   };
 
+  /**
+   * Clear a preference back to unset.
+   *
+   * Setting one to Open is not the same thing: Open still weighs it, so a member who decides
+   * a criterion should play no part at all had no way to say so, and the one endpoint that
+   * does it was never called from either app.
+   */
+  const remove = async (key: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await del(`/preferences/${key}`);
+      // `/blueprint/current` embeds the preference list (`current_payload` in
+      // blueprint/service.py), so a preference write has to refresh that query too — otherwise a
+      // Blueprint screen left mounted behind this one keeps showing the criterion that was just
+      // changed or deleted. The web save already did this; nothing else did.
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["preferences"] }),
+        qc.invalidateQueries({ queryKey: ["blueprint"] }),
+      ]);
+      setEditing(null);
+      setImpact(null);
+    } catch (e) {
+      setError(e as ApiError);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmRemove = (key: string, label: string) =>
+    Alert.alert(
+      `Stop using ${label} entirely?`,
+      "It will play no part in your matches until you set it again. This is not the same as Open, which still weighs it lightly.",
+      [
+        { text: "Keep it", style: "cancel" },
+        { text: "Stop using it", style: "destructive", onPress: () => void remove(key) },
+      ],
+    );
+
   const save = async () => {
     if (!editing) return;
     setBusy(true);
     setError(null);
     try {
       await patch(`/preferences/${editing.key}`, { tier: editing.tier, value: editing.value });
-      await qc.invalidateQueries({ queryKey: ["preferences"] });
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["preferences"] }),
+        qc.invalidateQueries({ queryKey: ["blueprint"] }),
+      ]);
       setEditing(null);
       setImpact(null);
     } catch (e) {
@@ -248,6 +317,12 @@ export default function YouPreferences() {
         >
           Cancel
         </Button>
+        {/* Only for a preference that is actually set, and only where the API will accept it. */}
+        {!CANNOT_REMOVE.includes(editing.key) && q.data?.preferences.some((p) => p.key === editing.key) && (
+          <Button variant="ghost" loading={busy} onPress={() => confirmRemove(editing.key, editing.label)}>
+            Stop using this preference
+          </Button>
+        )}
       </Screen>
     );
 
@@ -264,12 +339,36 @@ export default function YouPreferences() {
         <Card key={p.key}>
           <View style={s.row}>
             <Text style={s.h2}>{p.label}</Text>
-            <Badge label={p.tier} tone={p.tier === "must" ? "caution" : "muted"} />
+            <Badge label={p.active === false ? "not in use" : p.tier} tone={p.active !== false && p.tier === "must" ? "caution" : "muted"} />
           </View>
           <Text style={s.meta}>{describe(p)}</Text>
-          <Button variant="secondary" onPress={() => open(p)}>
-            Change
-          </Button>
+          {p.active === false && (
+            <Text style={s.meta}>
+              You withdrew consent for sensitive data, so this is not being applied to your introductions. Your setting
+              is kept — granting that consent again in Privacy puts it back in use.
+            </Text>
+          )}
+          {p.active !== false ? (
+            <Button variant="secondary" onPress={() => open(p)}>
+              Change
+            </Button>
+          ) : (
+            <>
+              {/* Erasing it needs no consent — `delete_preference` refuses only the four
+                  eligibility criteria — and a member who has just withdrawn consent for
+                  sensitive data is the likeliest person to want this one gone. Routing them
+                  through the editor would have made re-granting that consent the price of
+                  deleting the thing they withdrew it over. */}
+              {!CANNOT_REMOVE.includes(p.key) && (
+                <Button variant="ghost" loading={busy} onPress={() => confirmRemove(p.key, p.label)}>
+                  Delete this preference
+                </Button>
+              )}
+              <Button variant="ghost" onPress={() => router.push("/you/privacy")}>
+                Review your consents
+              </Button>
+            </>
+          )}
         </Card>
       ))}
 

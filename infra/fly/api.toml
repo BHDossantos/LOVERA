@@ -18,6 +18,12 @@ primary_region = "fra"
   # Belt and braces: the one-time code is only ever returned when this is true
   # AND the env is not production. Both say no here.
   MM_EXPOSE_DEV_OTP = "false"
+  # Identity verification. "sandbox" is refused at boot in production, because the sandbox
+  # completion endpoint is itself refused there and onboarding cannot finish without a result —
+  # every signup would stop at step 2 of 6 with every health check green. Pick one deliberately:
+  # a real vendor's name, or "manual_review", which means a person approves every member from the
+  # admin verification queue and the app tells them so.
+  MM_IDENTITY_PROVIDER = "manual_review"
   # Outbound mail. The host and credentials are secrets (see docs/DEPLOY.md);
   # only the non-secret shape belongs in a committed file. MM_MAIL_TRANSPORT is
   # left unset on purpose: "auto" means the API refuses to start if MM_SMTP_HOST

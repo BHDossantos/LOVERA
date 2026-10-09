@@ -103,9 +103,16 @@ export type ConversationSummary = {
   other: ProfileSnapshot;
   last_message: { text: string; sent_at: string; mine: boolean } | null;
   unread: number;
-  date: { date_plan_id: string; status: string; starts_at: string | null } | null;
+  /** `timezone` is the venue's, so this list and the thread show the same clock face as the date screen. */
+  date: { date_plan_id: string; status: string; starts_at: string | null; timezone: string } | null;
   opened_at: string;
   safety_hold: boolean;
+  /**
+   * The block and report target, carried separately from `other` because `other` is
+   * neutralised once the conversation closes (no name, no photo, no id) — which also took
+   * away the only thing the safety actions could act on.
+   */
+  safety: { subject_id: string | null; blocked_by_you: boolean };
 };
 
 export type Message = {
@@ -159,3 +166,55 @@ export type DatePlan = {
 export type TodayTask = { key: string; priority: number; title: string; body: string; path: string; cta: string; deadline?: string };
 
 export type Notification = { id: string; type: string; group: string; title: string; body: string; deep_link: string | null; read_at: string | null; created_at: string };
+
+/** GET /blueprint/current */
+export type BlueprintSignal = {
+  key: string;
+  category: string;
+  label: string;
+  value: string | null;
+  value_label: string;
+  confidence: string;
+  evidence: string | null;
+  member_corrected: boolean;
+  freshness_at: string | null;
+  special_category: boolean;
+  /**
+   * False for a special-category signal the member has withdrawn consent for. The row is still
+   * returned — they are entitled to see what we hold — but `correct_signal` refuses to change it,
+   * so anything offering an edit has to respect this or it offers a guaranteed 403.
+   */
+  correctable: boolean;
+  options: { value: string; label: string }[];
+};
+
+/** A catalog signal the member has never answered: no value, but choosable. */
+export type UnansweredSignal = {
+  key: string;
+  category: string;
+  label: string;
+  special_category: boolean;
+  options: { value: string; label: string }[];
+};
+
+export type Blueprint = {
+  version: { id: string; version_no: number; confirmed_at: string | null; model_version: string } | null;
+  signals: BlueprintSignal[];
+  /**
+   * Kept separate from `signals` so `coverage` and the Blueprint screen keep their meaning,
+   * but the correction form has to include them: a signal the matcher says it is missing is
+   * precisely the one the member cannot otherwise supply.
+   */
+  unanswered: UnansweredSignal[];
+  coverage: Record<string, number>;
+  freshness: { age_days: number | null; stale: boolean; refresh_after_days: number };
+  data_use: string;
+};
+
+/**
+ * POST /introductions/{id}/correction
+ *
+ * `applied` is false when no replacement value was chosen: the correction is on record for a
+ * reviewer, but nothing about matching changed, and the screen must not claim otherwise.
+ */
+export type CorrectionResult = { recorded: boolean; applied: boolean; message: string };

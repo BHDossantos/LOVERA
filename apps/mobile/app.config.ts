@@ -88,12 +88,58 @@ function easProjectId(): string | undefined {
   return configured;
 }
 
+/**
+ * Over-the-air updates, so a fix after launch does not need a store review.
+ *
+ * Without `expo-updates`, every correction — a wrong string, a crash on one screen, a safety copy
+ * fix — waits on App Review. For a product whose failure modes include safety notifications that
+ * open nothing, that is the wrong trade.
+ *
+ * Two decisions here, and the second is the one that matters:
+ *
+ * `url` is the EAS project's manifest endpoint, so it cannot be formed before `eas init` has run.
+ * Updates stay off until it can be (`enabled`), rather than shipping a binary that polls a URL
+ * built from `undefined`. A shipping build already cannot get this far without the project id —
+ * `easProjectId()` throws — so the off state only ever applies to a developer's own build.
+ *
+ * `runtimeVersion` is the policy that decides which binaries an update may be served to, and
+ * getting it wrong is how OTA bricks an app: a JS bundle that calls a native module the installed
+ * binary does not have will crash on launch, and the member cannot get out of it. `appVersion` and
+ * `nativeVersion` both leave that as a discipline requirement — ship a native change without
+ * remembering to bump the version and the mismatch is served to everyone. `fingerprint` derives the
+ * runtime version from the native project itself, so a native change *is* a new runtime version
+ * whether anybody remembered or not. EAS resolves it at build time; locally `expo config` reports
+ * the `file:fingerprint` sentinel, which is why check-native-config.py accepts that value.
+ *
+ * `fallbackToCacheTimeout: 0` is also deliberate: the app launches on the bundle it already has and
+ * applies anything it downloaded on the next launch. The alternative blocks the splash screen on a
+ * network round trip, which is a worse first impression than being one launch behind.
+ */
+function updates(projectId: string | undefined): ExpoConfig["updates"] {
+  if (!projectId) return { enabled: false };
+  return {
+    enabled: true,
+    url: `https://u.expo.dev/${projectId}`,
+    checkAutomatically: "ON_LOAD",
+    fallbackToCacheTimeout: 0,
+  };
+}
+
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: "AI Matchmaker",
   slug: "ai-matchmaker",
   scheme: "aimatchmaker",
   version: "1.0.0",
+  /**
+   * Declared, because the default is not what it looks like: Expo adds "web" to this list whenever
+   * `react-dom` is installed, and it is — pulled in through the toolchain, not by us. There is no
+   * `react-native-web` here and no web layout, so web is a platform this app cannot build, and
+   * leaving it in the list is not cosmetic. Anything that bundles "every platform in the config"
+   * then fails: `expo export --platform all` does, and so would `eas update`, which is the publish
+   * step the whole over-the-air story depends on. Found by running the export.
+   */
+  platforms: ["ios", "android"],
   orientation: "portrait",
   userInterfaceStyle: "light",
   icon: "./assets/icon.png",
@@ -102,6 +148,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     apiOrigin: apiOrigin(),
     eas: { projectId: easProjectId() },
   },
+  // Read from the native project rather than from `version`, so a native change cannot be served a
+  // JS bundle that expects a different one. See `updates()`.
+  runtimeVersion: { policy: "fingerprint" },
+  updates: updates(easProjectId()),
   ios: {
     bundleIdentifier: BUNDLE_ID,
     // Phone-first: a dating app laid out for iPad invites "does not work well on iPad"

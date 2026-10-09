@@ -131,7 +131,12 @@ function ReportInner() {
             <h2 className="mb-1 font-bold">Evidence (optional)</h2>
             <p className="mb-2 text-sm text-ink-secondary">A screenshot or photo, if you already have one. Never required, and we won't ask you to confront anyone to get one. Kept in a restricted vault with every access logged, for as long as the case needs it.</p>
             <label className={cx("inline-flex cursor-pointer items-center gap-2 rounded-[var(--radius-lg)] border border-border bg-surface px-4 py-3 font-semibold", file && "border-action bg-action-soft text-action")}>
-              <input type="file" accept="image/*,video/*,audio/*,.pdf,.txt" className="sr-only" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+              {/* Enumerated, not `image/*`: the server accepts exactly these (app/core/datauri.py),
+                  and a wildcard here invited files it then refused — the member attached one, was
+                  told the report was filed, and the reviewer got nothing. `image/*` would also have
+                  to include SVG, which is markup an `<img>` renders, so the list cannot be a
+                  wildcard on either side. */}
+              <input type="file" accept={EVIDENCE_ACCEPT} className="sr-only" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
               {file ? `Attached: ${file.name}` : "+ Attach a file"}
             </label>
             {file && (
@@ -192,6 +197,41 @@ function toDataUrl(file: File) {
     r.readAsDataURL(file);
   });
 }
+
+/**
+ * Exactly what `POST /safety/reports/{id}/evidence` accepts — `EVIDENCE_TYPES` in
+ * app/core/datauri.py, which is the list `add_evidence` passes to `decode_data_url` and which
+ * `tools/check_upload_types.py` compares this one against in CI.
+ *
+ * It is enumerated rather than `image/*,video/*,audio/*` because the server refuses SVG and
+ * text/html deliberately: both are markup that renders in a reviewer's session. The first
+ * version of this list left out `audio/webm` and `audio/x-m4a` — a browser recording and an
+ * iPhone voice memo — so a reporter holding a recording of the call could not attach it.
+ */
+const EVIDENCE_ACCEPT = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "image/heic",
+  "image/heif",
+  "video/mp4",
+  "video/quicktime",
+  "video/webm",
+  "video/x-matroska",
+  "video/3gpp",
+  "video/mpeg",
+  "audio/mpeg",
+  "audio/mp4",
+  "audio/aac",
+  "audio/ogg",
+  "audio/webm",
+  "audio/wav",
+  "audio/x-m4a",
+  "application/pdf",
+  "text/plain",
+].join(",");
+
 
 export default function ReportPage() {
   return (

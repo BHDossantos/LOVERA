@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.core.client_paths import onboarding_path
 from app.core.db import get_db
 from app.core.deps import Principal, current_principal
 from app.core.timeutil import iso, utcnow
@@ -28,7 +29,7 @@ def today(principal: Principal = Depends(current_principal), db: Session = Depen
     tasks: list[dict[str, Any]] = []
     me = me_payload(db, m)
     if m.status in ("pending_consent", "pending_verification", "onboarding"):
-        tasks.append({"key": "onboarding", "priority": 100, "title": "Finish setting up", "body": "Your matchmaker needs a confirmed Blueprint before the first introduction.", "path": f"/onboarding/{m.onboarding_step if m.onboarding_step != 'blueprint' else 'blueprint/interview'}", "cta": "Continue setup"})
+        tasks.append({"key": "onboarding", "priority": 100, "title": "Finish setting up", "body": "Your matchmaker needs a confirmed Blueprint before the first introduction.", "path": onboarding_path(m.onboarding_step), "cta": "Continue setup"})
     if m.status == "restricted":
         tasks.append({"key": "review", "priority": 100, "title": "Your account is under review", "body": "You can read the decision, add context and appeal.", "path": "/account/review", "cta": "Open account review"})
     now = utcnow()
@@ -56,7 +57,10 @@ def today(principal: Principal = Depends(current_principal), db: Session = Depen
     if bp and bp["freshness"]["stale"]:
         tasks.append({"key": "blueprint_refresh", "priority": 40, "title": "Your Blueprint is getting stale", "body": "Life changes. A short refresh keeps introductions accurate.", "path": "/you/blueprint", "cta": "Review your Blueprint"})
     if not m.date_ready and m.status == "active":
-        tasks.append({"key": "readiness", "priority": 50, "title": "You're marked as not ready to date", "body": "Introductions pause while readiness is off.", "path": "/you/profile", "cta": "Update readiness"})
+        # /you/profile is the photos-and-prompts editor; readiness is part of availability, and
+        # pointing the task at a screen that cannot change it made this task a dead end in both
+        # apps for as long as it has existed.
+        tasks.append({"key": "readiness", "priority": 50, "title": "You're marked as not ready to date", "body": "Introductions pause while readiness is off.", "path": "/you/availability", "cta": "Update readiness"})
     ent = entitlements_for(db, m)
     if m.status == "active" and not tasks:
         tasks.append({"key": "waiting", "priority": 10, "title": "Nothing to do right now", "body": "Your next introductions arrive with the weekly batch. Less time in the app is fine.", "path": "/introductions/waiting", "cta": "See why"})

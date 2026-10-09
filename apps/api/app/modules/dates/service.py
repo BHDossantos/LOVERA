@@ -1,7 +1,7 @@
 """Date plans: coarse availability intersection, safe public venues, proposal/response with reconfirmation, check-in, feedback."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -14,7 +14,8 @@ from app.core.audit import audit
 from app.core.config import get_settings
 from app.core.errors import ApiError
 from app.core.events import publish
-from app.core.timeutil import iso, utcnow
+from app.core.timeutil import iso, market_timezone, utcnow
+from app.core.windows import MINIMUM_SLOT_MINUTES, WEEKDAYS, day_intervals, intersect, local_dates_covering, merge
 from app.models.account import Member
 from app.models.availability import AvailabilityVersion
 from app.models.conversations import Conversation
@@ -25,7 +26,6 @@ from app.modules.conversations.realtime import hub
 from app.modules.dates.venues import venue_payload
 from app.modules.notifications.service import notify
 
-WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 CANCEL_REASONS = ("schedule", "not_feeling_it", "illness", "safety", "other")
 
 
@@ -33,33 +33,109 @@ def _availability(db: Session, member_id: str) -> AvailabilityVersion | None:
     return db.execute(select(AvailabilityVersion).where(AvailabilityVersion.member_id == member_id).order_by(AvailabilityVersion.created_at.desc())).scalars().first()
 
 
-def _minutes(t: str) -> int:
-    h, m = t.split(":")
-    return int(h) * 60 + int(m)
+def _available_parts(start: datetime, end: datetime, away: set[str | None], zone: ZoneInfo) -> list[tuple[datetime, datetime]]:
+    """`[start, end)` with the member's unavailable local days cut out, the rest rejoined.
+
+    Refusing the whole interval was wrong once slots could span midnight: Friday 22:00–24:00 and
+    Saturday 00:00–02:00 merge into one four-hour stretch, and a member who is away on the Saturday
+    would lose the Friday evening too — which the planner offered before those two windows were ever
+    merged. So the interval is cut at each local midnight the member has excluded, and what is left is
+    offered if it is still long enough. The caller reapplies the minimum, because a remaining piece can
+    be shorter than the whole was.
+    """
+    parts: list[tuple[datetime, datetime]] = []
+    cursor = start
+    while cursor < end:
+        day = cursor.astimezone(zone).date()
+        # The member's next local midnight. `fold=0` is deliberate: on a day that has two 00:00s the
+        # earlier is the boundary, and a zone whose midnight does not exist at all would otherwise
+        # produce a bound at or before `cursor` — hence the guard below.
+        boundary = datetime.combine(day + timedelta(days=1), time.min, tzinfo=zone)
+        piece_end = min(end, boundary)
+        if piece_end <= cursor:
+            break
+        if day.isoformat() not in away:
+            parts.append((cursor, piece_end))
+        cursor = piece_end
+    # Contiguous pieces are one stretch again: two available days either side of midnight are not two
+    # separate offers.
+    return merge(parts)
+
+
+def _timezone_of(db: Session, member_id: str) -> str:
+    """The zone *this member's* stated availability is in — not the zone a date is shown in."""
+    member = db.get(Member, member_id)
+    return (member.timezone if member else None) or market_timezone()
 
 
 def overlaps(db: Session, a_id: str, b_id: str, tz: str, horizon_days: int = 14) -> list[dict[str, Any]]:
+    """Slots both members are free for, as instants, expressed in `tz` for display.
+
+    Each member's windows are read in *their own* zone. The previous version applied the single `tz`
+    it was given — the proposing member's, or the plan's — to both members' windows, so two members
+    an hour apart were offered a slot an hour outside one of their stated evenings, and the date they
+    confirmed was not the date one of them thought they had agreed to. `tz` is now only the zone the
+    result is written in, which is what the caller actually wanted it for.
+
+    Days are built per member in their own zone, so a window's offset is the one in force on its own
+    date rather than one offset applied to a fortnight — correct across a DST change.
+    """
     av_a, av_b = _availability(db, a_id), _availability(db, b_id)
     if not av_a or not av_b:
         return []
+    a_tz, b_tz = _timezone_of(db, a_id), _timezone_of(db, b_id)
     zone = ZoneInfo(tz)
-    today = datetime.now(zone).date()
+    now = utcnow()
+    away_a = {e.get("date") for e in av_a.dated_exceptions if e.get("available") is False}
+    away_b = {e.get("date") for e in av_b.dated_exceptions if e.get("available") is False}
+    # A member's "I am away that day" is a date in their calendar, not in whoever is looking.
+    a_zone, b_zone = ZoneInfo(a_tz), ZoneInfo(b_tz)
+
+    # Not today: a first date is arranged, not sprung. The horizon is a pair of instants rather than a
+    # pair of dates to compare against, because a slot that crosses one of them has to be *cut* there,
+    # not thrown away — a window running from tonight into tomorrow is outside the horizon as a whole
+    # and its small hours are inside it.
+    earliest = now.astimezone(zone).date() + timedelta(days=1)
+    latest = now.astimezone(zone).date() + timedelta(days=horizon_days)
+    opens = max(now, datetime.combine(earliest, time.min, tzinfo=zone))
+    closes = datetime.combine(latest + timedelta(days=1), time.min, tzinfo=zone)
+
     out: list[dict[str, Any]] = []
-    for offset in range(1, horizon_days + 1):
-        day = today + timedelta(days=offset)
-        excluded = {e.get("date") for e in (av_a.dated_exceptions + av_b.dated_exceptions) if e.get("available") is False}
-        if day.isoformat() in excluded:
+    # Each member's candidate dates come from the horizon's instants in their own calendar, not from a
+    # day count: a count does not reach the far end of the horizon once the two zones are far apart.
+    for starts_at, ends_at in intersect(
+        day_intervals(av_a.recurring_windows, a_tz, local_dates_covering(opens, closes, a_tz)),
+        day_intervals(av_b.recurring_windows, b_tz, local_dates_covering(opens, closes, b_tz)),
+    ):
+        if ends_at <= now:
             continue
-        for wa in av_a.recurring_windows:
-            for wb in av_b.recurring_windows:
-                if wa["weekday"] != wb["weekday"] or wa["weekday"] != day.weekday():
-                    continue
-                start = max(_minutes(wa["start"]), _minutes(wb["start"]))
-                end = min(_minutes(wa["end"]), _minutes(wb["end"]))
-                if end - start >= 90:
-                    starts_at = datetime.combine(day, datetime.min.time(), tzinfo=zone) + timedelta(minutes=start)
-                    ends_at = datetime.combine(day, datetime.min.time(), tzinfo=zone) + timedelta(minutes=end)
-                    out.append({"date": day.isoformat(), "weekday": WEEKDAYS[day.weekday()], "start": f"{start // 60:02d}:{start % 60:02d}", "end": f"{end // 60:02d}:{end % 60:02d}", "starts_at": iso(starts_at), "ends_at": iso(ends_at)})
+        # Each member's unavailable days are cut out of the slot rather than rejecting it whole: a slot
+        # can span midnight now, so one excluded day would otherwise take a perfectly good evening on
+        # the other side of it with it.
+        pieces = [(starts_at, ends_at)]
+        for away, member_zone in ((away_a, a_zone), (away_b, b_zone)):
+            pieces = [part for piece in pieces for part in _available_parts(piece[0], piece[1], away, member_zone)]
+
+        # The horizon clips, like an excluded day does. Filtering on the piece's start date instead left
+        # the same hole one layer up: with no exception to split it, a window running from tonight into
+        # tomorrow stays one piece beginning today, and judging it by that date discarded the small
+        # hours of tomorrow that are perfectly inside the fortnight. The minimum is applied to what
+        # survives both cuts, because either can shorten a piece.
+        for piece_start, piece_end in pieces:
+            start, end = max(piece_start, opens), min(piece_end, closes)
+            if end - start < timedelta(minutes=MINIMUM_SLOT_MINUTES):
+                continue
+            shown, shown_end = start.astimezone(zone), end.astimezone(zone)
+            out.append(
+                {
+                    "date": shown.date().isoformat(),
+                    "weekday": WEEKDAYS[shown.weekday()],
+                    "start": shown.strftime("%H:%M"),
+                    "end": shown_end.strftime("%H:%M"),
+                    "starts_at": iso(start),
+                    "ends_at": iso(end),
+                }
+            )
     return out[:12]
 
 
@@ -82,7 +158,7 @@ def create_plan(db: Session, conv_id: str, member: Member) -> DatePlan:
     existing = db.execute(select(DatePlan).where(DatePlan.conversation_id == conv.id, DatePlan.status.in_(("draft", "proposed", "countered", "confirmed")))).scalars().first()
     if existing:
         return existing
-    plan = DatePlan(conversation_id=conv.id, member_a_id=conv.member_a_id, member_b_id=conv.member_b_id, status="draft", timezone=member.timezone, history=[{"by": member.id, "action": "created", "at": iso(utcnow())}])
+    plan = DatePlan(conversation_id=conv.id, member_a_id=conv.member_a_id, member_b_id=conv.member_b_id, status="draft", timezone=market_timezone(), history=[{"by": member.id, "action": "created", "at": iso(utcnow())}])
     db.add(plan)
     db.flush()
     return plan
@@ -336,7 +412,7 @@ def list_for(db: Session, viewer: Member) -> list[dict[str, Any]]:
 
 
 def suggest_for_draft(db: Session, conv: Conversation, member: Member) -> tuple[str | None, str | None]:
-    ov = overlaps(db, conv.member_a_id, conv.member_b_id, member.timezone)
+    ov = overlaps(db, conv.member_a_id, conv.member_b_id, market_timezone())
     plan = create_plan(db, conv.id, member)
     venues = venue_shortlist(db, plan, member, "coffee") or venue_shortlist(db, plan, member)
     venue = venues[0]["name"] if venues else None

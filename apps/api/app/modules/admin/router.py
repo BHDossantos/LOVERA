@@ -5,7 +5,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.audit import audit
@@ -17,7 +18,7 @@ from app.models.account import Member
 from app.models.billing import CreditLedger, Subscription
 from app.models.conversations import Conversation, Message
 from app.models.dates import DatePlan, PostDateFeedback
-from app.models.introductions import IntroDecision, Introduction, MatchExplanation
+from app.models.introductions import IntroCorrection, IntroCorrectionReview, IntroDecision, Introduction, MatchExplanation
 from app.models.matching import CandidatePair, MatchRun
 from app.models.privacy import AnalyticsEvent, AuditEvent
 from app.models.profile import Profile
@@ -36,6 +37,11 @@ class RunIn(BaseModel):
 
 class PairReviewIn(BaseModel):
     decision: str = Field(pattern="^(approve|reject)$")
+    note: str | None = Field(default=None, max_length=300)
+
+
+class CorrectionReviewIn(BaseModel):
+    decision: str = Field(pattern="^(actioned|no_change)$")
     note: str | None = Field(default=None, max_length=300)
 
 
@@ -69,6 +75,46 @@ def _name(db: Session, member_id: str | None) -> str:
         return "—"
     p = db.get(Profile, member_id)
     return (p.display_name if p and p.display_name else member_id[:8])
+
+
+STAFF_ROLES = ("concierge", "safety_reviewer", "support", "admin")
+
+
+def _staff_name(db: Session, member_id: str | None) -> str:
+    """A colleague's name, for a staff-facing record of who did something.
+
+    `_name` is for members and falls back to eight characters of a UUID, which is right there —
+    staff should not be shown a member's email because a profile has no display name. For staff it
+    is useless: accounts created through `staff_bootstrap_emails` get a `Profile` with no
+    `display_name` at all (account/service.py), which is the normal way a reviewer account comes
+    into existence, so every resolved correction read "Reviewed by 1a2b3c4d". The local part of a
+    colleague's work address is the thing another colleague can act on, and the role check keeps
+    this from ever becoming a way to read a member's email out of the admin API.
+    """
+    if not member_id:
+        return "—"
+    profile = db.get(Profile, member_id)
+    if profile and profile.display_name:
+        return profile.display_name
+    member = db.get(Member, member_id)
+    if member and any(r in STAFF_ROLES for r in (member.roles or [])):
+        return member.email.split("@")[0]
+    return member_id[:8]
+
+
+def _review_payload(db: Session, review: IntroCorrectionReview) -> dict[str, Any]:
+    """One correction's review, with the reviewer named rather than only identified.
+
+    A concierge queue is worked by several people, so "reviewed, no change needed" is not a useful
+    record unless the next person can see who decided it and ask them why. The id alone was no use
+    to the client: there is no endpoint that turns a staff id into a person.
+    """
+    return {
+        "decision": review.decision,
+        "note": review.note,
+        "reviewer": {"id": review.reviewer_id, "name": _staff_name(db, review.reviewer_id)},
+        "at": iso(review.created_at),
+    }
 
 
 # ---- Concierge matching -------------------------------------------------
@@ -109,6 +155,142 @@ def review_pair(pair_id: str, data: PairReviewIn, principal: Principal = Depends
     pair.review_note = data.note
     audit(db, actor_type="staff", actor_id=principal.id, action=f"admin.pair_{data.decision}", resource_type="candidate_pair", resource_id=pair.id, purpose="concierge_review", metadata={"note": data.note})
     return {"pair_id": pair.id, "review_status": pair.review_status}
+
+
+@router.get("/matching/corrections")
+def list_corrections(
+    unapplied_only: bool = Query(False),
+    unresolved_only: bool = Query(False),
+    limit: int = Query(50, le=200),
+    offset: int = Query(0, ge=0),
+    principal: Principal = Depends(require_roles("concierge", "admin")),
+    db: Session = Depends(get_db, scope="function"),
+) -> dict:
+    """Corrections members filed against an introduction's explanation.
+
+    These rows existed before this endpoint and were read by nothing, while the member was told
+    "noted for a reviewer" — a promise no reviewer could keep. The useful ones are those with no
+    replacement value: the member said an inference was wrong but could not say what the right
+    answer is, so nothing about their matching changed and only a person can act on it.
+
+    Paged, and with the reviewer's own decision in the payload, because the first version of this
+    endpoint was a queue that could not drain: it took the newest 50 and had no offset and no
+    notion of a correction having been dealt with, so past 50 unapplied rows the oldest disputed
+    signals were permanently unreachable while still affecting matching. `total` is the size of
+    the filtered set, so a caller can tell there is more behind what it asked for.
+
+    The filtering, the count and the page are all SQL. The version before this one read every
+    correction ever filed, then looked up reviews with every one of those ids in a single `IN`, and
+    only then cut the page in Python — so a queue nobody ever deletes from got slower and heavier
+    with its own history, and a long enough one would have passed more bind parameters than the
+    driver accepts and taken every page down with it.
+    """
+    from app.catalog.signals import SIGNALS
+
+    # `applied` is whether the member supplied a replacement value. `corrected_value` is JSONB and
+    # the writer always stores `{"value": <str|None>}` (introductions/service.py), so this is the
+    # same predicate as `bool(value)` — null and the empty string are the only falsy cases.
+    value = IntroCorrection.corrected_value["value"].astext
+    applied_sql = and_(value.isnot(None), value != "")
+    reviewed_sql = select(IntroCorrectionReview.id).where(IntroCorrectionReview.correction_id == IntroCorrection.id).exists()
+
+    where = []
+    if unapplied_only:
+        where.append(~applied_sql)
+    if unresolved_only:
+        where.extend([~applied_sql, ~reviewed_sql])
+
+    total = db.execute(select(func.count()).select_from(IntroCorrection).where(*where)).scalar_one()
+    rows = (
+        db.execute(
+            select(IntroCorrection)
+            .where(*where)
+            .order_by(IntroCorrection.created_at.desc(), IntroCorrection.id.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        .scalars()
+        .all()
+    )
+    reviews = (
+        {
+            r.correction_id: r
+            for r in db.execute(select(IntroCorrectionReview).where(IntroCorrectionReview.correction_id.in_([c.id for c in rows]))).scalars().all()
+        }
+        if rows
+        else {}
+    )
+
+    out = []
+    for c in rows:
+        applied = bool((c.corrected_value or {}).get("value"))
+        sig = SIGNALS.get(c.signal_key)
+        review = reviews.get(c.id)
+        out.append(
+            {
+                "id": c.id,
+                "introduction_id": c.introduction_id,
+                "member": {"id": c.member_id, "name": _name(db, c.member_id)},
+                "signal_key": c.signal_key,
+                "signal_label": sig.label if sig else c.signal_key,
+                "corrected_value": (c.corrected_value or {}).get("value"),
+                # False means the member's Blueprint was left as it was: they disputed the
+                # inference without supplying a replacement, so this row is the only record.
+                "applied": applied,
+                "note": c.note,
+                "created_at": iso(c.created_at),
+                "review": None if review is None else _review_payload(db, review),
+            }
+        )
+    audit(db, actor_type="staff", actor_id=principal.id, action="admin.corrections_viewed", resource_type="intro_correction", resource_id=None, purpose="concierge_review", metadata={"count": len(out)})
+    return {"items": out, "total": total, "limit": limit, "offset": offset}
+
+
+@router.post("/matching/corrections/{correction_id}/review")
+def review_correction(
+    correction_id: str,
+    data: CorrectionReviewIn,
+    principal: Principal = Depends(require_roles("concierge", "admin")),
+    db: Session = Depends(get_db, scope="function"),
+) -> dict:
+    """Resolve one correction, so the unresolved queue has a way out.
+
+    A correction the member filed without a replacement value changes nothing on its own: the
+    member is told it has been noted for a reviewer, and this is the endpoint by which a reviewer
+    says they have done that. It does not touch the member's blueprint — a signal is changed
+    through the blueprint endpoints, which audit it in the member's own name — it records that a
+    person has handled this row.
+    """
+    correction = db.get(IntroCorrection, correction_id)
+    if correction is None:
+        raise ApiError("NOT_FOUND")
+    review = IntroCorrectionReview(correction_id=correction.id, reviewer_id=principal.id, decision=data.decision, note=data.note)
+    # The unique constraint decides this, not a preceding SELECT. Two reviewers working the same
+    # queue — which is the normal way a queue gets worked — would both pass a check-then-insert
+    # before either wrote, and the loser got a 500 from the IntegrityError instead of the conflict
+    # this endpoint promises. Now there is one path for both, and the sequential second reviewer
+    # exercises the same code as the concurrent one.
+    #
+    # The savepoint keeps the failure local: without it a caught IntegrityError leaves the whole
+    # transaction unusable, so the handler ending the request would be the only thing between this
+    # and a poisoned session for anything added after it.
+    try:
+        with db.begin_nested():
+            db.add(review)
+            db.flush()
+    except IntegrityError:
+        raise ApiError("CONFLICT", "Another reviewer has already resolved this correction.")
+    audit(
+        db,
+        actor_type="staff",
+        actor_id=principal.id,
+        action="admin.correction_reviewed",
+        resource_type="intro_correction",
+        resource_id=correction.id,
+        purpose="concierge_review",
+        metadata={"decision": data.decision, "note": data.note, "signal_key": correction.signal_key},
+    )
+    return {"id": correction.id, "review": _review_payload(db, review)}
 
 
 @router.post("/matching/runs/{run_id}/publish")
@@ -199,8 +381,11 @@ def safety_case(report_id: str, principal: Principal = Depends(require_roles("sa
         raise ApiError("NOT_FOUND")
     audit(db, actor_type="staff", actor_id=principal.id, action="admin.case_opened", resource_type="safety_report", resource_id=r.id, purpose=purpose)
     evidence = db.execute(select(SafetyEvidence).where(SafetyEvidence.report_id == r.id)).scalars().all()
-    for e in evidence:
-        e.access_count += 1
+    # Not counted here. Listing an attachment's type and description is not opening it, and now that
+    # `GET /admin/safety/evidence/{id}` exists and counts the actual read, counting here as well made
+    # one open read as two — and read as two next to a single `admin.evidence_opened` audit event, so
+    # the number on the page and the trail behind it disagreed. The count means what it says: how
+    # many times somebody has looked at the file.
     notes = db.execute(select(CaseNote).where(CaseNote.report_id == r.id).order_by(CaseNote.created_at)).scalars().all()
     actions = db.execute(select(SafetyAction).where(SafetyAction.report_id == r.id)).scalars().all()
     context = []
@@ -209,6 +394,70 @@ def safety_case(report_id: str, principal: Principal = Depends(require_roles("sa
         context = [{"from": "reporter" if m.sender_id == r.reporter_id else "subject", "text": m.body, "at": iso(m.sent_at), "flags": (m.meta or {}).get("flags", [])} for m in reversed(msgs)]
         audit(db, actor_type="staff", actor_id=principal.id, action="admin.conversation_context_viewed", resource_type="conversation", resource_id=r.conversation_id, purpose=purpose)
     return {"id": r.id, "receipt_code": r.receipt_code, "severity": r.severity, "category": r.category, "urgency": r.urgency, "status": r.status, "specialist_workflow": r.specialist_workflow, "narrative": r.narrative, "reporter": {"id": r.reporter_id, "name": _name(db, r.reporter_id)}, "subject": {"id": r.subject_id, "name": _name(db, r.subject_id), "status": db.get(Member, r.subject_id).status if r.subject_id else None}, "evidence": [{"id": e.id, "content_type": e.content_type, "description": e.description, "collected_at": iso(e.collected_at), "access_count": e.access_count} for e in evidence], "notes": [{"id": n.id, "role": n.author_role, "note": n.note, "visible_to_reporter": n.visible_to_reporter, "at": iso(n.created_at)} for n in notes], "actions": [{"id": a.id, "type": a.type, "scope": a.scope, "reason_code": a.reason_code, "decision_source": a.decision_source, "appealable": a.appealable, "public_notice": a.public_notice, "ends_at": iso(a.ends_at), "lifted_at": iso(a.lifted_at)} for a in actions], "conversation_context": context, "submitted_at": iso(r.submitted_at)}
+
+
+@router.get("/safety/evidence/{evidence_id}")
+def safety_evidence(
+    evidence_id: str,
+    principal: Principal = Depends(require_roles("safety_reviewer", "admin")),
+    db: Session = Depends(get_db, scope="function"),
+    purpose: str = Query(min_length=3),
+) -> dict:
+    """The bytes of one piece of evidence, for the person handling the case.
+
+    The upload endpoint answers a reporter with "Kept under the case retention policy with
+    restricted access; every access is audited", and the case page lists each attachment's MIME
+    type and description. Neither was a way to open it: the screenshot a member attached — often
+    the whole substance of a report, a threat or a demand for money — was stored and could be read
+    by nobody. A reporter was being asked to send evidence into a vault with no door.
+
+    Same shape as the member-facing media read: a declared purpose, an audit row naming this
+    reviewer and this attachment, and the access counted on the row itself so the case page shows
+    how often it has been opened.
+    """
+    ev = db.get(SafetyEvidence, evidence_id)
+    if ev is None:
+        raise ApiError("NOT_FOUND")
+    from app.modules.profile.storage import get_object
+
+    data_url = get_object(ev.storage_key)
+    if not data_url:
+        # Metadata without bytes: an upload that never completed, or retention has expired. Not an
+        # error the reviewer can act on, so it says which rather than reading as a missing case.
+        raise ApiError("NOT_FOUND", "This attachment is no longer in the vault.")
+    # Incremented by the database, and read back from it.
+    #
+    # `ev.access_count += 1` is a read-modify-write: two reviewers opening the same attachment at
+    # once both read the same count, both write the same next value, and one open vanishes from the
+    # counter while the audit log correctly records two. The divergence this endpoint exists to
+    # prevent is exactly that — a count that disagrees with the log — so it is worth one statement.
+    access_count = db.execute(
+        update(SafetyEvidence)
+        .where(SafetyEvidence.id == ev.id)
+        .values(access_count=SafetyEvidence.access_count + 1)
+        .returning(SafetyEvidence.access_count)
+    ).scalar_one()
+    audit(
+        db,
+        actor_type="staff",
+        actor_id=principal.id,
+        action="admin.evidence_opened",
+        resource_type="safety_evidence",
+        resource_id=ev.id,
+        purpose=purpose,
+        metadata={"report_id": ev.report_id, "content_type": ev.content_type},
+    )
+    return {
+        "id": ev.id,
+        "report_id": ev.report_id,
+        "content_type": ev.content_type,
+        "description": ev.description,
+        "size_bytes": ev.size_bytes,
+        "checksum": ev.checksum,
+        "collected_at": iso(ev.collected_at),
+        "access_count": access_count,
+        "data_url": data_url,
+    }
 
 
 @router.post("/safety/cases/{report_id}")

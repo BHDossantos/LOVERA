@@ -1,4 +1,4 @@
-import { DocHeader, H2, P, UL, TODO } from "../_components";
+import { DocHeader, Fact, H2, P, UL } from "../_components";
 
 export const metadata = { title: "Terms of Service · AI Matchmaker" };
 
@@ -8,8 +8,8 @@ export default function Terms() {
       <DocHeader title="Terms of Service" version="2026-09" updated="23 September 2026" />
 
       <P>
-        These terms are between you and <TODO>legal entity name</TODO> (&ldquo;we&rdquo;),
-        registered at <TODO>registered address</TODO>. By creating an account you accept
+        These terms are between you and <Fact name="entity" /> (&ldquo;we&rdquo;),
+        registered at <Fact name="address" />. By creating an account you accept
         them.
       </P>
 
@@ -33,7 +33,7 @@ export default function Terms() {
           "You must be 18 or over. We verify this; misrepresenting your age ends the account.",
           "You must be the person in your photos and on your document.",
           "One account per person.",
-          <>The service is offered in <TODO>launch markets</TODO> only.</>,
+          <>The service is offered in <Fact name="markets" /> only.</>,
         ]}
       />
 
@@ -52,7 +52,7 @@ export default function Terms() {
           "Paid plans renew each month until you cancel, at the price shown when you subscribe.",
           "You cancel in the app. Cancelling stops the next renewal; the plan runs to the end of the period you have paid for.",
           "Where you subscribed through Apple or Google, they take the payment and you manage or cancel the subscription in their account settings, under their refund rules.",
-          <>Statutory withdrawal and refund rights, where they apply to you, are unaffected. <TODO>Confirm consumer-law position for launch markets</TODO>.</>,
+          <>Statutory withdrawal and refund rights, where they apply to you, are unaffected. <Fact name="consumerLaw" />.</>,
           "A quiet week does not cost you an introduction. Where we cannot offer you anyone who clears your non-negotiables, we hold the credit rather than spending it.",
         ]}
       />
@@ -108,14 +108,14 @@ export default function Terms() {
 
       <H2>Law</H2>
       <P>
-        These terms are governed by the law of <TODO>governing law</TODO>, and the courts of{" "}
-        <TODO>jurisdiction</TODO> have jurisdiction. If you are a consumer, you keep the
+        These terms are governed by the law of <Fact name="governingLaw" />, and the courts of{" "}
+        <Fact name="jurisdiction" /> have jurisdiction. If you are a consumer, you keep the
         protection of the mandatory law of the country you live in.
       </P>
 
       <H2>Contact</H2>
       <P>
-        <TODO>support@yourdomain</TODO>
+        <Fact name="supportEmail" />
       </P>
     </>
   );

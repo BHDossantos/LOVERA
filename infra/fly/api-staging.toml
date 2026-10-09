@@ -1,0 +1,62 @@
+# API, staging. Deploy with:
+#   fly deploy --config infra/fly/api-staging.toml --app <your-staging-api-app>
+#
+# What this is for: a real https API that a signed EAS build can talk to, before an
+# identity verification vendor exists. The only thing simulated here is the ID check.
+#
+# Why staging rather than production: the sandbox verification endpoint is refused when
+# MM_ENV is production (apps/api/app/modules/verification/router.py), and nothing else
+# can verify a member yet, so a production deploy dead-ends every signup at the
+# verification step — including yours. Staging keeps that one endpoint available and
+# changes nothing else about how the API behaves.
+#
+# What is NOT simulated, and must not be: sign-in. MM_EXPOSE_DEV_OTP is false below, so
+# the one-time code is never returned in a response. On a public URL returning it would
+# let anyone who knows an address sign in as that person. That means real mail is
+# required — MM_SMTP_HOST is a secret, and the API refuses to boot without it (see
+# check_mail_transport in apps/api/app/main.py), which is deliberate: the alternative is
+# an API that looks healthy while no member can get in.
+primary_region = "fra"
+
+[build]
+  dockerfile = "../../apps/api/Dockerfile"
+
+[env]
+  MM_ENV = "staging"
+  MM_MARKET_ID = "rome"
+  MM_MARKET_TIMEZONE = "Europe/Rome"
+  # Concierge review before anything reaches members. Same as production: a staging
+  # deploy with real people in it should not publish a batch unseen either.
+  MM_MATCH_AUTO_PUBLISH = "false"
+  # The sign-in code is NEVER returned in a response here. This is the one setting that
+  # makes a publicly reachable staging deploy safe to point a build at.
+  MM_EXPOSE_DEV_OTP = "false"
+  # Identity verification. Left at the default here on purpose: "sandbox" is only refused in
+  # production, and keeping it is the whole reason a staging deploy can be pointed at a build
+  # today — the only simulated thing in this posture is the ID check.
+  # Outbound mail. The host and credentials are secrets (see docs/DEPLOY.md); only the
+  # non-secret shape belongs in a committed file. MM_MAIL_TRANSPORT is left unset on
+  # purpose so "auto" applies and the API refuses to start without a mail host.
+  MM_MAIL_PRODUCT_NAME = "AI Matchmaker"
+  MM_SMTP_PORT = "587"
+  MM_SMTP_SECURITY = "starttls"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  # One machine is enough for staging, but not zero: a cold start on the first request
+  # is indistinguishable from the API being down when you are testing from a phone.
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "4s"
+    grace_period = "20s"
+    method = "GET"
+    path = "/healthz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

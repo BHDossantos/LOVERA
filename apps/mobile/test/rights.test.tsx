@@ -39,6 +39,9 @@ const BLUEPRINT = {
       member_corrected: false,
       freshness_at: "2026-09-01T10:00:00Z",
       special_category: false,
+      // The API sends this on every signal; it is false only for a sensitive one whose consent
+      // was withdrawn, which `correct_signal` refuses to change.
+      correctable: true,
       options: [
         { value: "yes", label: "Yes" },
         { value: "open", label: "Open to it" },
@@ -65,13 +68,17 @@ jest.mock("@/lib/auth", () => ({
   useAuth: () => ({ me: { id: "mem_me", email: "me@example.test" }, signOut: jest.fn() }),
 }));
 jest.mock("expo-router", () => ({
+  // The screens in the Tabs navigator are focused rather than remounted when a member comes
+  // back to them, so the freshness clock resets on focus. The harness runs the callback once, as a
+  // first focus would, and `refocus()` runs it again.
+  useFocusEffect: (cb: () => void | (() => void)) => (require("./render") as { mockUseFocusEffect: (c: () => void | (() => void)) => void }).mockUseFocusEffect(cb),
   useRouter: () => ({ push: jest.fn(), back: jest.fn(), replace: jest.fn() }),
   useLocalSearchParams: () => ({ dateId: "dp_1" }),
 }));
 
-import AccountReview from "../app/account-review";
+import AccountReview from "../app/account/review";
 import YouBlueprint from "../app/(app)/you/blueprint";
-import DateOutcome from "../app/(app)/dates/[dateId]/outcome";
+import DateOutcome from "../app/(app)/dates/[dateId]/mutual-second-date";
 
 beforeEach(() => {
   mockGet.mockReset();
@@ -140,4 +147,29 @@ test("a mutual yes is stated plainly, with a way back to the conversation", asyn
   const s = await renderScreen(<DateOutcome />);
   expect(s.hasText("You both said yes")).toBe(true);
   expect(s.hasText("Plan a second date from the chat")).toBe(true);
+});
+
+test("a sensitive signal whose consent was withdrawn says why it cannot be changed", async () => {
+  mockGet.mockImplementation(
+    routeGet({
+      "/blueprint/current": {
+        ...BLUEPRINT,
+        signals: [
+          {
+            ...BLUEPRINT.signals[0],
+            key: "values.faith_importance",
+            label: "Faith in daily life",
+            special_category: true,
+            correctable: false,
+          },
+        ],
+      },
+    }),
+  );
+  const s = await renderScreen(<YouBlueprint />);
+  // Still visible: a member is entitled to see what we hold about them.
+  expect(s.hasText("Faith in daily life")).toBe(true);
+  // But no control whose only outcome is a refusal.
+  expect(s.texts()).not.toContain("That's not right");
+  expect(s.joined()).toContain("cannot be changed here");
 });

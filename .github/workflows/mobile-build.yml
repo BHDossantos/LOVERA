@@ -12,8 +12,16 @@
 #   3. npx eas-cli build:configure                (generates the signing credentials)
 #   4. Create a token at expo.dev → Account settings → Access tokens, and store it as the
 #      repository secret EXPO_TOKEN.
-#   5. Replace the REPLACE-ME API origins in apps/mobile/eas.json. The build refuses to
-#      start while they are placeholders, which is the point of them.
+#   5. Set EXPO_PUBLIC_API_ORIGIN as an EAS environment variable for each profile you
+#      build. eas.json no longer carries `env` blocks — app.config.ts refuses a shipping
+#      build without a real https origin, which is the point of that guard.
+#
+# Shipping a fix without a store review:
+#   npx eas-cli update --branch <branch> --message "what changed"
+# That reaches builds on the matching channel (`preview` / `production` in eas.json) whose
+# runtime version matches. The runtime version is the native project's fingerprint, so a
+# JS-only fix reaches existing binaries and anything touching native code does not — see
+# `updates()` in apps/mobile/app.config.ts.
 #
 # This is deliberately manual. A store build burns a build minute quota, increments a
 # version, and on the production profile is a thing you intend to submit — none of which

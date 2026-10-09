@@ -10,8 +10,19 @@ import { Button, Card, EmptyState, ErrorState, EvidenceLabel, LinkButton, PageTi
 import { formatDate } from "@/lib/format";
 import type { Strength } from "@/lib/types";
 
-type Signal = { key: string; category: string; label: string; value: string | null; value_label: string; confidence: Strength; evidence: string | null; member_corrected: boolean; freshness_at: string | null; special_category: boolean; options: { value: string; label: string }[] };
-type Pref = { key: string; label: string; tier: string };
+/**
+ * `correctable` is false for a special-category signal whose consent was withdrawn: the row is
+ * still returned, because a member is entitled to see what we hold, but `correct_signal` refuses
+ * to change it. Offering the editor anyway meant every save came back 403.
+ */
+type Signal = { key: string; category: string; label: string; value: string | null; value_label: string; confidence: Strength; evidence: string | null; member_corrected: boolean; freshness_at: string | null; special_category: boolean; correctable: boolean; options: { value: string; label: string }[] };
+/**
+ * `current_payload` forwards the same preference objects the Preferences page gets, `active`
+ * included. Typing it without that field meant this summary kept calling a withdrawn-consent faith
+ * criterion a Must while the Preferences page, one tap away, correctly said it was not in use —
+ * and `build_snapshot` was applying neither.
+ */
+type Pref = { key: string; label: string; tier: string; active?: boolean };
 type Blueprint = {
   version: { id: string; version_no: number; confirmed_at: string | null; model_version: string } | null;
   signals: Signal[];
@@ -117,7 +128,12 @@ export default function BlueprintPage() {
               <ul className="flex flex-wrap gap-2">
                 {b.preferences.map((p) => (
                   <li key={p.key} className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1 text-sm">
-                    {p.label} <TierPill tier={p.tier} />
+                    {p.label}{" "}
+                    {p.active === false ? (
+                      <span className="text-xs text-ink-tertiary">not in use</span>
+                    ) : (
+                      <TierPill tier={p.tier} />
+                    )}
                   </li>
                 ))}
               </ul>
@@ -159,6 +175,12 @@ export default function BlueprintPage() {
                           Cancel
                         </Button>
                       </div>
+                    ) : s.correctable === false ? (
+                      <p className="mt-1 text-sm text-ink-secondary">
+                        You withdrew consent for sensitive data, so this is no longer used for matching and cannot be
+                        changed here. Granting that consent again in <a className="underline" href="/you/privacy">Privacy</a> makes it
+                        editable.
+                      </p>
                     ) : (
                       <Button size="sm" variant="ghost" className="mt-1" onClick={() => { setEditing(s.key); setDraft(s.value ?? ""); }}>
                         Correct this

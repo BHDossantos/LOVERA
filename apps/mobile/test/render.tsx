@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import { useEffect, type ReactElement } from "react";
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -14,6 +14,25 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
  * field the API does not send throws during render, which is the bug class these tests
  * exist to catch. `texts()` is then enough to assert what a member would see.
  */
+/**
+ * Trees to tear down after the test that made them.
+ *
+ * A screen that polls — the conversation refetches every 8s — keeps a timer scheduled for as
+ * long as its query observer is mounted, and jest will not exit while one is pending. The
+ * suite passed in under a second and then sat there until it was killed, which in CI is a
+ * hung job rather than a failing one. Unmounting releases the observer, and its timer with it.
+ */
+const mounted: ReactTestRenderer[] = [];
+
+afterEach(() => {
+  while (mounted.length) {
+    const tree = mounted.pop();
+    act(() => {
+      tree?.unmount();
+    });
+  }
+});
+
 export async function renderScreen(ui: ReactElement) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } },
@@ -28,8 +47,16 @@ export async function renderScreen(ui: ReactElement) {
   // between asserting on real data and asserting on a fallback that happens to match.
   await flush();
   const r = tree as ReactTestRenderer;
+  mounted.push(r);
   return {
     tree: r,
+    /**
+     * The screen's own cache, so a test can seed an entry another screen would be holding and
+     * then assert what an action did to it. Whether a mutation invalidates or *removes* is not
+     * a detail: invalidate marks an entry stale and leaves the data in place, so a screen left
+     * mounted keeps painting it, which is exactly how a cancelled date stayed actionable.
+     */
+    client,
     /** Every string rendered anywhere in the tree. */
     texts: () => collect(r.root),
     /** True when some single rendered string contains `needle`. */
@@ -71,6 +98,95 @@ export async function renderScreen(ui: ReactElement) {
         (node.props as { onPress: () => void }).onPress();
       });
     },
+    /**
+     * Type into the nth text input, by calling the handler the real component calls.
+     *
+     * Buttons on these screens are disabled until there is something to send, and `press`
+     * refuses a disabled control, so a test that never types can only ever assert the
+     * disabled half of the behaviour.
+     */
+    type: async (text: string, index = 0) => {
+      const inputs = r.root.findAll((n) => typeof (n.props as { onChangeText?: unknown }).onChangeText === "function");
+      const node = at(inputs, index);
+      if (!node) throw new Error(`no text input at index ${index} (found ${inputs.length})`);
+      await act(async () => {
+        (node.props as { onChangeText: (t: string) => void }).onChangeText(text);
+      });
+    },
+    /**
+     * Fire the nth onLayout with a measured position, as the native side would.
+     *
+     * A screen that reports what the member has reached has to learn where things are from
+     * layout. Nothing measures in a test renderer, so without this the measurement never
+     * arrives and such a screen can only be tested in its "I don't know yet" state.
+     */
+    layout: async (index: number, y: number, height = 400) => {
+      const nodes = layoutables(r.root);
+      const node = at(nodes, index);
+      if (!node) throw new Error(`no onLayout at index ${index} (found ${nodes.length})`);
+
+      await act(async () => {
+        (node.props as { onLayout: (e: unknown) => void }).onLayout({
+          nativeEvent: { layout: { x: 0, y, width: 360, height } },
+        });
+      });
+      await flush();
+    },
+    /** Fire the scroll view's onScroll at an offset, as a member dragging the page would. */
+    scroll: async (y: number) => {
+      const nodes = r.root.findAll((n) => typeof (n.props as { onScroll?: unknown }).onScroll === "function");
+      if (!nodes.length) throw new Error("nothing on this screen handles onScroll");
+      await act(async () => {
+        (nodes[0].props as { onScroll: (e: unknown) => void }).onScroll({ nativeEvent: { contentOffset: { x: 0, y } } });
+      });
+      await flush();
+    },
+    /**
+     * Flip a Switch by its accessibility label. A Switch has `onValueChange` rather than
+     * `onPress`, so `press` cannot see it — and a consent screen is nothing but switches.
+     */
+    toggle: async (label: string, to?: boolean) => {
+      const nodes = r.root.findAll(
+        (n) =>
+          typeof (n.props as { onValueChange?: unknown }).onValueChange === "function" &&
+          (n.props as { accessibilityLabel?: string }).accessibilityLabel === label,
+      );
+      if (!nodes.length) throw new Error(`no switch labelled ${JSON.stringify(label)}`);
+      const props = nodes[0].props as { onValueChange: (v: boolean) => void; value: boolean };
+      await act(async () => {
+        props.onValueChange(to ?? !props.value);
+      });
+      await flush();
+    },
+    /**
+     * Refetch what this screen is observing, as its own poll would.
+     *
+     * The failing poll is a state in its own right — the data is still there and the status is
+     * `error` — and there was no way to reach it: changing the stub and waiting for a 30-second
+     * interval is not something this renderer's clock does.
+     */
+    refetch: async (queryKey: unknown[]) => {
+      await act(async () => {
+        await client.refetchQueries({ queryKey });
+      });
+      await flush();
+    },
+    /**
+     * Run something that changes the screen — an `Alert` button's handler, say — inside `act`.
+     *
+     * `Alert.alert` is mocked, so a confirmation's `onPress` is reached by calling it off the spy
+     * rather than by pressing anything on screen, and calling it raw leaves React to schedule the
+     * resulting update whenever it likes. React says so ("An update to … was not wrapped in act"),
+     * and the consequence is worse than the warning: whether that state lands before the next
+     * assertion depends on how many microtask rounds `settle` happens to need, which differs
+     * between machines. Two tests passed here and failed in CI for exactly that reason.
+     */
+    run: async (fn: () => unknown) => {
+      await act(async () => {
+        await fn();
+      });
+      await flush();
+    },
     settle: flush,
   };
 }
@@ -85,9 +201,55 @@ async function flush(rounds = 6) {
   }
 }
 
+/**
+ * `useFocusEffect` for the test renderer, plus a way to focus a screen again.
+ *
+ * The screens in the Tabs navigator are not remounted when a member comes back to them, which is
+ * why the freshness clock resets on focus rather than on mount. Nothing in this renderer has a
+ * navigator, so each test file's `expo-router` mock delegates here: the callback runs once on mount,
+ * as a first focus would, and `refocus()` runs every registered one again, as returning to the tab
+ * does.
+ */
+const focusCallbacks = new Set<() => void>();
+
+export function mockUseFocusEffect(effect: () => void | (() => void)) {
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  useEffect(() => {
+    focusCallbacks.add(effect);
+    const cleanup = effect();
+    return () => {
+      focusCallbacks.delete(effect);
+      if (typeof cleanup === "function") cleanup();
+    };
+  }, [effect]);
+}
+
+/** Focus every mounted screen again, as navigating back to a tab does. */
+export async function refocus() {
+  await act(async () => {
+    for (const cb of [...focusCallbacks]) cb();
+  });
+  await flush();
+}
+
 /** Negative indices count from the end, so a test can say "the last one" without counting. */
 function at<T>(list: T[], index: number): T | undefined {
   return index < 0 ? list[list.length + index] : list[index];
+}
+
+/**
+ * The nodes that handle onLayout, one per handler, in tree order.
+ *
+ * A `View` shows up as both its composite and its host node and both carry the same handler, so
+ * a raw findAll returns roughly twice as many nodes as there are measured elements — and an
+ * index into that list means nothing. Handler identity is what distinguishes one from another.
+ */
+function layoutables(root: ReactTestInstance): ReactTestInstance[] {
+  const byHandler = new Map<unknown, ReactTestInstance>();
+  for (const n of root.findAll((node) => typeof (node.props as { onLayout?: unknown }).onLayout === "function")) {
+    byHandler.set((n.props as { onLayout: unknown }).onLayout, n);
+  }
+  return [...byHandler.values()];
 }
 
 /**
@@ -131,6 +293,16 @@ export function routeGet(routes: Record<string, unknown>) {
       .sort((a, b) => b.length - a.length) // longest prefix first: /safety/cases before /safety
       .find((r) => path === r || path.startsWith(r));
     if (!key) return Promise.reject(new Error(`test did not stub GET ${path}`));
-    return Promise.resolve(routes[key]);
+    // An Error as the stub means that route fails. A screen whose request fails is a state worth
+    // asserting on and there was no way to ask for it: every stub resolved, so the only failure a
+    // test could produce was a route nobody had stubbed, which is a different thing.
+    const value = routes[key];
+    if (value instanceof Error) return Promise.reject(value);
+    return Promise.resolve(value);
   };
+}
+
+/** An error shaped like the one `api()` throws, so `ErrorState` renders the server's sentence. */
+export function apiFailure(message: string, retryable = true) {
+  return Object.assign(new Error(message), { status: 503, body: { code: "UNAVAILABLE", message, retryable } });
 }

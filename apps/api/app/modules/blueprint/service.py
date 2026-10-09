@@ -271,7 +271,13 @@ def upsert_preference(db: Session, member: Member, key: str, tier: str, value: d
     if pdef.target in SIGNALS and SIGNALS[pdef.target].special_category:
         from app.modules.account.service import has_consent
 
-        if not has_consent(db, member.id, "special_category") and tier != "open":
+        # At every tier, Open included. The `tier != "open"` exemption let a member with no
+        # consent save a faith preference that build_snapshot then dropped and the payload then
+        # reported inactive — so the only thing the save accomplished was to record, about
+        # somebody who had declined to let us hold it, that faith is a criterion for them.
+        # That is the collection the consent exists to govern, and Open is not a lesser kind of
+        # it: it is still processing special-category data to rank and to explain.
+        if not has_consent(db, member.id, "special_category"):
             raise ApiError("FORBIDDEN", "Using faith for matching needs your explicit sensitive-data consent.", extra={"consent_required": "special_category"})
     pref = db.execute(select(Preference).where(Preference.member_id == member.id, Preference.key == key)).scalar_one_or_none()
     if pref is None:
@@ -284,20 +290,50 @@ def upsert_preference(db: Session, member: Member, key: str, tier: str, value: d
 
 
 def current_payload(db: Session, member: Member) -> dict[str, Any]:
+    from app.modules.account.service import has_consent
+
+    sensitive_ok = has_consent(db, member.id, "special_category")
     version = db.execute(select(BlueprintVersion).where(BlueprintVersion.member_id == member.id, BlueprintVersion.status == "confirmed")).scalar_one_or_none()
     signals = []
     if version:
         for s in db.execute(select(BlueprintSignal).where(BlueprintSignal.blueprint_version_id == version.id)).scalars():
             sig = SIGNALS[s.key]
-            signals.append({"key": s.key, "category": sig.category, "label": sig.label, "value": s.normalized_value.get("value"), "value_label": sig.options.get(s.normalized_value.get("value"), ""), "confidence": s.confidence, "evidence": (s.evidence_refs or [{}])[0].get("text"), "member_corrected": s.member_corrected, "freshness_at": iso(s.freshness_at), "special_category": sig.special_category, "options": [{"value": v, "label": l} for v, l in sig.options.items()]})
+            signals.append({"key": s.key, "category": sig.category, "label": sig.label, "value": s.normalized_value.get("value"), "value_label": sig.options.get(s.normalized_value.get("value"), ""), "confidence": s.confidence, "evidence": (s.evidence_refs or [{}])[0].get("text"), "member_corrected": s.member_corrected, "freshness_at": iso(s.freshness_at), "special_category": sig.special_category, "correctable": sensitive_ok or not sig.special_category, "options": [{"value": v, "label": l} for v, l in sig.options.items()]})
     from app.core.config import get_settings
 
     settings = get_settings()
     age_days = (utcnow() - version.confirmed_at).days if version and version.confirmed_at else None
     coverage = {cat: len([s for s in signals if s["category"] == cat]) for cat in ("life_plan", "daily", "values", "interaction", "readiness")}
+    # Signals the member has never answered. They are absent from `signals` because only
+    # persisted rows are serialised, which left no way to supply one: the correction form could
+    # offer only values that already existed, so the gap the matcher complained about was the
+    # one thing the member could not fill. Kept separate from `signals` so neither `coverage`
+    # nor the Blueprint screen changes meaning.
+    answered = {s["key"] for s in signals}
+    # A special-category signal is only offered to a member who has consented to that category.
+    # Listing it unconditionally invited sensitive data from somebody who had declined or
+    # withdrawn consent — `correct_signal` refuses it, and offering a control that is going to be
+    # refused is its own kind of wrong.
+    #
+    # An already-answered one stays in `signals`, because a member is entitled to see what we
+    # hold about them even after withdrawing consent to collect more. But it carries
+    # `correctable: false`, because the same refusal applies to changing it: without the flag,
+    # filtering only `unanswered` left the answered row selectable and the 403 was guaranteed.
+    unanswered = [
+        {
+            "key": sig.key,
+            "category": sig.category,
+            "label": sig.label,
+            "special_category": sig.special_category,
+            "options": [{"value": v, "label": l} for v, l in sig.options.items()],
+        }
+        for sig in SIGNALS.values()
+        if sig.key not in answered and (sensitive_ok or not sig.special_category)
+    ]
     return {
         "version": {"id": version.id, "version_no": version.version_no, "confirmed_at": iso(version.confirmed_at), "model_version": version.model_version} if version else None,
         "signals": signals,
+        "unanswered": unanswered,
         "preferences": preferences_payload(db, member)["preferences"],
         "coverage": coverage,
         "freshness": {"age_days": age_days, "stale": bool(age_days is not None and age_days > settings.blueprint_freshness_days), "refresh_after_days": settings.blueprint_freshness_days},
@@ -306,14 +342,48 @@ def current_payload(db: Session, member: Member) -> dict[str, Any]:
 
 
 def preferences_payload(db: Session, member: Member) -> dict[str, Any]:
+    from app.modules.account.service import has_consent
+    from app.modules.matching.snapshot import is_sensitive_preference
+
+    # A faith preference set while consented stays in the database after the consent is
+    # withdrawn — correctly, so granting it again restores the member's own setting — but the
+    # matcher stops applying it, because build_snapshot drops it. Reporting it with its tier and
+    # nothing else told the member a Must criterion was still gating introductions while they
+    # were being shown people it excludes. `active` is the one word that makes the row honest.
+    sensitive_ok = has_consent(db, member.id, "special_category")
     rows = db.execute(select(Preference).where(Preference.member_id == member.id)).scalars().all()
     out = []
     for p in rows:
         pdef = PREFERENCES[p.key]
         options = [{"value": v, "label": l} for v, l in SIGNALS[pdef.target].options.items()] if pdef.target in SIGNALS else None
-        out.append({"id": p.id, "key": p.key, "label": pdef.label, "description": pdef.description, "tier": p.tier, "operator": p.operator, "value": p.value, "options": options, "updated_at": iso(p.updated_at)})
+        # Exactly build_snapshot's rule, with no tier condition: it drops a sensitive preference
+        # at every tier, Open included, because processing special-category data to rank or to
+        # explain a match needs the same consent either way. Excusing Open here would have told
+        # the member a criterion was in use that the matcher never sees.
+        inactive = not sensitive_ok and is_sensitive_preference(p.key)
+        out.append(
+            {
+                "id": p.id,
+                "key": p.key,
+                "label": pdef.label,
+                "description": pdef.description,
+                "tier": p.tier,
+                "operator": p.operator,
+                "value": p.value,
+                "options": options,
+                "active": not inactive,
+                "inactive_reason": "special_category_consent_withdrawn" if inactive else None,
+                "updated_at": iso(p.updated_at),
+            }
+        )
     known = {p["key"] for p in out}
-    catalog = [{"key": k, "label": d.label, "description": d.description, "default_tier": d.default_tier, "operator": d.operator, "options": [{"value": v, "label": l} for v, l in SIGNALS[d.target].options.items()] if d.target in SIGNALS else None} for k, d in PREFERENCES.items() if k not in known]
+    # And nothing offered that upsert_preference will refuse: a control whose one outcome is a
+    # 403 is its own kind of wrong, the same reasoning as `unanswered` on the Blueprint payload.
+    catalog = [
+        {"key": k, "label": d.label, "description": d.description, "default_tier": d.default_tier, "operator": d.operator, "options": [{"value": v, "label": l} for v, l in SIGNALS[d.target].options.items()] if d.target in SIGNALS else None}
+        for k, d in PREFERENCES.items()
+        if k not in known and (sensitive_ok or not is_sensitive_preference(k))
+    ]
     return {"preferences": out, "available": catalog, "tier_meaning": {"must": "Hard gate. Never relaxed without you.", "prefer": "Weighted in ranking.", "open": "Used lightly; mostly for explanations."}}
 
 
@@ -321,14 +391,37 @@ def impact_preview(db: Session, member: Member, key: str, tier: str, value: dict
     """Estimate how many verified, active, reciprocal members would remain eligible if this preference were saved."""
     from app.modules.matching.eligibility import candidate_pool, passes_hard_gate
 
+    from app.modules.account.service import has_consent
+    from app.modules.matching.snapshot import is_sensitive_preference
+
+    # The same consent rule as build_snapshot. `prefs_a` overrides the snapshot's own filtered
+    # list, so passing the raw rows counted a faith gate the real batches ignore: the preview
+    # said "12 people" where matching would offer more, and the member was comparing a
+    # hypothetical against a baseline that does not exist.
+    sensitive_ok = has_consent(db, member.id, "special_category")
+
+    def enforced(pref: Preference) -> bool:
+        return sensitive_ok or not is_sensitive_preference(pref.key)
+
+    # upsert_preference refuses this save outright at every tier, so previewing a number for it
+    # would be a preview of a 403.
+    if not sensitive_ok and is_sensitive_preference(key):
+        raise ApiError(
+            "FORBIDDEN",
+            "Using faith for matching needs your explicit sensitive-data consent.",
+            extra={"consent_required": "special_category"},
+        )
+
     pool = candidate_pool(db, member)
     current_count = 0
     new_count = 0
-    prefs = {p.key: p for p in db.execute(select(Preference).where(Preference.member_id == member.id)).scalars()}
+    prefs = {p.key: p for p in db.execute(select(Preference).where(Preference.member_id == member.id)).scalars() if enforced(p)}
     from app.models.blueprint import Preference as P
 
     hypothetical = {**prefs}
-    hypothetical[key] = P(member_id=member.id, key=key, tier=tier, operator=PREFERENCES[key].operator, value=value)
+    candidate = P(member_id=member.id, key=key, tier=tier, operator=PREFERENCES[key].operator, value=value)
+    if enforced(candidate):
+        hypothetical[key] = candidate
     for other in pool:
         if passes_hard_gate(db, member, other, prefs_a=list(prefs.values())):
             current_count += 1

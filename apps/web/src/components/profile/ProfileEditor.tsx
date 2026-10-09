@@ -9,6 +9,18 @@ import { Button, Card, ErrorState, Field, MediaImage, Select, Skeleton, TextArea
 type Media = { id: string; type: string; position: number; alt_text: string | null; moderation_status: string; upload_state: string; url: string | null };
 type Profile = { display_name: string | null; pronouns: string | null; occupation: string | null; bio: string | null; languages: string[]; prompts: { key: string; answer: string }[]; available_prompts: { key: string; label: string }[]; media: Media[]; completeness: number; version: number; visibility_map: Record<string, string> };
 
+
+/**
+ * Exactly what `POST /profile/media/{id}/complete` accepts — `PHOTO_TYPES` and `VOICE_TYPES` in
+ * app/core/datauri.py, the two lists `complete_media` passes to `decode_data_url`, compared with
+ * these by `tools/check_upload_types.py` in CI.
+ *
+ * `image/*` would invite a file the server then refuses — and would have to include SVG, which is
+ * markup an `<img>` renders, so neither side can be a wildcard.
+ */
+const PHOTO_ACCEPT = ["image/png", "image/jpeg", "image/webp", "image/gif", "image/heic", "image/heif"].join(",");
+const VOICE_ACCEPT = ["audio/mpeg", "audio/mp4", "audio/aac", "audio/ogg", "audio/webm", "audio/wav", "audio/x-m4a"].join(",");
+
 export function ProfileEditor({ onSaved }: { onSaved?: () => void }) {
   const qc = useQueryClient();
   const profile = useQuery({ queryKey: ["profile"], queryFn: () => get<Profile>("/profile") });
@@ -78,7 +90,11 @@ export function ProfileEditor({ onSaved }: { onSaved?: () => void }) {
             ))}
         </ul>
         <label className="inline-flex cursor-pointer items-center gap-2 rounded-[var(--radius-lg)] border border-border bg-surface px-4 py-3 font-semibold">
-          <input type="file" accept="image/*" className="sr-only" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0], "photo")} />
+          {/* Labelled explicitly, so nothing has to identify this input by its `accept` list. An e2e
+              selector keyed on `accept="image/*"` is what broke when the list was enumerated to
+              match the server, and a hidden input that only a wrapping label names is thin for a
+              screen reader anyway. */}
+          <input type="file" aria-label="Add a photo" accept={PHOTO_ACCEPT} className="sr-only" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0], "photo")} />
           + Add a photo
         </label>
         <p className="mt-2 text-xs text-ink-tertiary">Public. Reviewed before publishing. Up to six. Recent and recognisably you.</p>
@@ -87,7 +103,7 @@ export function ProfileEditor({ onSaved }: { onSaved?: () => void }) {
         <h2 className="mb-3 font-bold">Voice note (optional)</h2>
         {p.media.some((m) => m.type === "voice") ? <p className="text-sm text-success">Voice note added ✓</p> : <p className="mb-2 text-sm text-ink-secondary">Thirty seconds of you: an answer to “what makes a good Sunday?”</p>}
         <label className="inline-flex cursor-pointer items-center gap-2 rounded-[var(--radius-lg)] border border-border bg-surface px-4 py-3 font-semibold">
-          <input type="file" accept="audio/*" className="sr-only" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0], "voice")} />
+          <input type="file" aria-label="Add a voice note" accept={VOICE_ACCEPT} className="sr-only" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0], "voice")} />
           🎤 Upload a voice note
         </label>
       </Card>

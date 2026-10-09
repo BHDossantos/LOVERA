@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.core.datauri import MAX_DATA_URL_CHARS
 from app.core.db import get_db
 from app.core.deps import Principal, current_principal
 from app.core.errors import ApiError
@@ -33,7 +34,7 @@ class EvidenceIn(BaseModel):
     size_bytes: int = 0
     checksum: str | None = None
     description: str | None = None
-    data_url: str | None = Field(default=None, max_length=15_000_000)
+    data_url: str | None = Field(default=None, max_length=MAX_DATA_URL_CHARS)
 
 
 class AppealIn(BaseModel):

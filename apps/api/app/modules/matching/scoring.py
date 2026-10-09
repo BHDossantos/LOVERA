@@ -5,29 +5,24 @@ from typing import Any
 
 from app.catalog.cities import zone_distance_km
 from app.catalog.signals import PREFERENCES, SIGNALS, TIER_WEIGHTS
+from app.core.timeutil import utcnow
+from app.core.windows import weekly_overlaps
 from app.modules.matching.eligibility import preference_satisfied
 from app.modules.matching.snapshot import Snapshot, is_fresh
 
 EPS = 1e-6
 
 
-def _minutes(t: str) -> int:
-    h, m = t.split(":")
-    return int(h) * 60 + int(m)
-
-
 def availability_overlap(a: Snapshot, b: Snapshot) -> tuple[float, list[dict[str, Any]]]:
-    overlaps: list[dict[str, Any]] = []
-    total = 0
-    for wa in a.windows:
-        for wb in b.windows:
-            if wa["weekday"] != wb["weekday"]:
-                continue
-            start = max(_minutes(wa["start"]), _minutes(wb["start"]))
-            end = min(_minutes(wa["end"]), _minutes(wb["end"]))
-            if end - start >= 90:
-                overlaps.append({"weekday": wa["weekday"], "start": f"{start // 60:02d}:{start % 60:02d}", "end": f"{end // 60:02d}:{end % 60:02d}"})
-                total += end - start
+    """How much of a week these two are free at the same time.
+
+    This used to match `weekday` and then compare `HH:MM` with `HH:MM`, which silently assumed both
+    members read the clock the same way. One of them setting a different time zone — what somebody
+    who has moved does — made the comparison wrong in the direction that matters: it claimed overlap
+    that does not exist, so a pair could be introduced on the strength of evenings only one of them
+    is actually free for. `weekly_overlaps` converts each side by its own offset first.
+    """
+    total, overlaps = weekly_overlaps(a.windows, a.member.timezone, b.windows, b.member.timezone, utcnow())
     score = min(1.0, total / (3 * 180))  # three 3-hour overlaps is "plenty"
     return score, overlaps
 

@@ -40,10 +40,49 @@ export class ApiError extends Error {
 
 const REFRESH_KEY = "mm.refresh";
 
+/** A host that only ever means "this machine", which on a phone is the phone. */
+const LOOPBACK = /^(127\.0\.0\.1|localhost|\[::1\]|::1)$/i;
+/** scheme, host (bracketed for IPv6), optional port — enough to swap the host and keep the rest. */
+const ORIGIN = /^(https?:\/\/)(\[[^\]]+\]|[^/:]+)(:\d+)?$/i;
+
+/**
+ * The origin to actually call, with the development host resolved on the device.
+ *
+ * `app.config.ts` is evaluated by the Expo CLI on the developer's machine, so the origin it
+ * bakes into `extra` cannot know anything about the device that will run the bundle. Its
+ * development fallback is `http://127.0.0.1:8000`, which is right on a simulator sharing the
+ * machine's loopback and wrong on every physical phone: there `127.0.0.1` is the phone itself,
+ * nothing is listening on it, and every request fails before it leaves the handset. That is the
+ * whole of "the API is failing" when the app is opened on a real device from `expo start`.
+ *
+ * The dev server already tells the app where it came from — `hostUri` on the manifest is the host
+ * the bundle was fetched from — so a loopback origin is rewritten to that host, keeping the API's
+ * own port rather than the dev server's. Outside a dev server `hostUri` is absent and nothing
+ * changes, so a release build is untouched; an origin that is already reachable is never
+ * rewritten, so `EXPO_PUBLIC_API_ORIGIN` still wins whenever it is set.
+ *
+ * Exported for the tests, which is also the only way to check this without a phone.
+ */
+export function resolveOrigin(origin: string, hostUri?: string): string {
+  if (!hostUri) return origin;
+  const parts = ORIGIN.exec(origin.replace(/\/$/, ""));
+  if (!parts) return origin;
+  const [, scheme, host, port = ""] = parts;
+  if (!LOOPBACK.test(host)) return origin;
+  // `hostUri` arrives as `192.168.1.10:8081`, and sometimes with a scheme in front of it. The
+  // port is the dev server's, not the API's, so it is dropped.
+  const devHost = hostUri
+    .replace(/^[a-z][a-z0-9+.-]*:\/\//i, "")
+    .split("/")[0]
+    .replace(/:\d+$/, "");
+  if (!devHost || LOOPBACK.test(devHost)) return origin;
+  return `${scheme}${devHost}${port}`;
+}
+
 function baseUrl(): string {
   const origin = (Constants.expoConfig?.extra as { apiOrigin?: string } | undefined)?.apiOrigin;
   if (!origin) throw new Error("apiOrigin is not configured; check app.config.ts and the EAS profile.");
-  return `${origin.replace(/\/$/, "")}/v1`;
+  return `${resolveOrigin(origin, Constants.expoConfig?.hostUri).replace(/\/$/, "")}/v1`;
 }
 
 let accessToken: string | null = null;
@@ -102,7 +141,10 @@ export async function refreshSession(): Promise<boolean> {
       const res = await fetch(`${baseUrl()}/auth/refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refresh_token: refresh }),
+        // The device id goes with it so the server can tell this retry from a replay of a token that
+        // leaked: a refresh interrupted by a cold start is retried with a token the server has already
+        // seen, and without something tying the request to this handset the two look identical.
+        body: JSON.stringify({ refresh_token: refresh, device_id: await deviceId() }),
       });
       if (!res.ok) {
         await clearSession();
@@ -119,6 +161,29 @@ export async function refreshSession(): Promise<boolean> {
     }
   })();
   return refreshing;
+}
+
+const DEVICE_KEY = "mm.device";
+
+/**
+ * A stable id for this installation, kept in the keychain.
+ *
+ * It lives here rather than beside the sign-in screen because the transport needs it too: a refresh
+ * sends it so the server can tell a retry of an interrupted refresh from a replay of a token that
+ * leaked. It is not a secret and is not meant to be one — the point is only that it is not carried
+ * *in* the token, so a token that escapes on its own does not bring it along.
+ */
+export async function deviceId() {
+  try {
+    let id = await SecureStore.getItemAsync(DEVICE_KEY);
+    if (!id) {
+      id = newIdempotencyKey();
+      await SecureStore.setItemAsync(DEVICE_KEY, id);
+    }
+    return id;
+  } catch {
+    return "mobile";
+  }
 }
 
 export function newIdempotencyKey() {

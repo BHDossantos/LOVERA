@@ -8,6 +8,9 @@ import {
   Text,
   TextInput as RNTextInput,
   View,
+  type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   type TextInputProps,
   type ViewStyle,
 } from "react-native";
@@ -15,7 +18,16 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { color, radius, space, type as typo } from "@/theme";
 import { ApiError } from "@/api/client";
 
-export function Screen({ children, scroll = true }: { children: ReactNode; scroll?: boolean }) {
+export function Screen({
+  children,
+  scroll = true,
+  onScroll,
+}: {
+  children: ReactNode;
+  scroll?: boolean;
+  /** Forwarded to the ScrollView. Used where a screen has to know what the member has actually reached. */
+  onScroll?: (e: NativeSyntheticEvent<NativeScrollEvent>) => void;
+}) {
   const inner = <View style={s.screenInner}>{children}</View>;
   return (
     <SafeAreaView style={s.screen} edges={["top", "left", "right"]}>
@@ -24,6 +36,8 @@ export function Screen({ children, scroll = true }: { children: ReactNode; scrol
           contentContainerStyle={s.scroll}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
+          onScroll={onScroll}
+          scrollEventThrottle={onScroll ? 200 : undefined}
         >
           {inner}
         </ScrollView>
@@ -46,8 +60,20 @@ export function PageTitle({ eyebrow, title, lede }: { eyebrow?: string; title: s
   );
 }
 
-export function Card({ children, style }: { children: ReactNode; style?: ViewStyle }) {
-  return <View style={[s.card, style]}>{children}</View>;
+export function Card({
+  children,
+  style,
+  onLayout,
+}: {
+  children: ReactNode;
+  style?: ViewStyle;
+  onLayout?: (e: LayoutChangeEvent) => void;
+}) {
+  return (
+    <View style={[s.card, style]} onLayout={onLayout}>
+      {children}
+    </View>
+  );
 }
 
 export function Button({
@@ -171,6 +197,41 @@ export function StatusBanner({ tone = "context", title, body }: { tone?: "contex
  * Errors carry a machine code from the API. We show the server's sentence, which is
  * already written for members, and only add a retry when the server says it is retryable.
  */
+/**
+ * What a server-driven screen shows while it is withholding an answer.
+ *
+ * Gating on `awaitingServer` alone made a failed forced refetch a permanent spinner: the gate
+ * stays shut, which is right — the cached answer is from before the member arrived — but nothing
+ * said why and there was no way out. Waiting and having failed are different states, and only one
+ * of them resolves on its own.
+ *
+ * `isError`, not `isRefetchError`: the latter is `isError && hasData`, so a *first* load that
+ * failed — nothing cached, which is the commonest failure of all, a cold open with no network —
+ * fell through to the spinner and stayed there with no error and no retry. Still false while the
+ * retry is in flight, so the spinner comes back for as long as it is working.
+ *
+ * The retry is unconditional here, unlike `ErrorState`'s, which appears only for an error the API
+ * marked retryable. While this gate is shut the member has no other way forward, so the button has
+ * to be there whatever the error says about itself.
+ */
+export function AwaitingServer({
+  label,
+  query,
+}: {
+  label: string;
+  query: { isError: boolean; isFetching: boolean; error: unknown; refetch: () => unknown };
+}) {
+  if (!query.isError || query.isFetching) return <Loading label={label} />;
+  return (
+    <View>
+      <ErrorState error={(query.error as ApiError) ?? null} />
+      <Button variant="secondary" onPress={() => void query.refetch()}>
+        Try again
+      </Button>
+    </View>
+  );
+}
+
 export function ErrorState({ error, retry }: { error: ApiError | null; retry?: () => void }) {
   if (!error) return null;
   // api() wraps every failure, including a rejected fetch, in an ApiError with a body — so

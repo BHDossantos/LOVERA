@@ -3,9 +3,10 @@ import { useQuery } from "@tanstack/react-query";
 import { Pressable, Text, View } from "react-native";
 import { ApiError, get } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
+import { serverDriven, useAwaitingServer } from "@/lib/query";
 import type { Introduction } from "@/api/types";
 import { INTRO_STATUS_LABEL, type IntroductionList } from "@/components/intro";
-import { Badge, Card, Empty, ErrorState, Loading, PageTitle, Screen } from "@/components/ui";
+import { AwaitingServer, Badge, Card, Empty, ErrorState, PageTitle, Screen } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
 
 function IntroRow({ intro, onPress }: { intro: Introduction; onPress: () => void }) {
@@ -43,9 +44,19 @@ export default function IntroductionsScreen() {
   const router = useRouter();
   const q = useQuery({
     queryKey: ["introductions"],
+    ...serverDriven,
     queryFn: () => get<IntroductionList>("/introductions"),
     enabled: !!me,
   });
+  /**
+   * Null while the screen is still waiting on the server, so nothing stale renders.
+   *
+   * `awaitingServer` as an extra spinner was not enough: `gcTime: 0` cannot evict a query that
+   * another mounted screen still observes, so the previous answer stayed on screen — and
+   * actionable — underneath the loading indicator.
+   */
+  const awaiting = useAwaitingServer(q);
+  const data = awaiting ? null : q.data;
 
   const open = (id: string) => router.push(`/introductions/${id}` as never);
 
@@ -56,59 +67,68 @@ export default function IntroductionsScreen() {
         title="Who the matchmaker chose, and why"
         lede="A few explained, reciprocal introductions at a time. No stack, no likes, no rankings."
       />
-      {q.isLoading && <Loading label="Loading introductions" />}
-      <ErrorState error={(q.error as ApiError) ?? null} retry={() => q.refetch()} />
-      {!!q.data && (
+      {/* Two different situations, so two renderings. Gated means there is nothing on screen, and
+          `AwaitingServer` owns that: a spinner while it is working, then the error with a retry that
+          is always offered. `ErrorState`'s own retry appears only for an error the API marked
+          retryable — which an unexpected 500 is not — so leaving the gated case to it left a member
+          with a sentence and nothing to press. Not gated means the list is up and a background poll
+          failed, which is reported beside the data rather than in place of it. */}
+      {awaiting ? (
+        <AwaitingServer label="Loading introductions" query={q} />
+      ) : (
+        <ErrorState error={(q.error as ApiError) ?? null} retry={() => q.refetch()} />
+      )}
+            {!!data && (
         <>
-          {q.data.current.length > 0 ? (
+          {data.current.length > 0 ? (
             <>
               <Text style={s.section}>Waiting for your private decision</Text>
-              {q.data.current.map((i) => (
+              {data.current.map((i) => (
                 <IntroRow key={i.id} intro={i} onPress={() => open(i.id)} />
               ))}
             </>
           ) : (
-            !!q.data.waiting && (
+            !!data.waiting && (
               <Card>
                 <Text style={s.sectionInline}>Why it's quiet</Text>
                 <Text style={s.meta}>
-                  {q.data.waiting.eligible_after_must} of {q.data.waiting.verified_pool} verified members clear your
-                  Musts right now. Next batch {q.data.waiting.next_batch}.
+                  {data.waiting.eligible_after_must} of {data.waiting.verified_pool} verified members clear your
+                  Musts right now. Next batch {data.waiting.next_batch}.
                 </Text>
-                {q.data.waiting.reasons.map((r) => (
+                {data.waiting.reasons.map((r) => (
                   <Text key={r.code} style={s.reason}>
                     • {r.text}
                   </Text>
                 ))}
-                {!!q.data.waiting.protected_credits && (
+                {!!data.waiting.protected_credits && (
                   <Text style={s.meta}>
-                    {q.data.waiting.protected_credits} protected credit(s) held — a quiet week never costs you one.
+                    {data.waiting.protected_credits} protected credit(s) held — a quiet week never costs you one.
                   </Text>
                 )}
-                <Text style={s.meta}>{q.data.waiting.broaden_hint}</Text>
+                <Text style={s.meta}>{data.waiting.broaden_hint}</Text>
               </Card>
             )
           )}
 
-          {q.data.mutual.length > 0 && (
+          {data.mutual.length > 0 && (
             <>
               <Text style={s.section}>You both said yes</Text>
-              {q.data.mutual.map((i) => (
+              {data.mutual.map((i) => (
                 <IntroRow key={i.id} intro={i} onPress={() => open(i.id)} />
               ))}
             </>
           )}
 
-          {q.data.history.length > 0 && (
+          {data.history.length > 0 && (
             <>
               <Text style={s.section}>Earlier</Text>
-              {q.data.history.map((i) => (
+              {data.history.map((i) => (
                 <IntroRow key={i.id} intro={i} onPress={() => open(i.id)} />
               ))}
             </>
           )}
 
-          {!q.data.current.length && !q.data.mutual.length && !q.data.history.length && !q.data.waiting && (
+          {!data.current.length && !data.mutual.length && !data.history.length && !data.waiting && (
             <Empty title="No introductions yet" body="The first batch arrives once your Blueprint and availability are in." />
           )}
         </>

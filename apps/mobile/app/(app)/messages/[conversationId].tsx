@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { FlatList, KeyboardAvoidingView, Platform, Pressable, Text, View } from "react-native";
+import { Alert, FlatList, KeyboardAvoidingView, Platform, Pressable, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ApiError, get, newIdempotencyKey, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
+import { planTimeLine } from "@/lib/format";
+import { serverDriven, useAwaitingServer } from "@/lib/query";
 import type { ConversationSummary, Message } from "@/api/types";
-import { Badge, Button, ErrorState, Loading, StatusBanner, TextInput } from "@/components/ui";
+import { AwaitingServer, Badge, Button, ErrorState, StatusBanner, TextInput } from "@/components/ui";
 import { color, radius, space, type as typo } from "@/theme";
 
 type History = { items: Message[]; next_cursor: string | null; has_more: boolean };
@@ -28,18 +30,29 @@ export default function Conversation() {
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState<Pending[]>([]);
   const [sendError, setSendError] = useState<ApiError | null>(null);
+  const [blockError, setBlockError] = useState<ApiError | null>(null);
+  const [blocking, setBlocking] = useState(false);
   const listRef = useRef<FlatList<Message>>(null);
 
+  // The summary carries the state the notifications are about — a new message, a conversation
+  // closed, a safety hold — so it gets the full policy.
   const summary = useQuery({
     queryKey: ["conversation", id],
     queryFn: () => get<ConversationSummary>(`/conversations/${id}`),
     enabled: !!me && !!id,
+    ...serverDriven,
   });
+  // The history deliberately does not. It refetches on mount, so a new-message notification
+  // never opens a thread missing the message it was about, but it keeps its cache: `gcTime: 0`
+  // would blank a conversation every time the member stepped out of it and back, and the 8s poll
+  // already keeps it current. Showing the messages you had while the refetch lands is right for
+  // a chat in a way it is not for a yes/no answer about somebody.
   const history = useQuery({
     queryKey: ["messages", id],
     queryFn: () => get<History>(`/conversations/${id}/messages`),
     enabled: !!me && !!id,
     refetchInterval: 8_000,
+    refetchOnMount: "always",
   });
 
   const items = history.data?.items ?? [];
@@ -91,15 +104,92 @@ export default function Conversation() {
     void send(text, newIdempotencyKey());
   };
 
-  if (summary.isLoading || (history.isLoading && !history.data))
+  // The whole screen is the summary: the header, the banners, the safety row, the assistant, date
+  // planning and the composer all read it. So it waits for the server rather than deriving a null
+  // conversation and carrying on — a null one made `onHold` and `ended` both false, which is the
+  // *permissive* reading of "I don't know yet": the composer, End and date planning stayed usable
+  // on a conversation the server had closed or put on hold, and every message then came back
+  // CONFLICT or SAFETY_HOLD. `summary.isLoading` is not the question either; it is false whenever
+  // anything is cached, which is the whole point of this policy.
+  const awaiting = useAwaitingServer(summary);
+  if (awaiting || (history.isLoading && !history.data))
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: color.canvas }}>
-        <Loading label="Loading conversation" />
+        <AwaitingServer label="Loading conversation" query={summary} />
       </SafeAreaView>
     );
 
-  const onHold = !!summary.data?.safety_hold;
-  const ended = summary.data?.status === "ended" || summary.data?.status === "closed";
+  const conversation = summary.data ?? null;
+  const onHold = !!conversation?.safety_hold;
+  const ended = conversation?.status === "ended" || conversation?.status === "closed";
+  const them = conversation?.other;
+  // Not `them.member_id`: that is null once the conversation is closed, which silently
+  // disabled Block and dropped `subject` from the report on every ended thread.
+  const subjectId = conversation?.safety.subject_id ?? null;
+  const alreadyBlocked = !!conversation?.safety.blocked_by_you;
+
+  /**
+   * Blocking from inside the conversation, through POST /blocks.
+   *
+   * Until now the only way to block somebody was to file a report, or to answer a question on
+   * the way out of the conversation — so a member who simply wanted contact to stop had to
+   * accuse them of something first. Both stores expect block and report to be reachable from
+   * the content itself (Apple guideline 1.2), and this screen had neither.
+   */
+  const block = () => {
+    const memberId = subjectId;
+    if (!memberId) return;
+    Alert.alert(
+      `Block ${them?.display_name ?? "them"}?`,
+      "This ends the conversation and cancels any date you had planned. They are never told you blocked them — only that you are unavailable. You can undo it from the safety centre.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Block",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              setBlocking(true);
+              setBlockError(null);
+              try {
+                await post("/blocks", { member_id: memberId });
+                // `create_block` does more than close this conversation: it cancels every
+                // draft, proposed, countered or confirmed date plan on it and closes any open
+                // introduction between the two (safety/service.py:46-54). The dialog above
+                // promises exactly that, so a Dates tab or a date detail left mounted must not
+                // go on showing a confirmed date with somebody who has just been blocked —
+                // with Confirm and Check in still on it.
+                //
+                // The details are removed rather than invalidated: invalidate marks an entry
+                // stale and leaves the data in place, which is the whole failure mode. The
+                // lists are invalidated, because a mounted list refetches at once and a row is
+                // not an action.
+                qc.removeQueries({ queryKey: ["date-plan"] });
+                qc.removeQueries({ queryKey: ["introduction"] });
+                await Promise.all([
+                  qc.invalidateQueries({ queryKey: ["conversations"] }),
+                  qc.invalidateQueries({ queryKey: ["blocks"] }),
+                  // And the safety centre's own payload, which carries the block count. The
+                  // Safety screen does not render that number today — the web one does — but it
+                  // holds the same query, and its unblock path already refetches it, so this is
+                  // the half of the pair that was missing rather than a choice.
+                  qc.invalidateQueries({ queryKey: ["safety"] }),
+                  qc.invalidateQueries({ queryKey: ["today"] }),
+                  qc.invalidateQueries({ queryKey: ["date-plans"] }),
+                  qc.invalidateQueries({ queryKey: ["introductions"] }),
+                ]);
+                router.replace("/messages" as never);
+              } catch (e) {
+                setBlockError(e as ApiError);
+              } finally {
+                setBlocking(false);
+              }
+            })();
+          },
+        },
+      ],
+    );
+  };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: color.canvas }} edges={["top", "left", "right"]}>
@@ -108,9 +198,9 @@ export default function Conversation() {
           <Text style={s.back}>‹</Text>
         </Pressable>
         <Text style={s.headerName} numberOfLines={1}>
-          {summary.data?.other.display_name ?? "Conversation"}
+          {conversation?.other.display_name ?? "Conversation"}
         </Text>
-        {!!summary.data?.other.verified && <Badge label="Verified" tone="success" />}
+        {!!conversation?.other.verified && <Badge label="Verified" tone="success" />}
         {!ended && (
           <Pressable
             onPress={() => router.push(`/messages/${id}/close` as never)}
@@ -134,9 +224,44 @@ export default function Conversation() {
       )}
       {ended && !onHold && (
         <View style={{ paddingHorizontal: space.lg }}>
-          <StatusBanner tone="context" title={summary.data?.public_reason ?? "This conversation has ended."} />
+          <StatusBanner tone="context" title={conversation?.public_reason ?? "This conversation has ended."} />
         </View>
       )}
+
+      {/* Report and block, from the conversation itself rather than three taps away in
+          another tab — and the report carries the conversation and the person with it, so a
+          reviewer gets the context instead of a bare narrative.
+
+          Shown whatever the state, and that has to be true rather than merely intended: most
+          reports are written after the thing is over, so an ended thread is exactly where
+          this matters. Block is dropped once the member has blocked them, because a button
+          that repeats an action already taken reads as if the first one did not work. */}
+      <View style={{ paddingHorizontal: space.lg, paddingBottom: space.sm }}>
+        <ErrorState error={blockError} retry={blockError ? () => block() : undefined} />
+        <View style={{ flexDirection: "row", gap: space.sm }}>
+          <View style={{ flex: 1 }}>
+            <Button
+              variant="ghost"
+              onPress={() =>
+                router.push(`/safety/report?conversation=${id}${subjectId ? `&subject=${subjectId}` : ""}` as never)
+              }
+            >
+              Report
+            </Button>
+          </View>
+          {alreadyBlocked ? (
+            <View style={{ flex: 1, justifyContent: "center" }}>
+              <Text style={s.blocked}>Blocked. Undo it in the safety centre.</Text>
+            </View>
+          ) : (
+            <View style={{ flex: 1 }}>
+              <Button variant="ghost" loading={blocking} disabled={!subjectId} onPress={block}>
+                Block
+              </Button>
+            </View>
+          )}
+        </View>
+      </View>
 
       {/* Writing help, translation and leaving. Drafting is a paid capability and the
           assistant screen says so itself rather than this one guessing; translation is
@@ -162,10 +287,10 @@ export default function Conversation() {
           or starts the first one. Hidden while a safety hold or an ending is in force. */}
       {!onHold && !ended && (
         <View style={{ paddingHorizontal: space.lg, paddingBottom: space.sm }}>
-          {summary.data?.date ? (
-            <Button variant="secondary" onPress={() => router.push(`/dates/${summary.data?.date?.date_plan_id}` as never)}>
-              {summary.data.date.starts_at
-                ? `Your date · ${new Date(summary.data.date.starts_at).toLocaleDateString()}`
+          {conversation?.date ? (
+            <Button variant="secondary" onPress={() => router.push(`/dates/${conversation?.date?.date_plan_id}` as never)}>
+              {conversation.date.starts_at
+                ? `Your date · ${planTimeLine(conversation.date.starts_at, conversation.date.timezone)}`
                 : "See the date you're planning"}
             </Button>
           ) : (
@@ -238,6 +363,7 @@ export default function Conversation() {
 }
 
 const s = {
+  blocked: { ...typo.small, color: color.inkSecondary, textAlign: "center" as const },
   headerAction: { ...typo.small, color: color.action, fontWeight: "600" as const, paddingLeft: space.sm },
   header: {
     flexDirection: "row",

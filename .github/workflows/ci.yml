@@ -39,6 +39,40 @@ jobs:
         run: |
           python -c "import json; from app.main import app; json.dump(app.openapi(), open('openapi.json','w'))"
           python ../../tools/check_api_contract.py openapi.json ../../apps/mobile ../../apps/web/src
+      # `other` is emptied on a closed conversation, so a client reading `other.member_id` for a
+      # report's subject names nobody and leaves Block nothing to act on — on exactly the threads
+      # where most reports are written. Neither typecheck nor the contract check can see it: the
+      # field is real, it is just the wrong one. This happened on mobile, was fixed, then happened
+      # on the web.
+      - name: Safety actions take their subject from the safety target
+        run: python ../../tools/check_safety_target.py ../../apps/mobile ../../apps/web/src
+      # React Query matches cache keys by prefix and says nothing when nothing matches, so
+      # invalidating a key no query uses is a silent no-op — the mutation looks like it refreshes
+      # the screen and does not. `["dates"]` beside a list keyed `["date-plans"]` shipped three
+      # times in one file family, leaving a cancelled date on the Dates list with Confirm still on
+      # it.
+      - name: Every cache key a mutation touches is one a query uses
+        run: python ../../tools/check_query_keys.py ../../apps/mobile ../../apps/web/src
+        env:
+          MM_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/matchmaker_test
+          MM_ENV: test
+      # The accepted media types are declared twice — the allow-list `decode_data_url` enforces,
+      # and the `accept` on the input that chooses the file — and they have now disagreed in both
+      # directions. A member whose file the picker hides thinks the product cannot take it; a
+      # member whose file the server refuses is told so only after choosing it.
+      - name: Every upload picker offers exactly what the API accepts
+        run: python ../../tools/check_upload_types.py ../../apps/web/src
+        env:
+          MM_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/matchmaker_test
+          MM_ENV: test
+      # The legal pages name operator facts — the controller, the governing law, the retention
+      # periods — from one declaration each. A page naming a fact nobody declared renders a gap
+      # labelled with the fact's own name, which is the least useful error message available, and
+      # these are the documents an app reviewer reads. `--require-all` is deliberately NOT used
+      # here: which facts are set is a property of a deployment, not of a commit. Run that before
+      # a production build (docs/DEPLOY.md).
+      - name: The legal pages name no fact that nobody declared
+        run: python ../../tools/check_legal_facts.py
         env:
           MM_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/matchmaker_test
           MM_ENV: test

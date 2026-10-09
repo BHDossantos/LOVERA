@@ -12,6 +12,18 @@
  * getRoutes, through its testing require-context stub, so it reflects what the app will
  * really register, including (group) segments being invisible in the URL.
  *
+ * It checks two sets of paths:
+ *
+ *   1. Every router.push/replace/navigate literal in this app.
+ *   2. Every client path the API hands back — a Today task's `path`, the safety centre's
+ *      action list, `safety_shortcut`, and a notification's `deep_link`. Those are routes in
+ *      the web app and this one, and both apps navigate to them verbatim. The web app has had
+ *      them all along; this app diverged (/account-review for /account/review,
+ *      /dates/{id}/check-in for /dates/{id}/safety, no /introductions/{id}/mutual at all), so
+ *      the "you both said yes" notification and the missed-check-in notification opened
+ *      nothing when tapped. Nothing could have caught that: it is a Python string on one side
+ *      and a file name on the other.
+ *
  *   node scripts/check-routes.js
  */
 const fs = require("fs");
@@ -79,20 +91,84 @@ function navigationTargets() {
   return [...found.entries()].map(([k, target]) => ({ target, where: k.split("@")[1] }));
 }
 
+const API_DIR = path.resolve(__dirname, "..", "..", "api", "app");
+
+function pyFiles(dir, out = []) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory() && e.name !== "__pycache__") pyFiles(p, out);
+    else if (e.name.endsWith(".py")) out.push(p);
+  }
+  return out;
+}
+
+/**
+ * Paths the API hands to a client. Three places produce them, and all three are matched on
+ * the line, not parsed: a `"path"`/`"cta_path"`/`"safety_shortcut"`/`"deep_link"` value; any
+ * route literal on a `notify(...)` line, where the deep link is a positional argument; and
+ * every literal in core/client_paths.py, which exists for the paths that cannot be written as
+ * a single literal at the call site.
+ */
+function apiClientPaths() {
+  const found = new Map();
+  const keyed = /"(?:path|cta_path|safety_shortcut|deep_link)":\s*f?(["'])((?:[^"'\\]|\\.)*)\1/g;
+  const literal = /f?(["'])(\/(?:[^"'\\]|\\.)*)\1/g;
+  for (const file of pyFiles(API_DIR)) {
+    const declared = file.endsWith(path.join("core", "client_paths.py"));
+    const text = fs.readFileSync(file, "utf8");
+    text.split("\n").forEach((line, i) => {
+      const scan = declared || /\bnotify\(/.test(line) ? [literal] : [];
+      for (const rx of [keyed, ...scan]) {
+        rx.lastIndex = 0;
+        let m;
+        while ((m = rx.exec(line))) {
+          if (!m[2].startsWith("/")) continue;
+          found.set(`${m[2]}@${path.relative(process.cwd(), file)}:${i + 1}`, m[2]);
+        }
+      }
+    });
+  }
+  return [...found.entries()].map(([k, target]) => ({ target, where: k.slice(k.indexOf("@") + 1) }));
+}
+
 const routes = registeredRoutes();
 const patterns = routes.map(toPattern);
+/**
+ * Routes with no [param] segment, by their exact URL.
+ *
+ * A fully literal path is checked against these rather than against the patterns, because a
+ * dynamic sibling will happily swallow it: with /introductions/waiting deleted, the path still
+ * "matches" /introductions/[id], and the app renders the introduction screen with id="waiting".
+ * That is not a 404 a tester would notice — it is a screen full of the wrong thing.
+ */
+const staticRoutes = new Set(routes.filter((r) => !r.includes("[")).map(stripGroups).map((r) => r.replace(/\/$/, "") || "/"));
 const targets = navigationTargets();
+const fromApi = apiClientPaths();
 
-const broken = targets.filter(({ target }) => {
-  // `${id}` stands in for one segment; a query string is not part of the route.
-  const p = target.replace(/\$\{[^}]*\}/g, "X").split("?")[0].replace(/\/$/, "") || "/";
-  return !patterns.some((rx) => rx.test(p));
-});
+/** `${id}` and an f-string's `{id}` each stand in for one segment; a query string is not part of the route. */
+const normalise = (target) =>
+  target
+    .replace(/\$?\{[^}]*\}/g, "X")
+    .split("?")[0]
+    .replace(/\/$/, "") || "/";
 
-console.log(`checked ${targets.length} navigation targets against ${routes.length} registered routes`);
+const resolves = (target) => {
+  const p = normalise(target);
+  return p.includes("X") ? patterns.some((rx) => rx.test(p)) : staticRoutes.has(p);
+};
+
+const unmatched = (list) => list.filter(({ target }) => !resolves(target));
+
+const broken = unmatched(targets);
+const brokenFromApi = unmatched(fromApi);
+
+console.log(`checked ${targets.length} navigation targets and ${fromApi.length} API-supplied paths against ${routes.length} registered routes`);
 for (const { target, where } of broken) console.log(`\n  ${target}\n         ${where}\n         no route matches this path`);
-if (broken.length) {
-  console.log(`\n${broken.length} navigation target(s) go nowhere`);
+for (const { target, where } of brokenFromApi)
+  console.log(`\n  ${target}\n         ${where}\n         the API hands this path to the app, and no route matches it`);
+if (broken.length || brokenFromApi.length) {
+  if (broken.length) console.log(`\n${broken.length} navigation target(s) go nowhere`);
+  if (brokenFromApi.length) console.log(`${brokenFromApi.length} path(s) the API hands out go nowhere`);
   process.exit(1);
 }
-console.log("every navigation target resolves to a route");
+console.log("every navigation target and every path the API hands out resolves to a route");

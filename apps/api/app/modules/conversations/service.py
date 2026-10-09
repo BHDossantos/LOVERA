@@ -3,12 +3,16 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
+# Postgres-specific, deliberately: `ON CONFLICT ... GREATEST` is what makes the read cursor's advance
+# atomic, and this application has only ever run on Postgres (JSONB columns, advisory locks).
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.core.analytics import track
 from app.core.audit import audit
 from app.core.errors import ApiError
+from app.core.ids import new_id
 from app.core.timeutil import iso, utcnow
 from app.models.account import Member
 from app.models.conversations import Conversation, Message, ReadCursor
@@ -41,13 +45,32 @@ def date_status(db: Session, conv: Conversation) -> dict[str, Any] | None:
     plan = db.execute(select(DatePlan).where(DatePlan.conversation_id == conv.id, DatePlan.status.in_(("proposed", "countered", "confirmed", "completed"))).order_by(DatePlan.created_at.desc())).scalars().first()
     if plan is None:
         return None
-    return {"date_plan_id": plan.id, "status": plan.status, "starts_at": iso(plan.starts_at)}
+    # `timezone` is the venue's, and it is here because both apps show this date on the conversation
+    # screen and in the Messages list. Without it those two places could only render it on the
+    # reader's own clock -- a different time from the one the date detail screen has them agree to.
+    return {"date_plan_id": plan.id, "status": plan.status, "starts_at": iso(plan.starts_at), "timezone": plan.timezone}
 
 
 def summary(db: Session, conv: Conversation, viewer: Member) -> dict[str, Any]:
+    from app.models.safety import Block
+
     other = db.get(Member, conv.other(viewer.id))
     last = db.execute(select(Message).where(Message.conversation_id == conv.id, Message.deleted_at.is_(None)).order_by(Message.sequence.desc()).limit(1)).scalar_one_or_none()
     closed_neutral = conv.status in ("closed", "blocked")
+    # The neutral snapshot on a closed conversation is a privacy decision: no name, no photo,
+    # no age once it is over. But it also took away the only id the client had, so an ended
+    # thread could neither block nor report the person — and reporting afterwards is the
+    # ordinary case, not the edge one. A report with no subject reaches a reviewer who cannot
+    # act on anybody.
+    #
+    # So the safety target is carried separately from the profile. It is not a new disclosure:
+    # the viewer was handed this id for the whole time the conversation was open.
+    blocked_by_viewer = other is not None and (
+        db.execute(
+            select(Block.id).where(Block.blocker_id == viewer.id, Block.blocked_id == other.id, Block.removed_at.is_(None))
+        ).first()
+        is not None
+    )
     return {
         "id": conv.id,
         "introduction_id": conv.introduction_id,
@@ -59,6 +82,7 @@ def summary(db: Session, conv: Conversation, viewer: Member) -> dict[str, Any]:
         "date": date_status(db, conv),
         "opened_at": iso(conv.opened_at),
         "safety_hold": conv.safety_hold,
+        "safety": {"subject_id": other.id if other else None, "blocked_by_you": blocked_by_viewer},
     }
 
 
@@ -127,12 +151,51 @@ def send_message(db: Session, conv_id: str, sender: Member, client_message_id: s
 
 
 def mark_read(db: Session, conv: Conversation, member_id: str, sequence: int) -> None:
-    cursor = db.execute(select(ReadCursor).where(ReadCursor.conversation_id == conv.id, ReadCursor.member_id == member_id)).scalar_one_or_none()
-    if cursor is None:
-        cursor = ReadCursor(conversation_id=conv.id, member_id=member_id)
-        db.add(cursor)
-    cursor.last_read_sequence = max(cursor.last_read_sequence, sequence)
-    cursor.updated_at = utcnow()
+    """Advance the member's read cursor, never rewind it, whatever order the requests arrive in.
+
+    Written as one upsert because two things race here and both have bitten. Reading the row and
+    computing the new value in Python protects only requests that do not overlap: two tabs, or a newer
+    message arriving before the previous POST finishes, can both read the same cursor and the older
+    sequence can commit last — putting messages the member has read back to unread. And when there is
+    no row yet, two concurrent first reads both insert and one dies on `uq_read_cursor`.
+
+    `GREATEST` in the conflict clause settles both inside a single statement: the row is locked for the
+    update by Postgres, the comparison happens against whatever is committed at that moment rather than
+    against what this transaction read earlier, and the insert path needs no separate existence check.
+
+    It replaced `max(cursor.last_read_sequence, sequence)` on a freshly added row, where
+    `last_read_sequence` was still None because `default=0` is a column default applied by the INSERT.
+    That raised, the 500 rolled the transaction back so the row was never written, and the next call
+    raised again — so `read_cursors` stayed empty and nobody's unread count ever cleared.
+    """
+    now = utcnow()
+    # Clamped to the conversation's head, read inside the same statement.
+    #
+    # Nothing stopped a client sending a sequence higher than any message that exists, and
+    # `GREATEST` below then made it permanent: `unread_count` counts messages *above* the cursor, so
+    # a cursor past the end marks every real message read and every future one too, until the
+    # conversation catches up with whatever number was sent. A client bug would be enough, and the
+    # member has no way to undo it — their unread badge simply never comes back.
+    #
+    # One clamp, applied to the inserted value, so the conflict path below inherits it through
+    # `excluded` rather than repeating the bound and having to agree with it.
+    head = select(Conversation.message_seq).where(Conversation.id == conv.id).scalar_subquery()
+    insert = pg_insert(ReadCursor).values(
+        id=new_id(),
+        conversation_id=conv.id,
+        member_id=member_id,
+        last_read_sequence=func.least(sequence, head),
+        updated_at=now,
+    )
+    db.execute(
+        insert.on_conflict_do_update(
+            constraint="uq_read_cursor",
+            set_={
+                "last_read_sequence": func.greatest(ReadCursor.__table__.c.last_read_sequence, insert.excluded.last_read_sequence),
+                "updated_at": now,
+            },
+        )
+    )
 
 
 def close(db: Session, conv_id: str, member: Member, reason: str, private_note: str | None, block: bool) -> dict[str, Any]:

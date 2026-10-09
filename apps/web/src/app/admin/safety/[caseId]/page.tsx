@@ -10,6 +10,8 @@ import { AdminShell } from "@/components/admin/AdminShell";
 import { CATEGORY_LABEL, CASE_STATUS_LABEL, SeverityTag } from "@/components/safety/shared";
 import { formatDateTime } from "@/lib/format";
 
+type EvidenceFile = { id: string; content_type: string; description: string | null; data_url: string; size_bytes: number; checksum: string | null; access_count: number };
+
 type CaseDetail = {
   id: string;
   receipt_code: string;
@@ -39,6 +41,28 @@ const ACTION_TYPES = [
 ];
 const REASON_CODES = ["harassment", "scam_or_fraud", "impersonation", "threats", "hate_or_discrimination", "coercion", "stalking", "misleading_profile", "no_show", "no_violation", "other"];
 
+
+/** The types this page can show in place; everything else is offered as a download. */
+const PREVIEWABLE = ["image/png", "image/jpeg", "image/webp", "image/gif", "video/", "audio/", "text/plain"];
+
+/**
+ * The text inside a `data:text/plain;base64,…` attachment, for the one type shown as text.
+ *
+ * `atob` alone returns a binary string, one char per byte, so a saved chat log with an accented
+ * name, a non-Latin script or an emoji in it reached the reviewer as mojibake — on the screen where
+ * the point is to read what was actually said. `TextDecoder` turns those bytes back into the text
+ * the reporter submitted.
+ */
+function decodeDataUrlText(dataUrl: string) {
+  try {
+    const binary = atob(dataUrl.slice(dataUrl.indexOf(",") + 1));
+    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+    return new TextDecoder("utf-8").decode(bytes);
+  } catch {
+    return "This attachment could not be decoded. Download it instead.";
+  }
+}
+
 /** Safety case detail. A declared purpose is required before anything loads; every open is audited. */
 function CaseInner({ caseId }: { caseId: string }) {
   const { me } = useAuth();
@@ -58,6 +82,9 @@ function CaseInner({ caseId }: { caseId: string }) {
   const [aDays, setADays] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
+  // Fetched on demand rather than with the case: a reviewer reading the narrative does not need
+  // every attachment's bytes, and each open is a separate audited access.
+  const [opened, setOpened] = useState<Record<string, EvidenceFile>>({});
 
   const run = async (label: string, fn: () => Promise<unknown>) => {
     setBusy(label);
@@ -74,6 +101,19 @@ function CaseInner({ caseId }: { caseId: string }) {
   };
   const update = () => run("update", () => post(`/admin/safety/cases/${caseId}`, { status: status || null, note: note.trim() || null, visible_to_reporter: visible, purpose })).then(() => { setNote(""); setStatus(""); });
   const applyAction = () => run("action", () => post(`/admin/safety/cases/${caseId}/actions`, { type: aType, reason_code: aReason, public_notice: aNotice.trim() || null, duration_days: aDays ? Number(aDays) : null, purpose })).then(() => setActionOpen(false));
+
+  /**
+   * Open one attachment.
+   *
+   * Until this existed the reporter was told the reviewer would see their screenshot and the
+   * reviewer could see its MIME type. On a harassment report the screenshot is usually the whole
+   * substance of the case, so the attachment list was a vault with no door.
+   */
+  const openEvidence = (id: string) =>
+    run(`evidence:${id}`, async () => {
+      const file = await get<EvidenceFile>(`/admin/safety/evidence/${id}?purpose=${encodeURIComponent(purpose)}`);
+      setOpened((prev) => ({ ...prev, [id]: file }));
+    });
 
   if (purpose.length < 3) {
     return (
@@ -130,14 +170,65 @@ function CaseInner({ caseId }: { caseId: string }) {
               <h2 className="mb-1 font-bold">Evidence ({c.evidence.length})</h2>
               {c.evidence.length === 0 && <p className="text-sm text-ink-secondary">None attached. Never require the reporter to obtain more.</p>}
               <ul className="divide-y divide-border text-sm">
-                {c.evidence.map((e) => (
-                  <li key={e.id} className="py-2">
-                    <span className="font-semibold">{e.content_type}</span> · collected {formatDateTime(e.collected_at)} · opened {e.access_count}×
-                    {e.description && <p className="text-ink-secondary">{e.description}</p>}
-                  </li>
-                ))}
+                {c.evidence.map((e) => {
+                  const file = opened[e.id];
+                  return (
+                    <li key={e.id} className="py-2">
+                      <span className="font-semibold">{e.content_type}</span> · collected {formatDateTime(e.collected_at)} · opened {e.access_count}×
+                      {e.description && <p className="text-ink-secondary">{e.description}</p>}
+                      {!file && (
+                        <Button variant="secondary" className="mt-1" loading={busy === `evidence:${e.id}`} onClick={() => openEvidence(e.id)}>
+                          Open this attachment
+                        </Button>
+                      )}
+                      {file && !file.data_url.startsWith("data:") && (
+                        /* The API refuses anything but an inline data URL on the way in
+                           (app/core/datauri.py). This is the same refusal on the way out, for a row
+                           stored before that check existed: a remote URL here would make the
+                           reviewer's browser fetch it, telling whoever uploaded it that their case
+                           had just been opened, and by whom. */
+                        <p className="mt-2 text-sm text-caution">
+                          This attachment was not stored as an inline file and will not be opened. Ask the engineering
+                          team to look at it rather than following the link.
+                        </p>
+                      )}
+                      {file && file.data_url.startsWith("data:") && (
+                        <div className="mt-2">
+                          {/* An attachment is whatever the reporter had to hand, so the type decides
+                              what can be shown. The reporter can attach a recording of a call or a
+                              saved chat log as well as a screenshot, and a reviewer who is shown
+                              "cannot be previewed" for a video concludes there is nothing to see —
+                              so each kind gets the control that plays or shows it, and anything
+                              left over gets the download rather than a guess.
+
+                              HEIC is the exception worth naming: browsers will not render it, so it
+                              falls through to the download deliberately. */}
+                          {file.content_type.startsWith("image/") && !["image/heic", "image/heif"].includes(file.content_type) && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={file.data_url} alt={file.description ?? "Evidence attached by the reporter"} className="max-h-[32rem] w-auto rounded-[var(--radius-md)] border border-border" />
+                          )}
+                          {file.content_type.startsWith("video/") && (
+                            <video src={file.data_url} controls className="max-h-[32rem] w-full rounded-[var(--radius-md)] border border-border" />
+                          )}
+                          {file.content_type.startsWith("audio/") && <audio src={file.data_url} controls className="w-full" />}
+                          {file.content_type === "text/plain" && (
+                            // Rendered as text, never as markup: React escapes the content, which is
+                            // the whole reason `text/html` is not an accepted type.
+                            <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-[var(--radius-md)] border border-border bg-surface-muted p-2 text-xs text-ink">{decodeDataUrlText(file.data_url)}</pre>
+                          )}
+                          {!PREVIEWABLE.some((prefix) => file.content_type.startsWith(prefix)) && (
+                            <p className="text-sm text-ink-secondary">{file.content_type} cannot be shown in the browser. Download it below.</p>
+                          )}
+                          <a href={file.data_url} download={`evidence-${file.id}`} className="mt-1 inline-flex min-h-11 items-center text-sm font-semibold text-action">
+                            Download ({Math.max(1, Math.round(file.size_bytes / 1024))} KB)
+                          </a>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
-              <p className="mt-2 text-xs text-ink-tertiary">Files live in the restricted vault; downloads are controlled separately and each access is logged.</p>
+              <p className="mt-2 text-xs text-ink-tertiary">Files live in the restricted vault. Opening one is a separate audited access against the purpose you declared, and is counted on the attachment.</p>
             </Card>
             <Card className="mb-4">
               <h2 className="mb-1 font-bold">Conversation context (last 20)</h2>

@@ -1,4 +1,4 @@
-import { DocHeader, H2, P, UL, TODO } from "../_components";
+import { DocHeader, Fact, H2, P, UL } from "../_components";
 
 export const metadata = { title: "Privacy Notice · AI Matchmaker" };
 
@@ -19,9 +19,9 @@ export default function Privacy() {
         survived.
       </P>
       <P>
-        The controller is <TODO>legal entity name</TODO>, <TODO>registered address</TODO>.
-        Contact <TODO>privacy@yourdomain</TODO>. Our data protection officer, where one is
-        required, is <TODO>DPO name and contact</TODO>.
+        The controller is <Fact name="entity" />, <Fact name="address" />.
+        Contact <Fact name="privacyEmail" />. Our data protection officer, where one is
+        required, is <Fact name="dpo" />.
       </P>
 
       <H2>What we collect, and why</H2>
@@ -60,15 +60,15 @@ export default function Privacy() {
       <H2>Who else processes your data</H2>
       <UL
         items={[
-          <>Our identity verification vendor, <TODO>vendor name</TODO>, which checks your document and liveness and returns only a result.</>,
-          <>Our hosting and database provider, <TODO>hosting provider and region</TODO>.</>,
-          <>Our payment provider, <TODO>payment provider</TODO>, and, where you subscribe inside a mobile app, Apple or Google.</>,
-          <>An AI provider, <TODO>AI provider</TODO>, which structures your interview answers into signals you then confirm. It is never used to decide anything about you on its own, and never to write a message as you.</>,
+          <>Identity verification: <Fact name="identityVendor" />. Your document and your liveness check establish that you are a real adult and nothing else; what is kept is the result, never the document.</>,
+          <>Our hosting and database provider, <Fact name="hosting" />.</>,
+          <>Our payment provider, <Fact name="paymentProvider" />, and, where you subscribe inside a mobile app, Apple or Google.</>,
+          <>An AI provider, <Fact name="aiProvider" />, which structures your interview answers into signals you then confirm. It is never used to decide anything about you on its own, and never to write a message as you.</>,
         ]}
       />
       <P>
         Each is bound by a data processing agreement. Where a provider is outside the
-        UK or EEA, transfers rely on <TODO>transfer mechanism, e.g. Standard Contractual Clauses</TODO>.
+        UK or EEA, transfers rely on <Fact name="transferMechanism" />.
       </P>
 
       <H2>Automated decisions</H2>
@@ -85,8 +85,9 @@ export default function Privacy() {
         items={[
           "Your account and profile: until you delete it.",
           "After deletion: a grace period during which you can change your mind, then erasure.",
-          <>Safety reports and their evidence: <TODO>retention period</TODO>, because deleting them would let a reported person erase their own history.</>,
-          <>Audit and billing records we must keep by law: <TODO>retention period</TODO>.</>,
+          <>Safety reports and their evidence: <Fact name="safetyRetention" />, because deleting them would let a reported person erase their own history.</>,
+          <>Audit and billing records we must keep by law: <Fact name="auditRetention" />.</>,
+          <>A location you chose to share with a check-in: <Fact name="checkinLocationRetention" /> after the date, then it is erased. This one is enforced by the code rather than by a policy — the retention sweep clears it on a schedule.</>,
         ]}
       />
 

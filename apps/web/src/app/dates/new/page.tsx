@@ -7,7 +7,7 @@ import { ApiError, get, post } from "@/lib/api";
 import { useRequireMember } from "@/lib/auth";
 import { AppShell } from "@/components/shell/AppShell";
 import { Button, Card, ChoiceCard, EmptyState, ErrorState, LinkButton, PageTitle, Select, Skeleton, StatusBanner } from "@/components/ui";
-import { formatDateTime } from "@/lib/format";
+import { planTimeLine } from "@/lib/format";
 import { shortWhen, type Overlap, type OverlapsOut } from "@/components/dates/shared";
 import type { DatePlan } from "@/lib/types";
 
@@ -76,7 +76,7 @@ function PlannerInner() {
       {plan && closed && <StatusBanner type="caution" title="This plan is closed" body="Start a new plan from the conversation if you'd like to meet." action={<LinkButton href={`/messages/${plan.conversation_id}`} variant="secondary">Back to the conversation</LinkButton>} />}
       {plan && !closed && (
         <>
-          {plan.status !== "draft" && plan.starts_at && <StatusBanner type="info" title="There is already a proposal on the table" body={`${plan.venue?.name ?? "A venue"} on ${formatDateTime(plan.starts_at, plan.timezone)}. Choosing a new window sends a change that ${plan.other_display_name} must reconfirm.`} action={<LinkButton href={`/dates/${plan.id}`} variant="secondary">See the current proposal</LinkButton>} />}
+          {plan.status !== "draft" && plan.starts_at && <StatusBanner type="info" title="There is already a proposal on the table" body={`${plan.venue?.name ?? "A venue"} on ${planTimeLine(plan.starts_at, plan.timezone)}. Choosing a new window sends a change that ${plan.other_display_name} must reconfirm.`} action={<LinkButton href={`/dates/${plan.id}`} variant="secondary">See the current proposal</LinkButton>} />}
           {!concierge && (
             <StatusBanner type="info" title="Manual planning (free)" body="You see up to three overlapping windows and one venue suggestion. Matchmaker Pro adds the full overlap list and a balanced shortlist of three public venues." action={<LinkButton href="/you/membership" variant="ghost">See what membership includes</LinkButton>} />
           )}
@@ -106,7 +106,7 @@ function PlannerInner() {
               <Select id="start" value={startAt} onChange={(e) => setStartAt(e.target.value)}>
                 {slots.map((s) => (
                   <option key={s} value={s}>
-                    {formatDateTime(s, plan.timezone)}
+                    {planTimeLine(s, plan.timezone)}
                   </option>
                 ))}
               </Select>

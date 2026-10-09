@@ -3,8 +3,9 @@ import { useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { Text } from "react-native";
 import { ApiError, get, post } from "@/api/client";
-import { useAuth } from "@/lib/auth";
-import { Badge, Button, Card, Divider, ErrorState, Field, Loading, PageTitle, Screen, StatusBanner, TextInput } from "@/components/ui";
+import { useAuth, useRequireMember } from "@/lib/auth";
+import { serverDriven, useAwaitingServer } from "@/lib/query";
+import { AwaitingServer, Badge, Button, Card, Divider, ErrorState, Field, PageTitle, Screen, StatusBanner, TextInput } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
 
 /**
@@ -36,7 +37,14 @@ type Action = {
 type Review = { status: string; actions: Action[]; rights: string[] };
 
 export default function AccountReview() {
-  const { me, signOut } = useAuth();
+  // `useRequireMember`, not `useAuth`: this screen is a notification destination, and a member whose
+  // session has gone — the app reopened after a long time, or they signed out on another device —
+  // arrives with `me` null. The query is disabled until `me` exists, so nothing ever fetches, and
+  // the freshness gate is right to withhold an answer it never received. Nothing redirected though,
+  // so the screen sat on "Loading the decision" for ever. The guard sends them to sign in, and
+  // allows a restricted account through, which is the only kind of account this screen is for.
+  const { me } = useRequireMember({ allowRestricted: true, allowOnboarding: true });
+  const { signOut } = useAuth();
   const router = useRouter();
   const [appealing, setAppealing] = useState<string | null>(null);
   const [statement, setStatement] = useState("");
@@ -44,7 +52,16 @@ export default function AccountReview() {
   const [error, setError] = useState<ApiError | null>(null);
   const [sent, setSent] = useState<string | null>(null);
 
-  const q = useQuery({ queryKey: ["account-review"], queryFn: () => get<Review>("/account/review"), enabled: !!me });
+  const q = useQuery({ queryKey: ["account-review"], queryFn: () => get<Review>("/account/review"), enabled: !!me, ...serverDriven });
+  /**
+   * Null while the screen is still waiting on the server, so nothing stale renders.
+   *
+   * `awaitingServer` as an extra spinner was not enough: `gcTime: 0` cannot evict a query that
+   * another mounted screen still observes, so the previous answer stayed on screen — and
+   * actionable — underneath the loading indicator.
+   */
+  const awaiting = useAwaitingServer(q);
+  const data = awaiting ? null : q.data;
 
   const submit = async (actionId: string) => {
     setBusy(true);
@@ -70,10 +87,18 @@ export default function AccountReview() {
         title="Introductions are paused while a person looks at this"
         body="You can still reach the safety centre and your own data."
       />
-      <ErrorState error={error ?? ((q.error as ApiError) ?? null)} retry={() => q.refetch()} />
-      {q.isLoading && <Loading label="Loading the decision" />}
+      {/* Two different errors, so two places. This one is the appeal submission's: it belongs beside
+          the form whatever the fetch is doing. The fetch's own error belongs to the gate below,
+          which always offers a retry — `ErrorState` only offers one for an error the API marked
+          retryable, and an unexpected 500 is not, which left a gated screen with nothing to press. */}
+      <ErrorState error={error} />
+      {awaiting ? (
+        <AwaitingServer label="Loading the decision" query={q} />
+      ) : (
+        <ErrorState error={(q.error as ApiError) ?? null} retry={() => q.refetch()} />
+      )}
 
-      {q.data?.actions.length === 0 && (
+      {data?.actions.length === 0 && (
         <Card>
           <Text style={s.body}>
             There is no decision notice on your account. If introductions are paused, a review is in progress and
@@ -82,7 +107,7 @@ export default function AccountReview() {
         </Card>
       )}
 
-      {q.data?.actions.map((a) => (
+      {data?.actions.map((a) => (
         <Card key={a.id}>
           <Text style={s.h2}>{a.notice}</Text>
           <Badge label={a.active ? "In effect" : "Ended"} tone={a.active ? "caution" : "muted"} />
@@ -131,10 +156,10 @@ export default function AccountReview() {
         </Card>
       ))}
 
-      {!!q.data?.rights.length && (
+      {!!data?.rights.length && (
         <Card>
           <Text style={s.h2}>What you are entitled to</Text>
-          {q.data.rights.map((r) => (
+          {data.rights.map((r) => (
             <Text key={r} style={s.fine}>
               • {r}
             </Text>

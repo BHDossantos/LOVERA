@@ -23,7 +23,48 @@ export const URGENCY = [
   { value: "not_urgent", label: "Not urgent", body: "I want it on record." },
 ];
 
-export type SafetyCase = { id: string; category: string; state: string; opened_at: string; acknowledgement_due_at?: string | null };
+/**
+ * GET /safety/cases and GET /safety/cases/{id}, both of which return case_payload().
+ *
+ * This type used to say `state`, `opened_at` and `acknowledgement_due_at`. The API returns
+ * none of those three. Because `get<T>()` is an unchecked assertion nothing complained, and
+ * the case list and the case detail both rendered an empty status badge and the literal text
+ * "Invalid Date" — on the safety path, which is the last place a member should have to
+ * wonder whether their report registered.
+ */
+export type SafetyCase = {
+  id: string;
+  receipt_code: string;
+  category: string;
+  severity: string;
+  status: string;
+  submitted_at: string;
+  updated_at: string;
+  protection_applied: string[];
+  response_target: string;
+  evidence_count: number;
+  updates: { at: string; note: string }[];
+  resolution_code: string | null;
+  support: { emergency: { number: string; note: string }; note: string };
+};
+
+/** Mirrors CASE_STATUS_LABEL in apps/web/src/components/safety/shared.tsx. */
+export const CASE_STATUS_LABEL: Record<string, string> = {
+  submitted: "Received",
+  triaged: "Received and triaged",
+  assigned: "With a reviewer",
+  in_review: "Under review",
+  awaiting_information: "Waiting for information from you",
+  actioned: "Action taken",
+  appealed: "Under appeal",
+  closed: "Closed",
+};
+
+/** Mirrors PROTECTION_LABEL. The API sends the codes, not the sentences. */
+export const PROTECTION_LABEL: Record<string, string> = {
+  contact_separated: "Contact separated: they can no longer reach you here",
+  account_restricted: "The reported account is restricted while we review",
+};
 
 /**
  * GET /safety, as the API actually answers it.

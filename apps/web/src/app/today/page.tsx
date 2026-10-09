@@ -85,7 +85,11 @@ function TodayBody({ data }: { data: Today }) {
         </h2>
         <Card className="p-0">
           <ul className="divide-y divide-border">
-            <ReadinessRow label="Ready to date" ok={r.date_ready} value={r.date_ready ? "On" : "Paused"} href="/you/profile" />
+            {/* /you/availability, not /you/profile: readiness is `date_ready`, which is set through
+                PUT /availability. The photos-and-prompts editor cannot change it, so this row sent
+                a member who wanted to unpause to the one screen that could not do it — the same
+                wrong destination the server-provided readiness task had. */}
+            <ReadinessRow label="Ready to date" ok={r.date_ready} value={r.date_ready ? "On" : "Paused"} href="/you/availability" />
             <ReadinessRow label="Verification" ok={r.verification === "verified"} value={VERIFICATION_LABEL[r.verification] ?? r.verification} href="/you/verification" />
             <ReadinessRow label="Dating Blueprint" ok={r.blueprint_fresh} value={r.blueprint_fresh ? "Fresh" : "Needs a refresh"} href="/you/blueprint" />
             <ReadinessRow label="Introduction timing" ok value={`${data.introduction_timing.cadence === "weekly" ? "Weekly batch" : data.introduction_timing.cadence} · up to ${data.introduction_timing.cap} at a time`} href="/introductions" />

@@ -4,9 +4,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Linking, Text } from "react-native";
 import { ApiError, get, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
+import { planTimeLine } from "@/lib/format";
+import { serverDriven, useAwaitingServer } from "@/lib/query";
 import { telUri } from "@/components/safety";
 import type { DatePlan } from "@/api/types";
-import { Button, Card, Divider, ErrorState, Field, Loading, Options, PageTitle, Screen, StatusBanner, TextInput } from "@/components/ui";
+import { AwaitingServer, Button, Card, Divider, ErrorState, Field, Options, PageTitle, Screen, StatusBanner, TextInput } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
 
 /**
@@ -47,6 +49,7 @@ export default function DateCheckIn() {
 
   const q = useQuery({
     queryKey: ["date-plan", dateId],
+    ...serverDriven,
     queryFn: () => get<DatePlan>(`/date-plans/${dateId}`),
     enabled: !!me && !!dateId,
   });
@@ -64,10 +67,11 @@ export default function DateCheckIn() {
     }
   };
 
-  if (q.isLoading)
+  const awaiting = useAwaitingServer(q);
+  if (awaiting)
     return (
       <Screen scroll={false}>
-        <Loading label="Loading date" />
+        <AwaitingServer label="Loading date" query={q} />
       </Screen>
     );
 
@@ -92,7 +96,7 @@ export default function DateCheckIn() {
         <Card>
           <Text style={s.h2}>Active</Text>
           <Text style={s.meta}>
-            {new Date(existing.check_at).toLocaleString()} · shared as {existing.share_scope}
+            {planTimeLine(existing.check_at, d?.timezone)} · shared as {existing.share_scope}
             {existing.trusted_contact_name ? ` with ${existing.trusted_contact_name}` : ""}
           </Text>
           <Text style={s.meta}>State: {existing.state}</Text>

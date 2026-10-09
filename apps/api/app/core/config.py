@@ -39,7 +39,11 @@ class Settings(BaseSettings):
     match_auto_publish: bool = False  # concierge review before publishing; local/dev may set true
 
     # Vendors (sandbox by default; real adapters read their own keys)
-    identity_provider: str = "sandbox"  # sandbox | webhook-only vendor
+    # sandbox: a simulated capture page, refused in production — see main.check_identity_provider.
+    # manual_review: no vendor at all; every member is approved or rejected by a person in the
+    #   admin queue. A deliberate pilot posture, not a fallback.
+    # anything else: a real vendor, which reports through POST /webhooks/verification.
+    identity_provider: str = "sandbox"  # sandbox | manual_review | webhook-only vendor
     identity_webhook_secret: str = "sandbox-identity-secret"
     payments_provider: str = "sandbox"  # sandbox | stripe
     payments_webhook_secret: str = "sandbox-payments-secret"

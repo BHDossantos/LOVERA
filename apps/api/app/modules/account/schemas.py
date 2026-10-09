@@ -5,6 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.core.timeutil import TimezoneName
+
 
 class AuthStartIn(BaseModel):
     email: str = Field(pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$", max_length=320)
@@ -33,6 +35,9 @@ class TokenOut(BaseModel):
 
 class RefreshIn(BaseModel):
     refresh_token: str
+    # Optional so a client that predates this still refreshes. It is what separates a retry of an
+    # interrupted refresh from a replay of a token that leaked: see `rotate_session`.
+    device_id: str | None = None
 
 
 class ConsentIn(BaseModel):
@@ -52,7 +57,7 @@ class AdultConsentIn(BaseModel):
 
 class MeUpdateIn(BaseModel):
     locale: str | None = Field(default=None, pattern="^(en|it|es|pt)$")
-    timezone: str | None = None
+    timezone: TimezoneName | None = None
     date_ready: bool | None = None
 
 

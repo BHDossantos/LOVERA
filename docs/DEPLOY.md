@@ -211,14 +211,137 @@ so members see "try again in a moment" instead of watching an empty inbox.
 
 ## 5. Point the mobile app at it
 
-Replace the placeholders in `apps/mobile/eas.json`:
+`apps/mobile/eas.json` carries no `env` blocks — they were removed when the release config
+was standardised — so the origin has to be supplied, either by putting the block back:
 
 ```json
-"production": { "env": { "EXPO_PUBLIC_API_ORIGIN": "https://matchmaker-api.fly.dev" } }
+"production": {
+  "autoIncrement": true,
+  "env": {
+    "EXPO_PUBLIC_API_ORIGIN": "https://matchmaker-api.fly.dev",
+    "EXPO_PUBLIC_EAS_PROJECT_ID": "<the id from `npx eas-cli init`>"
+  }
+}
 ```
 
-Then rebuild. Until this is done, a store build installs and fails every
-request, which is an immediate App Review rejection.
+or by setting the same two as EAS environment variables for the profile (`npx eas-cli env
+--help`), which keeps them out of the repository.
+
+**Then rebuild.** Expo inlines the origin into the bundle at build time and `expo-updates`
+is not installed, so an existing build cannot be repointed at a different API by any means
+short of a new build. A build made before the API existed will keep failing every request
+no matter what you deploy afterwards.
+
+Both values are required for a `preview` or `production` build and `app.config.ts` refuses
+the build without them, with the reason. The `development` profile is exempt from both
+checks, which is worth knowing: a development build with no origin set silently falls back
+to `http://127.0.0.1:8000`, and on a phone that is the phone. The app recovers from that on
+its own now — `resolveOrigin` in `src/api/client.ts` rewrites a loopback origin to whatever
+host served the bundle — but only for a build that loads JS from a dev server.
+
+## 5b. Staging: a real API for a signed build, before an identity vendor exists
+
+A `production` deploy dead-ends every signup, including yours. `/verification/sandbox/complete`
+is refused when `MM_ENV` is production, and nothing else can verify a member until an identity
+vendor is wired up, so onboarding stops at the verification step. Deploy as **staging** instead
+and the only simulated thing is the ID check:
+
+```bash
+fly apps create matchmaker-api-staging
+# Postgres as in section 1, then the secrets from section 2 against the staging app, plus:
+fly secrets set --app matchmaker-api-staging \
+  MM_SMTP_HOST='smtp.yourprovider.com' \
+  MM_SMTP_USERNAME='...' MM_SMTP_PASSWORD='...' \
+  MM_MAIL_FROM='AI Matchmaker <no-reply@yourdomain>'
+
+fly deploy --config infra/fly/api-staging.toml --app matchmaker-api-staging
+```
+
+`infra/fly/api-staging.toml` sets `MM_ENV=staging` and `MM_EXPOSE_DEV_OTP=false`. That second
+one is the setting that makes a publicly reachable staging deploy safe to point a build at: the
+sign-in code is never returned in a response, so knowing somebody's address is not enough to
+sign in as them. It also means **real mail is required** — the API refuses to boot without a mail
+host rather than running healthy while nobody can get in (`check_mail_transport` in
+`apps/api/app/main.py` covers staging for exactly this reason).
+
+Verify the same way as section 4, and check the two things that distinguish this posture:
+
+```bash
+curl -sS https://matchmaker-api-staging.fly.dev/healthz        # {"ok":true,"env":"staging"}
+# dev_code MUST be null here too.
+curl -sS -X POST https://matchmaker-api-staging.fly.dev/v1/auth/start \
+  -H 'content-type: application/json' -d '{"email":"you@yourdomain"}'
+```
+
+Then point a build at it exactly as in section 5, with the staging hostname, and rebuild.
+
+## 5b-bis. The legal pages, before anything is submitted
+
+The terms, privacy notice and community agreement state facts only you have: who the
+contracting entity is, where it is registered, which law governs, the addresses members
+write to, how long safety reports are kept. Each is declared once in
+`apps/web/src/app/legal/_facts.ts` and read from the environment, so filling them in is one
+variable each rather than a search through three documents — the entity name and the
+registered address each appeared twice, and a privacy notice naming a controller the terms
+do not is a document that contradicts itself.
+
+Check where you stand:
+
+```bash
+python tools/check_legal_facts.py              # what is still missing (always passes)
+python tools/check_legal_facts.py --require-all # fails while anything required is unset
+```
+
+Run the second before a production build or a store submission. CI runs the first on every
+push, because which facts are set belongs to a deployment and not to a commit.
+
+Five of them this repository already answers — hosting and its region, the AI provider, the
+payment provider, how long a shared check-in location is kept, and whether there is an
+identity vendor (under `MM_IDENTITY_PROVIDER=manual_review` there is not, and saying there
+is would be false). The rest are yours, and a lawyer should see all of it: the file says what
+each one is and where it comes from, not what it should say.
+
+One of them is a decision and not just a sentence. `NEXT_PUBLIC_LEGAL_SAFETY_RETENTION` is
+how long safety reports and their evidence are kept — and nothing in the code deletes them
+today, by design (`erase_member` preserves safety records). So whatever you write there has
+to be implemented too, or the notice says something the system does not do.
+
+---
+
+## 5c. Shipping a fix without a store review
+
+`expo-updates` is installed, so a JavaScript-only fix can reach installed apps in minutes
+instead of waiting on App Review. From `apps/mobile`:
+
+```bash
+npx eas-cli update --branch production --message "what changed"
+```
+
+That publishes to the branch, and `eas.json` maps the `production` build profile to the
+`production` channel (and `preview` to `preview`). Builds pick it up on their next launch:
+`fallbackToCacheTimeout` is 0, so the app starts on the bundle it already has and swaps in
+what it downloaded the time after. Nobody waits on a network round trip at the splash
+screen, and nobody is more than one launch behind.
+
+**What an update must not do is reach a binary it does not fit.** A JS bundle calling a
+native module the installed app does not have crashes on launch, and the member cannot get
+out of that by themselves — no screen loads, so there is nothing to tap. The runtime version
+is what prevents it, and it is set to the `fingerprint` policy: EAS derives it from the
+native project, so any change to native code, a config plugin or a dependency with native
+code produces a different runtime version and the update is simply not offered to the old
+binaries. The alternatives (`appVersion`, `nativeVersion`) leave that as something you have
+to remember, and forgetting it once is unrecoverable on the device.
+
+So the rule is simple: **anything that changes native code needs a new store build, not an
+update.** If you are unsure whether a change is native, it is — `npx expo-doctor` and the
+build logs will tell you, and `apps/mobile/scripts/check-native-config.py` asserts the
+runtime version policy has not been loosened.
+
+Updates stay off entirely until `eas init` has created the project, because the manifest URL
+is built from the project id (`updates()` in `apps/mobile/app.config.ts`). A production build
+cannot get that far anyway — the project id guard throws first.
+
+---
 
 ## 6. A custom domain, when you have one
 

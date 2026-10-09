@@ -4,9 +4,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Linking, Text, View } from "react-native";
 import { ApiError, get, post } from "@/api/client";
 import { useRequireMember } from "@/lib/auth";
+import { serverDriven, useAwaitingServer } from "@/lib/query";
+import { planTimeLine } from "@/lib/format";
 import { telUri } from "@/components/safety";
 import type { DatePlan } from "@/api/types";
-import { Badge, Button, Card, Divider, ErrorState, Loading, PageTitle, Screen, StatusBanner } from "@/components/ui";
+import { AwaitingServer, Badge, Button, Card, Divider, ErrorState, PageTitle, Screen, StatusBanner } from "@/components/ui";
 import { color, space, type as typo } from "@/theme";
 
 /** D03 Date detail: the plan, the confirmation, and the safety tools attached to it. */
@@ -20,6 +22,7 @@ export default function DateDetail() {
 
   const q = useQuery({
     queryKey: ["date-plan", dateId],
+    ...serverDriven,
     queryFn: () => get<DatePlan>(`/date-plans/${dateId}`),
     enabled: !!me && !!dateId,
   });
@@ -37,10 +40,11 @@ export default function DateDetail() {
     }
   };
 
-  if (q.isLoading)
+  const awaiting = useAwaitingServer(q);
+  if (awaiting)
     return (
       <Screen scroll={false}>
-        <Loading label="Loading date" />
+        <AwaitingServer label="Loading date" query={q} />
       </Screen>
     );
 
@@ -53,7 +57,7 @@ export default function DateDetail() {
           <PageTitle
             eyebrow={d.status}
             title={`With ${d.other_display_name}`}
-            lede={d.starts_at ? new Date(d.starts_at).toLocaleString() : "Time not settled yet"}
+            lede={d.starts_at ? planTimeLine(d.starts_at, d.timezone) : "Time not settled yet"}
           />
           {d.awaiting_your_confirmation && (
             <StatusBanner tone="context" title="They proposed this. It isn't set until you confirm." />
@@ -105,7 +109,7 @@ export default function DateDetail() {
             <Text style={s.h2}>Safety</Text>
             {d.check_in ? (
               <Text style={s.meta}>
-                Check-in set for {new Date(d.check_in.check_at).toLocaleString()} · shared as {d.check_in.share_scope}
+                Check-in set for {planTimeLine(d.check_in.check_at, d.timezone)} · shared as {d.check_in.share_scope}
                 {d.check_in.trusted_contact_name ? ` with ${d.check_in.trusted_contact_name}` : ""}
               </Text>
             ) : (
@@ -115,7 +119,7 @@ export default function DateDetail() {
               </Text>
             )}
             {(d.status === "confirmed" || !!d.check_in) && (
-              <Button variant="secondary" onPress={() => router.push(`/dates/${d.id}/check-in` as never)}>
+              <Button variant="secondary" onPress={() => router.push(`/dates/${d.id}/safety` as never)}>
                 {d.check_in ? "Check in, or change it" : "Set up a check-in"}
               </Button>
             )}
@@ -154,7 +158,7 @@ export default function DateDetail() {
               <Text style={s.meta}>
                 If you both said yes to a second date, you will both hear. Nobody is told about a no.
               </Text>
-              <Button variant="secondary" onPress={() => router.push(`/dates/${d.id}/outcome` as never)}>
+              <Button variant="secondary" onPress={() => router.push(`/dates/${d.id}/mutual-second-date` as never)}>
                 See if it was mutual
               </Button>
               <Button variant="ghost" onPress={() => router.push(`/dates/${d.id}/feedback` as never)}>

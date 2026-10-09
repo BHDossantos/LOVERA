@@ -6,7 +6,7 @@ import { ApiError, get, put } from "@/lib/api";
 import { Button, Card, ErrorState, Field, Select, Skeleton, Toggle } from "@/components/ui";
 
 type Window = { weekday: number; start: string; end: string };
-type Availability = { timezone: string | null; recurring_windows: Window[]; date_styles: string[]; date_ready: boolean; policy: string };
+type Availability = { timezone: string | null; recurring_windows: Window[]; date_styles: string[]; date_ready: boolean; updated_at: string | null; policy: string };
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const STYLES = [["coffee", "Coffee"], ["walk", "A walk"], ["drinks", "Drinks"], ["dinner", "Dinner"], ["culture", "Museum or show"], ["activity", "An activity"]];
 const HOURS = Array.from({ length: 16 }, (_, i) => `${String(i + 8).padStart(2, "0")}:00`);
@@ -21,10 +21,16 @@ export function AvailabilityEditor({ onSaved, cta = "Save availability" }: { onS
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
 
+  // `updated_at` is the only thing that tells "never saved" from "saved as empty": GET /availability
+  // returns date_styles: [] for both, so seeding a default off `length` re-added a style the member
+  // had deliberately removed, every visit, on the next save of anything else. date_styles gates and
+  // scores nothing — it is only carried in the feature snapshot — so an empty list is a choice to
+  // respect, not a gap to fill.
   useEffect(() => {
     if (q.data && !loaded) {
-      setWindows(q.data.recurring_windows.length ? q.data.recurring_windows : [{ weekday: 3, start: "18:00", end: "22:00" }, { weekday: 5, start: "11:00", end: "17:00" }]);
-      setStyles(q.data.date_styles.length ? q.data.date_styles : ["coffee"]);
+      const first = q.data.updated_at === null;
+      setWindows(first ? [{ weekday: 3, start: "18:00", end: "22:00" }, { weekday: 5, start: "11:00", end: "17:00" }] : q.data.recurring_windows);
+      setStyles(first ? ["coffee"] : q.data.date_styles);
       setReady(q.data.date_ready);
       setLoaded(true);
     }
@@ -44,7 +50,21 @@ export function AvailabilityEditor({ onSaved, cta = "Save availability" }: { onS
     }
   };
 
-  if (!q.data) return <Skeleton lines={5} />;
+  // The same on this side: a first load that fails has no data, so an unconditional skeleton left
+  // the readiness editor loading for ever with no error and no retry. The button is unconditional
+  // too, unlike ErrorState's own, because while this is the whole screen there is no other way on.
+  if (!q.data) {
+    if (q.isError && !q.isFetching)
+      return (
+        <Card>
+          <ErrorState error={q.error as ApiError} />
+          <Button variant="secondary" onClick={() => void q.refetch()}>
+            Try again
+          </Button>
+        </Card>
+      );
+    return <Skeleton lines={5} />;
+  }
   return (
     <div>
       <ErrorState error={error} />
@@ -103,7 +123,11 @@ export function AvailabilityEditor({ onSaved, cta = "Save availability" }: { onS
       <Card className="mb-6">
         <Toggle checked={ready} onChange={setReady} label="I'm ready to meet within two weeks" description="Off pauses introductions without hiding your profile from existing connections." />
       </Card>
-      <Button fullWidth loading={busy} disabled={windows.length === 0} onClick={save}>
+      {/* A style as well as a window, which is what the mobile editor has always required. The
+          two disagreeing is what let an empty list exist at all: saved on the web, then silently
+          re-seeded with "coffee" on the next read. Nothing is pre-selected on the member's behalf
+          now, so an empty stored list shows as empty and asks them to choose. */}
+      <Button fullWidth loading={busy} disabled={windows.length === 0 || styles.length === 0} onClick={save}>
         {cta}
       </Button>
     </div>

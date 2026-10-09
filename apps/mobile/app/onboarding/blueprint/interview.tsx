@@ -106,7 +106,7 @@ export default function Interview() {
       const next = await post<SessionState>(`/blueprint/sessions/${state.session_id}/answers`, payload);
       setState(next);
       if (!next.next_question)
-        router.replace({ pathname: "/onboarding/blueprint-review", params: { session: state.session_id } } as never);
+        router.replace({ pathname: "/onboarding/blueprint/review", params: { session: state.session_id } } as never);
     } catch (err) {
       setError(err as ApiError);
     } finally {

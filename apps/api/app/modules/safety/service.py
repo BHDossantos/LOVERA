@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.analytics import track
 from app.core.audit import audit
+from app.core.datauri import EVIDENCE_TYPES, decode_data_url
 from app.core.errors import ApiError
 from app.core.timeutil import iso, utcnow
 from app.models.account import Member
@@ -124,6 +125,18 @@ def add_evidence(db: Session, reporter: Member, report_id: str, content_type: st
         raise ApiError("NOT_FOUND")
     if report.status == "closed":
         raise ApiError("CONFLICT", "This case is closed. Open a new report to add information.")
+    # Validated before anything is stored, because what is stored is handed to a reviewer as an
+    # image source. An unchecked string here let the reporter put a URL of their choosing in front
+    # of the person handling a report about them — see app/core/datauri.py.
+    if data_url:
+        # Everything the pickers offer. A recording of a call and a saved chat log are evidence as
+        # much as a screenshot is, and narrowing the server behind the client meant the member
+        # attached a file, was told the report was filed, and the reviewer got nothing.
+        raw = decode_data_url(data_url, content_type, EVIDENCE_TYPES)
+        # The bytes, not the client's claim about them. A reviewer reads this number to decide
+        # whether to open the attachment at all, and it described whatever the picker had opened
+        # rather than what was sent.
+        size_bytes = len(raw)
     key = f"evidence/{report.id}/{secrets.token_hex(8)}"
     ev = SafetyEvidence(report_id=report.id, storage_key=key, content_type=content_type, size_bytes=size_bytes, checksum=checksum, description=(description or "")[:300] or None)
     db.add(ev)

@@ -36,7 +36,7 @@ def auth_verify(data: schemas.AuthVerifyIn, request: Request, db: Session = Depe
 
 @router.post("/auth/refresh", response_model=schemas.TokenOut)
 def auth_refresh(data: schemas.RefreshIn, db: Session = Depends(get_db, scope="function")) -> dict:
-    _, _, access, refresh = service.rotate_session(db, data.refresh_token)
+    _, _, access, refresh = service.rotate_session(db, data.refresh_token, data.device_id)
     return {"access_token": access, "refresh_token": refresh, "expires_in": get_settings().access_token_ttl_seconds}
 
 

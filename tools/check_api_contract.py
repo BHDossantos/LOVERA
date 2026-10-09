@@ -28,9 +28,17 @@ import sys
 # than matched, because a template literal can contain another one —
 # `` `/date-plans/${id}/venues${style ? `?style=${style}` : ""}` `` — and a regex that
 # stops at the first backtick truncates the path and then reports it as missing.
-CALL_OPEN = re.compile(r'\b(get|post|put|patch|del)\s*(?:<[^>()]*>)?\s*\(\s*([`"\'])')
+# A type argument can itself contain angle brackets — `get<Record<string, unknown>>(...)` —
+# and a pattern that stops at the first `>` matches nothing here, so the call was skipped
+# silently. One level of nesting covers everything in these two apps; a deeper one would be
+# skipped again rather than mis-read, so tools/endpoint_coverage.py is where that would show.
+CALL_OPEN = re.compile(
+    r'\b(get|post|put|patch|del)\s*(?:<(?:[^<>()]|<[^<>()]*>)*>)?\s*\(\s*([`"\'])'
+)
 VERB = {"get": "get", "post": "post", "put": "put", "patch": "patch", "del": "delete"}
 PREFIX = "/v1"
+# A `?` that opens a string literal, which is how a conditional query suffix is written.
+QUERY_SUFFIX = re.compile(r"""[`"']\?""")
 
 
 def strip_interpolations(path: str) -> str:
@@ -39,7 +47,12 @@ def strip_interpolations(path: str) -> str:
     An interpolation standing in for a path segment becomes one segment. An
     interpolation that builds a conditional query suffix —
     `${style ? `?style=${style}` : ""}` — is not part of the path at all, so everything
-    from there on is dropped. Telling them apart by the `?` inside the expression is a
+    from there on is dropped.
+
+    What marks the second kind is a `?` that opens a *string*, not just a `?` anywhere in the
+    expression: `${plan?.id}` is optional chaining standing in for one segment, and reading its
+    `?` as a query suffix truncated `/date-plans/${plan?.id}/overlaps` to `/date-plans`, which
+    is also a real route — so the call passed the check without ever being checked. Still a
     heuristic, but the alternative is evaluating TypeScript.
     """
     out, i = [], 0
@@ -52,7 +65,7 @@ def strip_interpolations(path: str) -> str:
                 elif path[j] == "}":
                     depth -= 1
                 j += 1
-            if "?" in path[i:j]:
+            if QUERY_SUFFIX.search(path[i:j]):
                 break  # a query suffix, and the path ended before it
             out.append("X")
             i = j

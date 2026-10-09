@@ -52,7 +52,8 @@ function ConversationInner({ id }: { id: string }) {
         qc.invalidateQueries({ queryKey: ["conversations"] });
       } else if (e.type === "date_plan.updated") {
         qc.invalidateQueries({ queryKey: ["conversation", id] });
-        qc.invalidateQueries({ queryKey: ["dates"] });
+        qc.invalidateQueries({ queryKey: ["date-plans"] });
+        qc.invalidateQueries({ queryKey: ["date-plan"] });
       } else if (e.type === "introduction.updated") {
         qc.invalidateQueries({ queryKey: ["introductions"] });
       }
