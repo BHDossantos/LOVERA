@@ -167,6 +167,100 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // rejections under guideline 2.4.1, and we have no tablet layouts.
     supportsTablet: false,
     config: { usesNonExemptEncryption: false },
+    /**
+     * The privacy manifest. There was none at all, which is an upload rejection: since 2024 every
+     * app on the App Store has to carry one, and the app-level obligations — whether it tracks,
+     * and what it collects — are the app's own and are not covered by the manifests its SDKs
+     * ship for themselves.
+     *
+     * Everything below has to match the App Privacy answers in App Store Connect, because a
+     * reviewer compares them. Two of these are worth saying out loud:
+     *
+     *   - **Sensitive Info.** Who somebody is seeking is sexual-orientation data under Apple's
+     *     taxonomy. A dating app that does not declare it is not making an oversight, it is
+     *     making a claim that will not survive review.
+     *   - **No location.** The city and zone are chosen from a list, not read from the device —
+     *     `blockedPermissions` below removes both location permissions on Android, and no
+     *     location purpose string exists on iOS. Member-entered geography is not device location,
+     *     so it is not declared here; declaring what we do not collect is as wrong as omitting
+     *     what we do.
+     *
+     * Nothing here is for tracking: there is no advertising SDK, no attribution SDK and no
+     * analytics vendor in this binary — `track()` writes to our own API.
+     */
+    privacyManifests: {
+      NSPrivacyTracking: false,
+      NSPrivacyTrackingDomains: [],
+      NSPrivacyAccessedAPITypes: [
+        {
+          // The app reads and writes its own user defaults and nothing else's.
+          NSPrivacyAccessedAPIType: "NSPrivacyAccessedAPICategoryUserDefaults",
+          NSPrivacyAccessedAPITypeReasons: ["CA92.1"],
+        },
+      ],
+      NSPrivacyCollectedDataTypes: [
+        {
+          NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeEmailAddress",
+          NSPrivacyCollectedDataTypeLinked: true,
+          NSPrivacyCollectedDataTypeTracking: false,
+          NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"],
+        },
+        {
+          NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeName",
+          NSPrivacyCollectedDataTypeLinked: true,
+          NSPrivacyCollectedDataTypeTracking: false,
+          NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"],
+        },
+        {
+          NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeUserID",
+          NSPrivacyCollectedDataTypeLinked: true,
+          NSPrivacyCollectedDataTypeTracking: false,
+          NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"],
+        },
+        {
+          NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypePhotosorVideos",
+          NSPrivacyCollectedDataTypeLinked: true,
+          NSPrivacyCollectedDataTypeTracking: false,
+          NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"],
+        },
+        {
+          // Who somebody is seeking, and the identity-verification result.
+          NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeSensitiveInfo",
+          NSPrivacyCollectedDataTypeLinked: true,
+          NSPrivacyCollectedDataTypeTracking: false,
+          NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"],
+        },
+        {
+          // Messages, prompt answers, the bio, and what a member says in a safety report.
+          NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeOtherUserContent",
+          NSPrivacyCollectedDataTypeLinked: true,
+          NSPrivacyCollectedDataTypeTracking: false,
+          NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"],
+        },
+        {
+          // Date of birth, the Blueprint answers, availability.
+          NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeOtherDataTypes",
+          NSPrivacyCollectedDataTypeLinked: true,
+          NSPrivacyCollectedDataTypeTracking: false,
+          NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"],
+        },
+        {
+          NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeProductInteraction",
+          NSPrivacyCollectedDataTypeLinked: true,
+          NSPrivacyCollectedDataTypeTracking: false,
+          NSPrivacyCollectedDataTypePurposes: [
+            "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+            "NSPrivacyCollectedDataTypePurposeAnalytics",
+          ],
+        },
+        {
+          NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypePurchaseHistory",
+          NSPrivacyCollectedDataTypeLinked: true,
+          NSPrivacyCollectedDataTypeTracking: false,
+          NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"],
+        },
+      ],
+    },
     infoPlist: {
       NSCameraUsageDescription:
         "AI Matchmaker uses the camera so you can take a profile photo and complete identity verification.",

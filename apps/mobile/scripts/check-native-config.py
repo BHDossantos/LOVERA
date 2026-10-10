@@ -153,6 +153,41 @@ def main() -> int:
               f"{label}: the runtime version is the fingerprint policy",
               f"got {runtime_value!r}")
 
+    # ---- iOS privacy manifest -------------------------------------------------------------
+    #
+    # There was none at all, which is an upload rejection: since 2024 every app on the App Store
+    # has to carry one. The app-level obligations — whether it tracks, and what it collects — are
+    # the app's own and are *not* covered by the manifests its SDKs ship for themselves, so an
+    # empty or missing file is not "the SDKs have it handled".
+    #
+    # These assertions are about the two answers a reviewer compares against App Store Connect,
+    # and about the one that is easy to get quietly wrong: a dating app that does not declare
+    # sensitive info is not making an oversight, it is making a claim that will not survive
+    # review, because who somebody is seeking is sexual-orientation data under Apple's taxonomy.
+    privacy_path = ROOT / "ios/AIMatchmaker/PrivacyInfo.xcprivacy"
+    check(privacy_path.exists(), "ios: a privacy manifest was generated", f"expected {privacy_path}")
+    if privacy_path.exists():
+        privacy = plistlib.loads(privacy_path.read_bytes())
+        collected = {c.get("NSPrivacyCollectedDataType") for c in privacy.get("NSPrivacyCollectedDataTypes", [])}
+        check(privacy.get("NSPrivacyTracking") is False,
+              "ios: the manifest declares no cross-app tracking",
+              f"got {privacy.get('NSPrivacyTracking')!r}")
+        check(privacy.get("NSPrivacyTrackingDomains") == [],
+              "ios: no tracking domains are declared",
+              f"got {privacy.get('NSPrivacyTrackingDomains')!r}")
+        check("NSPrivacyCollectedDataTypeSensitiveInfo" in collected,
+              "ios: sensitive info is declared (who a member is seeking)",
+              f"collected: {sorted(collected)}")
+        check("NSPrivacyCollectedDataTypeOtherUserContent" in collected,
+              "ios: member-written content is declared (messages, prompts, reports)")
+        # Declaring what we do not collect is as wrong as omitting what we do, and this one is
+        # checked in the same breath as the blocked location permissions above.
+        check(not {"NSPrivacyCollectedDataTypePreciseLocation", "NSPrivacyCollectedDataTypeCoarseLocation"} & collected,
+              "ios: no location is declared, because none is collected",
+              f"collected: {sorted(collected)}")
+        check(all(not c.get("NSPrivacyCollectedDataTypeTracking") for c in privacy.get("NSPrivacyCollectedDataTypes", [])),
+              "ios: nothing collected is used for tracking")
+
     print()
     if failures:
         print(f"{len(failures)} check(s) failed:")
