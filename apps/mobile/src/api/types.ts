@@ -113,6 +113,13 @@ export type ConversationSummary = {
   public_reason: string | null;
   other: ProfileSnapshot;
   last_message: { text: string; sent_at: string; mine: boolean } | null;
+  /**
+   * Whose move it is, decided by the server.
+   *
+   * Not derived from `last_message.mine` on either client: two clients working out the same
+   * thing separately is how they come to disagree about who owes a reply.
+   */
+  your_turn: boolean;
   unread: number;
   /** `timezone` is the venue's, so this list and the thread show the same clock face as the date screen. */
   date: { date_plan_id: string; status: string; starts_at: string | null; timezone: string } | null;
@@ -137,6 +144,14 @@ export type Message = {
   moderation_state: string;
   meta: Record<string, unknown>;
   sent_at: string;
+  /**
+   * The prompt of theirs this message answers, resolved when it was sent.
+   *
+   * Stored with the message rather than looked up on read: the quote renders as their words, and
+   * re-reading the profile would silently rewrite a two-week-old quote into something they never
+   * said at the time.
+   */
+  replying_to?: { key: string; label: string; answer: string };
 };
 
 export type Venue = {

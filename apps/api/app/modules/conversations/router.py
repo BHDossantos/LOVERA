@@ -20,6 +20,9 @@ class MessageIn(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
     type: str = Field(default="text", pattern="^(text|voice)$")
     draft_id: str | None = None
+    # The prompt of theirs this message answers. Validated server-side against what they really
+    # wrote, because the quote renders as their words.
+    prompt_key: str | None = None
     translation_id: str | None = None
     source_lang: str | None = None
 
@@ -70,6 +73,8 @@ def send(conv_id: str, data: MessageIn, principal: Principal = Depends(current_p
             draft.status = "used"
             draft.accepted_text_hash = hashlib.sha256(data.text.encode()).hexdigest()
             meta["edit_bucket"] = "none" if draft.draft_text.strip() == data.text.strip() else "edited"
+    if data.prompt_key:
+        meta["prompt_key"] = data.prompt_key
     if data.translation_id:
         meta["translation_id"] = data.translation_id
         meta["translated_from"] = data.source_lang
@@ -77,6 +82,18 @@ def send(conv_id: str, data: MessageIn, principal: Principal = Depends(current_p
         meta["source_lang"] = data.source_lang
     msg = service.send_message(db, conv_id, principal.member, data.client_message_id, data.text, data.type, meta)
     return service.message_payload(msg, principal.id)
+
+
+@router.get("/conversations/{conv_id}/openers")
+def openers(conv_id: str, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
+    """Things to actually say, for a conversation nobody has spoken in yet.
+
+    A blank box after a mutual yes is where most conversations die. These are the other person's
+    own prompt answers — written to be responded to, chosen by them — so a first message can be a
+    specific reply rather than "hey".
+    """
+    conv = service.get_conversation(db, conv_id, principal.id)
+    return {"items": service.openers_for(db, conv, principal.member)}
 
 
 @router.post("/conversations/{conv_id}/read", status_code=204)

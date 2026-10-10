@@ -30,11 +30,30 @@ export default function InboxPage() {
           <p className="text-sm text-ink-secondary">
             {active.length} of {q.data.pilot_cap} pilot conversations open. The cap protects attention and keeps introductions from becoming a collection.
           </p>
-          {active.length > 0 && (
+          {/* Whose move it is, which is the only question worth asking of a message list — a
+              list sorted by recency does not answer it. `your_turn` comes from the server so the
+              web and the phone cannot disagree about who owes a reply. */}
+          {active.filter((c) => c.your_turn).length > 0 && (
+            <section aria-labelledby="yourturn">
+              <h2 id="yourturn" className="display mb-2 text-xl font-bold text-ink">
+                Your turn
+              </h2>
+              <ul className="space-y-2">
+                {active
+                  .filter((c) => c.your_turn)
+                  .map((c) => (
+                    <ConversationRow key={c.id} c={c} />
+                  ))}
+              </ul>
+            </section>
+          )}
+          {active.filter((c) => !c.your_turn).length > 0 && (
             <ul className="space-y-2" aria-label="Active conversations">
-              {active.map((c) => (
-                <ConversationRow key={c.id} c={c} />
-              ))}
+              {active
+                .filter((c) => !c.your_turn)
+                .map((c) => (
+                  <ConversationRow key={c.id} c={c} />
+                ))}
             </ul>
           )}
           {ended.length > 0 && (
@@ -60,7 +79,7 @@ function ConversationRow({ c }: { c: ConversationSummary }) {
   const ended = c.status !== "active";
   const context = ended ? (CONVERSATION_STATUS_LABEL[c.status] ?? c.status) : (dateContext(c) ?? null);
   return (
-    <Card as="li" className={cx("p-3", c.unread > 0 && "border-action")}>
+    <Card as="li" className={cx("p-3", (c.unread > 0 || c.your_turn) && "border-action")}>
       <Link href={`/messages/${c.id}`} className="flex min-h-12 items-center gap-3">
         <Avatar name={c.other.display_name} url={photo} size={48} />
         <span className="min-w-0 flex-1">

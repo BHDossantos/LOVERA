@@ -17,7 +17,7 @@ export function MessageBubble({ message }: { message: Message }) {
   const state = stateOf(message);
   const meta = message.meta as { draft_assisted?: boolean; translated_from?: string | null; source_lang?: string | null };
   return (
-    <Bubble mine={message.mine} state={state} text={state === "hidden" ? "" : message.text} time={formatDateTime(message.sent_at)} voice={message.type === "voice"} assisted={!!meta.draft_assisted} translatedFrom={meta.translated_from ?? null} />
+    <Bubble mine={message.mine} state={state} text={state === "hidden" ? "" : message.text} time={formatDateTime(message.sent_at)} voice={message.type === "voice"} assisted={!!meta.draft_assisted} translatedFrom={meta.translated_from ?? null} replyingTo={message.replying_to ?? null} />
   );
 }
 
@@ -25,11 +25,20 @@ export function PendingBubble({ pending, onRetry, onDiscard }: { pending: Pendin
   return <Bubble mine state={pending.state} text={pending.text} error={pending.error} onRetry={onRetry} onDiscard={onDiscard} translatedFrom={pending.source_lang ?? null} />;
 }
 
-function Bubble({ mine, state, text, time, error, voice, assisted, translatedFrom, onRetry, onDiscard }: { mine: boolean; state: State; text: string; time?: string; error?: string; voice?: boolean; assisted?: boolean; translatedFrom?: string | null; onRetry?: () => void; onDiscard?: () => void }) {
-  const tone = mine ? "bg-action text-white" : "bg-surface text-ink border border-border";
+function Bubble({ mine, state, text, time, error, voice, assisted, translatedFrom, replyingTo, onRetry, onDiscard }: { mine: boolean; state: State; text: string; time?: string; error?: string; voice?: boolean; assisted?: boolean; translatedFrom?: string | null; replyingTo?: { label: string; answer: string } | null; onRetry?: () => void; onDiscard?: () => void }) {
+  const tone = mine ? "bg-action text-ink-inverse" : "bg-surface text-ink border border-border";
   return (
     <li className={cx("flex", mine ? "justify-end" : "justify-start")}>
       <div className={cx("max-w-[85%] rounded-[var(--radius-lg)] px-4 py-3", tone, state === "failed" && "border border-caution bg-caution-soft text-ink", state === "sending" && "opacity-70")}>
+        {/* The prompt this answers, so the message reads as a reply to something rather than as
+            an opening line out of nowhere. Resolved when it was sent, so it still says what they
+            said at the time even if they have since edited the prompt. */}
+        {!!replyingTo && state !== "hidden" && (
+          <div className={cx("mb-2 border-l-[3px] pl-2.5", mine ? "border-white/50" : "border-action")}>
+            <p className={cx("text-[0.6875rem] font-bold uppercase tracking-[0.14em]", mine ? "text-white/75" : "text-context")}>{replyingTo.label}</p>
+            <p className={cx("text-sm", mine ? "text-white/90" : "text-ink-secondary")}>{replyingTo.answer}</p>
+          </div>
+        )}
         {state === "hidden" ? (
           <p className="text-sm italic text-ink-secondary">This message was hidden by the safety team.</p>
         ) : (

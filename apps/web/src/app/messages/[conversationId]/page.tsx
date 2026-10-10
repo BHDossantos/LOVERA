@@ -7,11 +7,11 @@ import { ApiError, get, post } from "@/lib/api";
 import { useRequireMember } from "@/lib/auth";
 import type { Message } from "@/lib/types";
 import { AppShell } from "@/components/shell/AppShell";
-import { Button, ErrorState, LinkButton, Skeleton, StatusBanner } from "@/components/ui";
+import { Button, ErrorState, LinkButton, Skeleton, StatusBanner, cx } from "@/components/ui";
 import { Composer, type Prefill } from "@/components/messages/Composer";
 import { ConversationHeader } from "@/components/messages/ConversationHeader";
 import { MessageBubble, PendingBubble } from "@/components/messages/MessageBubble";
-import type { History, PendingMessage, RealtimeEvent, SendPayload } from "@/components/messages/types";
+import type { History, Opener, PendingMessage, RealtimeEvent, SendPayload } from "@/components/messages/types";
 import { useConversation, useRealtime } from "@/components/messages/useConversation";
 
 /** M02 Conversation: verified header, cursor-paginated history, realtime with polling fallback, member-controlled composer. */
@@ -70,6 +70,20 @@ function ConversationInner({ id }: { id: string }) {
   const [sendError, setSendError] = useState<ApiError | null>(null);
 
   const messages = useMemo(() => mergeMessages(earlier?.items ?? [], history.data?.items ?? []), [earlier, history.data]);
+
+  /**
+   * Things to actually say, for a conversation nobody has spoken in yet.
+   *
+   * Only fetched while the thread is empty: after the first message there is a conversation to
+   * continue, and still offering openers would be suggesting the two of them ignore each other.
+   */
+  const empty = !history.isLoading && messages.length === 0 && pending.length === 0;
+  const openers = useQuery({
+    queryKey: ["openers", id],
+    queryFn: () => get<{ items: Opener[] }>(`/conversations/${id}/openers`),
+    enabled: !!me && empty,
+  });
+  const [replyingTo, setReplyingTo] = useState<Opener | null>(null);
   const nextCursor = earlier ? earlier.next_cursor : (history.data?.next_cursor ?? null);
 
   const loadEarlier = async () => {
@@ -112,6 +126,10 @@ function ConversationInner({ id }: { id: string }) {
   const send = useCallback(
     async (p: SendPayload) => {
       setSendError(null);
+      // The server validates the key against what they actually wrote and stores the answer with
+      // the message, so the quote can neither be forged nor change when they edit the prompt.
+      if (replyingTo) p = { ...p, prompt_key: replyingTo.key };
+      setReplyingTo(null);
       setPending((prev) => [...prev.filter((x) => x.client_message_id !== p.client_message_id), { client_message_id: p.client_message_id, text: p.text, state: "sending", translation_id: p.translation_id, source_lang: p.source_lang }]);
       try {
         const msg = await post<Message>(`/conversations/${id}/messages`, p);
@@ -155,10 +173,37 @@ function ConversationInner({ id }: { id: string }) {
         )}
         <ErrorState error={earlierError} retry={loadEarlier} />
         {history.isError && <ErrorState error={history.error as ApiError} retry={() => history.refetch()} />}
-        {messages.length === 0 && pending.length === 0 && (
-          <div className="rounded-[var(--radius-xl)] border border-dashed border-border bg-surface p-6 text-center">
-            <p className="font-semibold text-ink">You both said yes. Say hello when you're ready.</p>
-            <p className="mt-1 text-sm text-ink-secondary">Their prompt answers are a good place to start. The AI Wingman can offer an editable draft; nothing is sent without you.</p>
+        {/* The blank box is where most conversations die, and "hey" is what anybody writes when
+            there is nothing specific to answer. This used to *say* their prompt answers were a
+            good place to start without showing any of them. */}
+        {empty && (
+          <div className="rounded-[var(--radius-xl)] border border-dashed border-border bg-surface p-6">
+            <p className="display text-xl font-bold text-ink">You both said yes.</p>
+            <p className="mt-1 text-sm text-ink-secondary">
+              {(openers.data?.items?.length ?? 0) > 0
+                ? "Their words, not ours. Pick one to answer — or ignore all of it and write your own."
+                : "Say hello when you're ready. The AI Wingman can offer an editable draft; nothing is sent without you."}
+            </p>
+            {(openers.data?.items?.length ?? 0) > 0 && (
+              <ul className="mt-4 space-y-2">
+                {openers.data?.items?.map((o) => (
+                  <li key={o.key}>
+                    <button
+                      type="button"
+                      aria-pressed={replyingTo?.key === o.key}
+                      onClick={() => setReplyingTo(replyingTo?.key === o.key ? null : o)}
+                      className={cx(
+                        "w-full rounded-[var(--radius-lg)] border p-3 text-left transition-colors",
+                        replyingTo?.key === o.key ? "border-action bg-action-soft" : "border-border bg-surface hover:bg-surface-muted",
+                      )}
+                    >
+                      <span className="block text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-context">{o.label}</span>
+                      <span className="mt-0.5 block text-ink">{o.answer}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
         <ul className="space-y-2" aria-live="polite" aria-label="Messages">

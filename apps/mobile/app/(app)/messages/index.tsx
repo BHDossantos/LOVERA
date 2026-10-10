@@ -29,6 +29,11 @@ export default function MessagesScreen() {
    */
   const awaiting = useAwaitingServer(q);
   const data = awaiting ? null : q.data;
+  // Whose move it is, which is the only question worth asking of a message list — a list sorted
+  // by recency does not answer it. The flag comes from the server so the phone and the web
+  // cannot disagree about who owes a reply.
+  const yours = data?.items.filter((c) => c.your_turn) ?? [];
+  const rest = data?.items.filter((c) => !c.your_turn) ?? [];
 
   return (
     <Screen>
@@ -51,7 +56,8 @@ export default function MessagesScreen() {
       {!!data && data.items.length === 0 && (
         <Empty title="No conversations yet" body="A conversation opens the moment an introduction is mutual." />
       )}
-      {data?.items.map((c) => (
+      {yours.length > 0 && <Text style={s.section}>Your turn{yours.length > 1 ? ` · ${yours.length}` : ""}</Text>}
+      {[...yours, ...rest].map((c) => (
         <Pressable key={c.id} onPress={() => router.push(`/messages/${c.id}` as never)} accessibilityRole="button">
           <Card>
             <View style={s.row}>
@@ -76,7 +82,7 @@ export default function MessagesScreen() {
                 )}
                 {!c.last_message && <Text style={s.preview}>Say hello when you're ready.</Text>}
               </View>
-              {c.unread > 0 && <Badge label={`${c.unread} new`} tone="context" />}
+              {c.unread > 0 ? <Badge label={`${c.unread} new`} tone="context" /> : c.your_turn ? <Badge label="Your turn" tone="success" /> : null}
             </View>
             {!!c.date && (
               <Text style={s.date}>
@@ -93,6 +99,7 @@ export default function MessagesScreen() {
 }
 
 const s = {
+  section: { ...typo.title, color: color.ink, marginBottom: space.sm },
   row: { flexDirection: "row", alignItems: "center", gap: space.md },
   rowBody: { flex: 1 },
   name: { ...typo.heading, color: color.ink },
