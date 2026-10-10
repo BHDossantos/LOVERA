@@ -46,6 +46,19 @@ class Settings(BaseSettings):
     identity_provider: str = "sandbox"  # sandbox | manual_review | webhook-only vendor
     identity_webhook_secret: str = "sandbox-identity-secret"
     payments_provider: str = "sandbox"  # sandbox | stripe
+    # How a purchase made through an app store is verified before it grants anything.
+    #
+    #   disabled  — the default. `POST /subscriptions/store-purchase` refuses, and the phone is
+    #               told the store is not configured so it shows no purchase UI at all.
+    #   sandbox   — the receipt is taken at face value. Refused outright in production, because a
+    #               client-asserted receipt is a self-service upgrade to the most expensive tier.
+    #   app_store / play_store — verify with the store's own server. Not implemented yet, and the
+    #               endpoint says so rather than falling through to trusting the client.
+    #
+    # There is deliberately no value that trusts the client in production. A missing validator has
+    # to fail closed: the worst outcome of refusing is that nobody can buy, and the worst outcome
+    # of trusting is that everybody gets Concierge for nothing.
+    store_validation: str = "disabled"  # disabled | sandbox | app_store | play_store
     payments_webhook_secret: str = "sandbox-payments-secret"
     stripe_api_key: str | None = None
 

@@ -148,6 +148,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   extra: {
     apiOrigin: apiOrigin(),
     eas: { projectId: easProjectId() },
+    // RevenueCat's *public* SDK keys, which are designed to ship in a client binary — they can
+    // start a purchase and read entitlements, and they cannot refund, grant or read anybody
+    // else's data. The secret key stays on the server and is not referenced here. Absent, the
+    // app simply never offers an in-app purchase; see src/lib/purchases.ts.
+    revenueCat: {
+      ios: process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY ?? null,
+      android: process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_KEY ?? null,
+    },
   },
   // Read from the native project rather than from `version`, so a native change cannot be served a
   // JS bundle that expects a different one. See `updates()`.

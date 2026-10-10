@@ -17,6 +17,7 @@ from app.catalog.plans import (
     PERIOD_DAYS,
     PLANS,
     RENEWAL_TERMS,
+    STORE_PRODUCTS,
     grants,
     plan_payload,
     price_cents,
@@ -28,7 +29,7 @@ from app.core.errors import ApiError
 from app.core.security import verify_webhook
 from app.core.timeutil import iso, utcnow
 from app.models.account import Member
-from app.models.billing import BillingTerm, CheckoutSession, CreditLedger, Subscription, WebhookReceipt
+from app.models.billing import BillingTerm, CheckoutSession, CreditLedger, StorePurchase, Subscription, WebhookReceipt
 from app.models.introductions import Introduction
 
 
@@ -119,10 +120,30 @@ def entitlements_for(db: Session, member: Member) -> dict[str, Any]:
     return out
 
 
+def store_status() -> dict[str, Any]:
+    """Whether the phone may offer an in-app purchase, and why not when it may not.
+
+    The client asks rather than assumes. A purchase button that leads to a refusal is worse than
+    no button, and on iOS a non-functional purchase path is a guideline 2.1 rejection on its own.
+    """
+    settings = get_settings()
+    mode = settings.store_validation
+    enabled = mode in ("sandbox", "app_store", "play_store") and not (mode == "sandbox" and settings.is_production)
+    reason = None
+    if mode == "disabled":
+        reason = "In-app purchase is not configured for this deployment yet."
+    elif mode == "sandbox" and settings.is_production:
+        reason = "Sandbox receipt validation is never accepted in production."
+    elif mode in ("app_store", "play_store"):
+        reason = None
+    return {"enabled": enabled, "validation": mode, "reason": reason, "products": dict(STORE_PRODUCTS)}
+
+
 def plans_payload() -> dict[str, Any]:
     return {
         "plans": [plan_payload(p) for p in PLANS],
         "cadences": list(CADENCES),
+        "store": store_status(),
         "renewal_terms": RENEWAL_TERMS,
         "principles": [
             "No boosts, super-likes or pay-to-reach.",
@@ -180,6 +201,59 @@ def checkout_detail(db: Session, member: Member, provider_ref: str) -> dict[str,
     if session is None or session.member_id != member.id:
         raise ApiError("NOT_FOUND", "We could not find that checkout.")
     return checkout_payload(db, session)
+
+
+def record_store_purchase(db: Session, member: Member, store: str, product_id: str, transaction_id: str) -> dict[str, Any]:
+    """Turn a store receipt into a subscription, or refuse to.
+
+    The refusals come first and on purpose. `store-purchase` is an endpoint any signed-in member
+    can call with any JSON they like, so the only thing separating it from a free upgrade to the
+    most expensive tier is that an unverified receipt is never honoured. There is no configuration
+    that makes this trust the client in production: `store_validation=sandbox` exists for the
+    simulator and is refused outright once `is_production` is set, and the real validators are not
+    written yet and say so rather than falling through.
+    """
+    settings = get_settings()
+    if store not in ("app_store", "play_store"):
+        raise ApiError("VALIDATION_ERROR", "Unknown store.", field_errors={"store": "invalid"})
+
+    existing = db.execute(
+        select(StorePurchase).where(StorePurchase.store == store, StorePurchase.transaction_id == transaction_id)
+    ).scalar_one_or_none()
+    if existing:
+        # A replay — a retry, a restore-purchases, or somebody trying it on. Same answer either
+        # way, and no second subscription.
+        return {"status": existing.status, "duplicate": True, "entitlements": entitlements_for(db, member)}
+
+    mapped = STORE_PRODUCTS.get(product_id)
+    if mapped is None:
+        db.add(StorePurchase(member_id=member.id, store=store, product_id=product_id, transaction_id=transaction_id, plan="", cadence="", status="refused_unknown_product", validated_by=settings.store_validation))
+        db.flush()
+        raise ApiError("VALIDATION_ERROR", "That product is not one of ours.", field_errors={"product_id": "unknown"})
+    plan_id, cadence = mapped
+
+    status = store_status()
+    if not status["enabled"]:
+        db.add(StorePurchase(member_id=member.id, store=store, product_id=product_id, transaction_id=transaction_id, plan=plan_id, cadence=cadence, status="refused_unverified", validated_by=settings.store_validation))
+        db.flush()
+        audit(db, actor_type="member", actor_id=member.id, action="billing.store_purchase_refused", resource_type="member", resource_id=member.id, metadata={"product_id": product_id, "validation": settings.store_validation})
+        raise ApiError(
+            "DEPENDENCY_UNAVAILABLE",
+            status["reason"] or "Purchases cannot be verified right now. You have not been charged by us, and anything the store charged will be refunded by the store.",
+        )
+
+    if settings.store_validation in ("app_store", "play_store"):
+        # Deliberately not implemented rather than stubbed as success. A stub here is the one bug
+        # whose symptom is "everybody has Concierge".
+        db.add(StorePurchase(member_id=member.id, store=store, product_id=product_id, transaction_id=transaction_id, plan=plan_id, cadence=cadence, status="refused_unverified", validated_by=settings.store_validation))
+        db.flush()
+        raise ApiError("DEPENDENCY_UNAVAILABLE", "Receipt verification with the store is not available yet.")
+
+    sub = activate_subscription(db, member.id, plan_id, store, f"{store}:{transaction_id}", cadence=cadence)
+    db.add(StorePurchase(member_id=member.id, store=store, product_id=product_id, transaction_id=transaction_id, plan=plan_id, cadence=cadence, status="granted", validated_by=settings.store_validation, subscription_id=sub.id))
+    db.flush()
+    audit(db, actor_type="member", actor_id=member.id, action="billing.store_purchase_granted", resource_type="subscription", resource_id=sub.id, metadata={"product_id": product_id, "store": store})
+    return {"status": "granted", "duplicate": False, "entitlements": entitlements_for(db, member)}
 
 
 def activate_subscription(db: Session, member_id: str, plan_id: str, provider: str, provider_subscription_ref: str, cadence: str = "monthly") -> Subscription:

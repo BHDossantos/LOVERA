@@ -35,6 +35,24 @@ jest.mock("expo-router", () => ({
 }));
 jest.mock("expo-web-browser", () => ({ openBrowserAsync: jest.fn() }));
 
+/**
+ * The purchase layer is mocked rather than the native module, because what this screen must get
+ * right is the *decision*: offer a purchase only when every precondition holds, and otherwise say
+ * so without a dead button and without a link to a web checkout — which is the one thing
+ * guideline 3.1.1 explicitly prohibits.
+ */
+const mockPurchase = jest.fn();
+const mockRestore = jest.fn();
+let mockStoreAvailable: { available: boolean; reason?: string } = { available: false, reason: "Memberships cannot be bought in the app yet." };
+let mockStoreProducts: { productId: string; priceLabel: string }[] = [];
+jest.mock("@/lib/purchases", () => ({
+  availability: () => mockStoreAvailable,
+  configure: () => true,
+  products: () => Promise.resolve(mockStoreProducts),
+  purchase: (id: string) => mockPurchase(id),
+  restore: () => mockRestore(),
+}));
+
 import Membership from "../app/(app)/you/membership";
 import VerificationCentre from "../app/(app)/you/verification";
 
@@ -47,10 +65,11 @@ const PLANS = {
   cadences: ["monthly", "annual"],
   renewal_terms: "Renews until you cancel.",
   principles: ["No boosts, super-likes or pay-to-reach."],
+  store: { enabled: false, validation: "disabled", reason: "In-app purchase is not configured for this deployment yet.", products: {} },
   plans: [
-    { id: "free", name: "Verified", tagline: "See how we match.", currency: "EUR", weekly_intro_cap: 1, features: [], included: ["Verified profile"], not_included: ["Weekly curated introductions"], prices: prices(0), annual_saving_cents: 0, price_cents: 0 },
-    { id: "pro", name: "Matchmaker Pro", tagline: "The whole method.", currency: "EUR", weekly_intro_cap: 3, features: ["weekly_introductions", "ai_wingman"], included: ["Weekly curated introductions", "AI Wingman drafts"], not_included: ["Human matchmaker review", "Boosts"], prices: prices(3900), annual_saving_cents: 7800, price_cents: 3900 },
-    { id: "concierge", name: "Concierge", tagline: "With a person watching.", currency: "EUR", weekly_intro_cap: 3, features: ["weekly_introductions", "ai_wingman", "human_review"], included: ["Weekly curated introductions", "AI Wingman drafts", "Human matchmaker review"], not_included: ["Boosts"], prices: prices(8900), annual_saving_cents: 17800, price_cents: 8900 },
+    { id: "free", name: "Verified", tagline: "See how we match.", currency: "EUR", weekly_intro_cap: 1, features: [], included: ["Verified profile"], not_included: ["Weekly curated introductions"], prices: prices(0), store_product_ids: { monthly: null, annual: null }, annual_saving_cents: 0, price_cents: 0 },
+    { id: "pro", name: "Matchmaker Pro", tagline: "The whole method.", currency: "EUR", weekly_intro_cap: 3, features: ["weekly_introductions", "ai_wingman"], included: ["Weekly curated introductions", "AI Wingman drafts"], not_included: ["Human matchmaker review", "Boosts"], prices: prices(3900), store_product_ids: { monthly: "pro_monthly", annual: "pro_annual" }, annual_saving_cents: 7800, price_cents: 3900 },
+    { id: "concierge", name: "Concierge", tagline: "With a person watching.", currency: "EUR", weekly_intro_cap: 3, features: ["weekly_introductions", "ai_wingman", "human_review"], included: ["Weekly curated introductions", "AI Wingman drafts", "Human matchmaker review"], not_included: ["Boosts"], prices: prices(8900), store_product_ids: { monthly: "concierge_monthly", annual: "concierge_annual" }, annual_saving_cents: 17800, price_cents: 8900 },
   ],
 };
 
@@ -98,6 +117,10 @@ const status = (over: Record<string, unknown> = {}) => ({
 beforeEach(() => {
   mockGet.mockReset();
   mockPost.mockReset();
+  mockPurchase.mockReset();
+  mockRestore.mockReset();
+  mockStoreAvailable = { available: false, reason: "Memberships cannot be bought in the app yet." };
+  mockStoreProducts = [];
 });
 
 function billing(ent: Record<string, unknown>, ledger: unknown[] = []) {
@@ -128,7 +151,65 @@ describe("Membership", () => {
   it("tells a free member why, rather than leaving a dead button", async () => {
     billing(entitlements());
     const s = await renderScreen(<Membership />);
-    expect(s.joined()).toContain("Neither paid plan is sold in the app");
+    expect(s.joined()).toContain("Memberships cannot be bought in the app yet");
+  });
+
+  it("offers a purchase at the store's own price once everything is configured", async () => {
+    mockStoreAvailable = { available: true };
+    mockStoreProducts = [
+      { productId: "pro_monthly", priceLabel: "£34.99" },
+      { productId: "pro_annual", priceLabel: "£349.99" },
+    ];
+    mockPurchase.mockResolvedValue({ ok: true, entitlementsChanged: true });
+    billing(entitlements());
+    const s = await renderScreen(<Membership />);
+
+    // The store's price string, not our catalog's euros: the member is charged in their own
+    // storefront's currency, after their store's tax, and the catalog knows neither.
+    expect(s.joined()).toContain("£34.99 a month");
+    await s.press("£34.99 a month");
+    expect(mockPurchase).toHaveBeenCalledWith("pro_monthly");
+  });
+
+  it("offers no button for a product the store has no price for", async () => {
+    // Concierge exists in the catalog but has not been created in App Store Connect yet. A
+    // purchase button for it would fail at the store, which is a guideline 2.1 rejection.
+    mockStoreAvailable = { available: true };
+    mockStoreProducts = [{ productId: "pro_monthly", priceLabel: "£34.99" }];
+    billing(entitlements());
+    const s = await renderScreen(<Membership />);
+    expect(s.joined()).toContain("£34.99 a month");
+    expect(s.texts().join(" ")).not.toContain("concierge_monthly");
+  });
+
+  it("offers restore, which Apple requires and which recovers a lost receipt", async () => {
+    mockStoreAvailable = { available: true };
+    mockStoreProducts = [{ productId: "pro_monthly", priceLabel: "£34.99" }];
+    mockRestore.mockResolvedValue({ ok: true, entitlementsChanged: true });
+    billing(entitlements());
+    const s = await renderScreen(<Membership />);
+    await s.press("Restore purchases");
+    expect(mockRestore).toHaveBeenCalled();
+  });
+
+  it("never turns a cancelled purchase into an error", async () => {
+    mockStoreAvailable = { available: true };
+    mockStoreProducts = [{ productId: "pro_monthly", priceLabel: "£34.99" }];
+    mockPurchase.mockResolvedValue({ ok: false, cancelled: true });
+    billing(entitlements());
+    const s = await renderScreen(<Membership />);
+    await s.press("£34.99 a month");
+    expect(s.texts().join(" ")).not.toContain("About your purchase");
+  });
+
+  it("tells a member who was charged how to recover, rather than losing it", async () => {
+    mockStoreAvailable = { available: true };
+    mockStoreProducts = [{ productId: "pro_monthly", priceLabel: "£34.99" }];
+    mockPurchase.mockResolvedValue({ ok: false, cancelled: false, message: "Your purchase went through but we could not record it. Use Restore purchases to finish." });
+    billing(entitlements());
+    const s = await renderScreen(<Membership />);
+    await s.press("£34.99 a month");
+    expect(s.joined()).toContain("Use Restore purchases to finish");
   });
 
   it("shows the annual price as money, with what it works out at per month", async () => {

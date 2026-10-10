@@ -226,3 +226,92 @@ def test_repricing_the_catalog_does_not_reprice_an_existing_member(client, monke
     monkeypatch.setitem(PLANS["pro"]["prices"], "annual", 99900)
     after = a.get("/subscriptions/current").json()["entitlements"]["price_cents"]
     assert after == agreed
+
+
+# --------------------------------------------------------------------------------------------
+# In-app purchase. The endpoint any signed-in member can POST anything to.
+# --------------------------------------------------------------------------------------------
+def test_store_purchase_is_refused_when_no_validator_is_configured(client, monkeypatch):
+    """The default. Fail closed: nobody can buy, rather than everybody buying for nothing."""
+    from app.core import config
+
+    a = billing_member(client, "store-off", "Store Off")
+    monkeypatch.setattr(config.get_settings(), "store_validation", "disabled", raising=False)
+    r = a.post("/subscriptions/store-purchase", json={"store": "app_store", "product_id": "pro_monthly", "transaction_id": uuid.uuid4().hex})
+    assert r.status_code == 503, r.text
+    assert a.get("/subscriptions/current").json()["entitlements"]["paid"] is False
+
+
+def test_an_unknown_product_never_becomes_a_plan(client, monkeypatch):
+    from app.core import config
+
+    a = billing_member(client, "store-bogus", "Store Bogus")
+    monkeypatch.setattr(config.get_settings(), "store_validation", "sandbox", raising=False)
+    r = a.post("/subscriptions/store-purchase", json={"store": "app_store", "product_id": "concierge_free_lol", "transaction_id": uuid.uuid4().hex})
+    assert r.status_code == 422, r.text
+    assert r.json()["error"]["field_errors"] == {"product_id": "unknown"}
+    assert a.get("/subscriptions/current").json()["entitlements"]["paid"] is False
+
+
+def test_a_sandbox_receipt_grants_the_plan_its_product_maps_to(client, monkeypatch):
+    from app.core import config
+
+    a = billing_member(client, "store-ok", "Store Ok")
+    monkeypatch.setattr(config.get_settings(), "store_validation", "sandbox", raising=False)
+    r = a.post("/subscriptions/store-purchase", json={"store": "app_store", "product_id": "concierge_annual", "transaction_id": uuid.uuid4().hex})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "granted"
+
+    ent = a.get("/subscriptions/current").json()["entitlements"]
+    assert ent["plan"] == "concierge" and ent["cadence"] == "annual"
+    assert ent["human_review"] is True
+
+
+def test_the_same_receipt_twice_does_not_subscribe_twice(client, monkeypatch):
+    """A restore-purchases and a replay are the same request; only one can be a subscription."""
+    from app.core import config
+
+    a = billing_member(client, "store-replay", "Store Replay")
+    monkeypatch.setattr(config.get_settings(), "store_validation", "sandbox", raising=False)
+    tx = uuid.uuid4().hex
+    body = {"store": "app_store", "product_id": "pro_monthly", "transaction_id": tx}
+    first = a.post("/subscriptions/store-purchase", json=body)
+    assert first.status_code == 200 and first.json()["duplicate"] is False
+    second = a.post("/subscriptions/store-purchase", json=body)
+    assert second.status_code == 200, second.text
+    assert second.json()["duplicate"] is True
+    assert a.get("/subscriptions/current").json()["entitlements"]["plan"] == "pro"
+
+
+def test_a_receipt_replayed_by_a_different_member_grants_them_nothing(client, monkeypatch):
+    from app.core import config
+
+    a = billing_member(client, "store-owner", "Store Owner")
+    b = billing_member(client, "store-thief", "Store Thief")
+    monkeypatch.setattr(config.get_settings(), "store_validation", "sandbox", raising=False)
+    tx = uuid.uuid4().hex
+    body = {"store": "app_store", "product_id": "concierge_monthly", "transaction_id": tx}
+    assert a.post("/subscriptions/store-purchase", json=body).status_code == 200
+    r = b.post("/subscriptions/store-purchase", json=body)
+    assert r.status_code == 200, r.text
+    assert r.json()["duplicate"] is True
+    assert b.get("/subscriptions/current").json()["entitlements"]["paid"] is False
+
+
+def test_the_phone_is_told_whether_it_may_offer_a_purchase(client, monkeypatch):
+    from app.core import config
+
+    a = billing_member(client, "store-status", "Store Status")
+    monkeypatch.setattr(config.get_settings(), "store_validation", "disabled", raising=False)
+    off = a.get("/plans").json()["store"]
+    assert off["enabled"] is False and off["reason"]
+
+    monkeypatch.setattr(config.get_settings(), "store_validation", "sandbox", raising=False)
+    on = a.get("/plans").json()["store"]
+    assert on["enabled"] is True
+    # Every paid cadence has a product to ask the store for.
+    for p in a.get("/plans").json()["plans"]:
+        for c in CADENCES:
+            pid = p["store_product_ids"][c]
+            if p["price_cents"] > 0:
+                assert pid in on["products"], f"{p['id']}/{c} has no store product"

@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Text, View } from "react-native";
 import { ApiError, get, post } from "@/api/client";
 import { useAuth, useRequireMember } from "@/lib/auth";
+import { availability, configure, products, purchase, restore, type StoreProduct, type StoreStatus } from "@/lib/purchases";
 import { euro, formatDate } from "@/lib/format";
 import { Button, Card, ChoiceCard, Divider, ErrorState, Loading, PageTitle, Screen, StatusBanner } from "@/components/ui";
 import type { Capabilities } from "@/api/types";
@@ -42,11 +43,12 @@ type Plan = {
   included: string[];
   not_included: string[];
   prices: Record<string, Price>;
+  store_product_ids: Record<string, string | null>;
   annual_saving_cents: number;
   /** Kept by the API for clients written before annual existed. */
   price_cents: number;
 };
-type PlansOut = { plans: Plan[]; cadences: string[]; renewal_terms: string; principles: string[] };
+type PlansOut = { plans: Plan[]; cadences: string[]; store?: StoreStatus; renewal_terms: string; principles: string[] };
 
 /** The comparison rows, in the order somebody weighing the ladder actually cares about. */
 const COMPARE: [string, string][] = [
@@ -95,6 +97,59 @@ export default function Membership() {
   const [error, setError] = useState<ApiError | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [reason, setReason] = useState("taking_a_break");
+  const [cadence, setCadence] = useState<"monthly" | "annual">("monthly");
+  const [storeNote, setStoreNote] = useState<string | null>(null);
+  const [storePrices, setStorePrices] = useState<Record<string, string>>({});
+
+  // Four things have to be true before a purchase may be offered, and `availability` is the one
+  // place that knows all four. See src/lib/purchases.ts — a button that leads to an error is
+  // worse than no button, and on iOS it is a guideline 2.1 rejection on its own.
+  const store = availability(plans.data?.store);
+  const canBuy = store.available;
+
+  // The store's own price strings, which are the only prices allowed on a purchase button: the
+  // member is charged in their storefront's currency, after their store's tax, and our catalog
+  // knows none of that.
+  useEffect(() => {
+    if (!canBuy || !me?.id || !plans.data) return;
+    if (!configure(me.id)) return;
+    const ids = plans.data.plans.flatMap((p) => Object.values(p.store_product_ids).filter((i): i is string => !!i));
+    let alive = true;
+    void products(ids).then((found: StoreProduct[]) => {
+      if (!alive) return;
+      setStorePrices(Object.fromEntries(found.map((f) => [f.productId, f.priceLabel])));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [canBuy, me?.id, plans.data]);
+
+  const afterPurchase = async () => {
+    await qc.invalidateQueries({ queryKey: ["subscription"] });
+    await refresh();
+  };
+
+  const buy = async (productId: string) => {
+    setBusy(true);
+    setError(null);
+    setStoreNote(null);
+    const out = await purchase(productId);
+    if (out.ok) await afterPurchase();
+    else if (!out.cancelled) setStoreNote(out.message);
+    setBusy(false);
+  };
+
+  const restorePurchases = async () => {
+    setBusy(true);
+    setError(null);
+    setStoreNote(null);
+    const out = await restore();
+    if (out.ok) {
+      await afterPurchase();
+      setStoreNote("Your purchases have been restored.");
+    } else if (!out.cancelled) setStoreNote(out.message);
+    setBusy(false);
+  };
 
   const cancel = async () => {
     setBusy(true);
@@ -201,6 +256,29 @@ export default function Membership() {
                   </Text>
                 )}
                 <Bullets items={p.included.slice(0, p.features.length)} glyph="✓" />
+                {canBuy && (
+                  <View style={{ marginTop: space.md }}>
+                    {(["monthly", "annual"] as const).map((c) => {
+                      const pid = p.store_product_ids[c];
+                      if (!pid) return null;
+                      // The store's price when it has told us one, never our catalog's: the
+                      // member is charged in their own storefront's currency and tax.
+                      const label = storePrices[pid];
+                      if (!label) return null;
+                      return (
+                        <Button
+                          key={c}
+                          variant={c === "monthly" ? "primary" : "secondary"}
+                          loading={busy}
+                          disabled={busy}
+                          onPress={() => buy(pid)}
+                        >
+                          {c === "monthly" ? `${label} a month` : `${label} a year`}
+                        </Button>
+                      );
+                    })}
+                  </View>
+                )}
               </Card>
             ))}
 
@@ -211,11 +289,26 @@ export default function Membership() {
                 title="Introductions depend on real people, not on paying"
                 body="They depend on qualified, verified members in your city. If a paid week passes without one, you get a protected credit that extends your membership rather than a worse introduction."
               />
-              <Text style={{ ...typo.small, color: color.inkSecondary }}>
-                Neither paid plan is sold in the app. We would have to either charge through the App Store or send you
-                to a web page to pay, and the second is not something an app is allowed to do. If you already pay, your
-                plan and everything in it appear here.
-              </Text>
+              {!!storeNote && <StatusBanner tone="caution" title="About your purchase" body={storeNote} />}
+              {canBuy ? (
+                <>
+                  <Text style={{ ...typo.small, color: color.inkSecondary }}>
+                    Payment is handled by the App Store or Google Play, and your subscription is managed there — we
+                    never see your card. Cancel any time from this screen or from your store account.
+                  </Text>
+                  <View style={{ marginTop: space.md }}>
+                    <Button variant="ghost" loading={busy} disabled={busy} onPress={restorePurchases}>
+                      Restore purchases
+                    </Button>
+                  </View>
+                </>
+              ) : (
+                <Text style={{ ...typo.small, color: color.inkSecondary }}>
+                  {/* Honest, and never a link out to a web checkout — that is the specific thing
+                      guideline 3.1.1 prohibits, and shipping one is a rejection rather than a risk. */}
+                  {store.available ? "" : store.reason} If you already pay, your plan and everything in it appear here.
+                </Text>
+              )}
               <Text style={{ ...typo.small, color: color.inkTertiary, marginTop: space.sm }}>{plans.data.renewal_terms}</Text>
             </Card>
           )}

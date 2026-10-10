@@ -99,6 +99,27 @@ PLANS: dict[str, dict[str, Any]] = {
 
 PAID_PLANS = ("pro", "concierge")
 
+# The product identifiers created in App Store Connect and the Play Console, and what each one
+# buys. The store knows nothing about our plans — it knows a product id and that somebody paid for
+# it — so this mapping is the only thing that turns a receipt into an entitlement. It lives here,
+# beside the prices, so adding a plan without creating its products is visible in one file.
+#
+# The ids are identical on both stores on purpose: two sets of names for the same four things is
+# how a receipt ends up granting the wrong tier.
+STORE_PRODUCTS: dict[str, tuple[str, str]] = {
+    "pro_monthly": ("pro", "monthly"),
+    "pro_annual": ("pro", "annual"),
+    "concierge_monthly": ("concierge", "monthly"),
+    "concierge_annual": ("concierge", "annual"),
+}
+
+
+def store_product_id(plan_id: str, cadence: str) -> str | None:
+    for pid, (p, c) in STORE_PRODUCTS.items():
+        if p == plan_id and c == cadence:
+            return pid
+    return None
+
 RENEWAL_TERMS = (
     "Renews until you cancel, monthly or annually as you chose. Cancel any time in the app; access "
     "continues to the end of the period you have paid for. If we cannot make a qualified "
@@ -161,6 +182,8 @@ def plan_payload(plan_id: str) -> dict[str, Any]:
             for c in CADENCES
         },
         "annual_saving_cents": annual_saving_cents(plan_id),
+        # What to ask the store for, per cadence. Null on the free plan, which nobody buys.
+        "store_product_ids": {c: store_product_id(plan_id, c) for c in CADENCES},
         # The clients were written against a flat monthly price and a `cadence` string. Both are
         # kept so an older build keeps rendering something true rather than something empty.
         "price_cents": price_cents(plan_id, "monthly"),

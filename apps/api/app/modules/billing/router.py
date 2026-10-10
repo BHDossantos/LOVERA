@@ -27,6 +27,12 @@ class CancelIn(BaseModel):
     reason: str | None = None
 
 
+class StorePurchaseIn(BaseModel):
+    store: str
+    product_id: str
+    transaction_id: str
+
+
 class SandboxPayIn(BaseModel):
     checkout_ref: str
     outcome: str = "paid"
@@ -57,6 +63,16 @@ def checkout_detail(provider_ref: str, principal: Principal = Depends(current_pr
 @router.get("/subscriptions/current")
 def current(principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
     return {"entitlements": service.entitlements_for(db, principal.member), "ledger": service.ledger(db, principal.id)}
+
+
+@router.post("/subscriptions/store-purchase")
+def store_purchase(data: StorePurchaseIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
+    """Report a completed App Store or Play Store purchase.
+
+    Idempotent on the store's own transaction id, so a retry, a restore-purchases, or a replay all
+    land on the same answer and never activate twice.
+    """
+    return service.record_store_purchase(db, principal.member, data.store, data.product_id, data.transaction_id)
 
 
 @router.post("/subscriptions/cancel")
