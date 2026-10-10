@@ -31,17 +31,34 @@ import { color, space, type as typo } from "@/theme";
  *
  * Nothing here is a placeholder: every number comes from the API, and `cancel` really cancels.
  */
+type Price = { cents: number; monthly_equivalent_cents: number; period_days: number };
 type Plan = {
   id: string;
   name: string;
-  price_cents: number;
+  tagline: string;
   currency: string;
-  cadence: string;
   weekly_intro_cap: number;
+  features: string[];
   included: string[];
   not_included: string[];
+  prices: Record<string, Price>;
+  annual_saving_cents: number;
+  /** Kept by the API for clients written before annual existed. */
+  price_cents: number;
 };
-type PlansOut = { plans: Plan[]; renewal_terms: string; principles: string[] };
+type PlansOut = { plans: Plan[]; cadences: string[]; renewal_terms: string; principles: string[] };
+
+/** The comparison rows, in the order somebody weighing the ladder actually cares about. */
+const COMPARE: [string, string][] = [
+  ["weekly_introductions", "Weekly introductions"],
+  ["adaptive_refresh", "Adaptive Blueprint"],
+  ["ai_wingman", "AI Wingman drafts"],
+  ["translation", "Translation"],
+  ["date_concierge", "Date concierge"],
+  ["protected_credits", "Protected credits"],
+  ["human_review", "Human matchmaker review"],
+  ["priority_coordination", "Priority coordination"],
+];
 type Ledger = { id: string; amount: number; reason: string; balance_after: number; created_at: string; expires_at: string | null };
 type Current = { entitlements: Capabilities["entitlements"]; ledger: Ledger[] };
 
@@ -100,8 +117,9 @@ export default function Membership() {
   };
 
   const ent = current.data?.entitlements;
-  const paid = plans.data?.plans.find((p) => p.id !== "free");
-  const mine = plans.data?.plans.find((p) => p.id === ent?.plan);
+  const all = plans.data?.plans ?? [];
+  const paidPlans = all.filter((p) => p.price_cents > 0);
+  const mine = all.find((p) => p.id === ent?.plan);
   const endsLabel = ent?.renews_at ? formatDate(ent.renews_at) : "the end of the paid period";
 
   return (
@@ -122,7 +140,8 @@ export default function Membership() {
               {(
                 [
                   ["Status", ent.paid ? (ent.cancel_at_period_end ? "Cancelled · access continues" : ent.status === "past_due" ? "Payment failed" : "Active") : "Free"],
-                  ["Price", mine ? (mine.price_cents === 0 ? "Free" : `${euro(mine.price_cents)} / month`) : "—"],
+                  // What this member agreed to pay, which is not necessarily today's catalog price.
+              ["Price", ent.paid ? `${euro(ent.price_cents)} / ${ent.cadence === "annual" ? "year" : "month"}` : "Free"],
                   [ent.cancel_at_period_end ? "Access ends" : "Renews", ent.renews_at ? formatDate(ent.renews_at) : "—"],
                   ["Introductions per week", `up to ${ent.weekly_intro_cap}, when inventory supports it`],
                   ["Protected credits", `${ent.protected_credits}`],
@@ -159,35 +178,93 @@ export default function Membership() {
             </Card>
           )}
 
-          {/* Free plan: describe the paid one accurately, and do not pretend it can be bought here.
+          {/* The ladder, described accurately, with no way to buy it from here.
               See the note at the top of this file — a web checkout link is the one thing guideline
               3.1.1 explicitly prohibits, so there is no button and no link, just the truth. */}
-          {!ent.paid && !!paid && (
+          {!ent.paid &&
+            paidPlans.map((p) => (
+              <Card key={p.id}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", gap: space.sm }}>
+                  <Text style={{ ...typo.title, color: color.ink }}>{p.name}</Text>
+                  <Text style={{ ...typo.heading, color: color.ink }}>
+                    {euro(p.prices.monthly.cents)}
+                    <Text style={{ ...typo.small, color: color.inkSecondary }}> / month</Text>
+                  </Text>
+                </View>
+                <Text style={{ ...typo.small, color: color.inkSecondary, marginTop: 2 }}>{p.tagline}</Text>
+                {/* Annual as a price with its per-month equivalent beside it. "Save 17%" is how
+                    subscription pricing hides the number that matters. */}
+                {p.annual_saving_cents > 0 && (
+                  <Text style={{ ...typo.small, color: color.inkSecondary, marginTop: space.xs }}>
+                    Or {euro(p.prices.annual.cents)} a year — {euro(p.prices.annual.monthly_equivalent_cents)} a month,
+                    billed once. That is ten months for twelve, saving {euro(p.annual_saving_cents)}.
+                  </Text>
+                )}
+                <Bullets items={p.included.slice(0, p.features.length)} glyph="✓" />
+              </Card>
+            ))}
+
+          {!ent.paid && (
             <Card>
-              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", gap: space.sm }}>
-                <Text style={{ ...typo.heading, color: color.ink }}>{paid.name}</Text>
-                <Text style={{ ...typo.heading, color: color.ink }}>{euro(paid.price_cents)}<Text style={{ ...typo.small, color: color.inkSecondary }}> / month</Text></Text>
-              </View>
               <StatusBanner
                 tone="context"
                 title="Introductions depend on real people, not on paying"
                 body="They depend on qualified, verified members in your city. If a paid week passes without one, you get a protected credit that extends your membership rather than a worse introduction."
               />
-              <Bullets items={paid.included} glyph="✓" />
-              {paid.not_included.length > 0 && (
-                <>
-                  <Divider />
-                  <Text style={{ ...typo.small, color: color.inkSecondary, fontWeight: "600" }}>Not included, on any plan</Text>
-                  <Bullets items={paid.not_included} glyph="—" muted />
-                </>
-              )}
-              <Divider />
               <Text style={{ ...typo.small, color: color.inkSecondary }}>
-                {paid.name} is not sold in the app. We would have to either charge through the App Store or send you to
-                a web page to pay, and the second is not something an app is allowed to do. If you already pay, your plan
-                and everything in it appear here.
+                Neither paid plan is sold in the app. We would have to either charge through the App Store or send you
+                to a web page to pay, and the second is not something an app is allowed to do. If you already pay, your
+                plan and everything in it appear here.
               </Text>
               <Text style={{ ...typo.small, color: color.inkTertiary, marginTop: space.sm }}>{plans.data.renewal_terms}</Text>
+            </Card>
+          )}
+
+          {all.length > 1 && (
+            <Card>
+              <Text style={{ ...typo.title, color: color.ink, marginBottom: space.sm }}>Compare</Text>
+              <View style={{ flexDirection: "row", paddingBottom: space.xs, borderBottomWidth: 1, borderBottomColor: color.border }}>
+                <Text style={{ ...typo.caption, color: color.inkSecondary, flex: 1 }}>FEATURE</Text>
+                {all.map((p) => (
+                  <Text
+                    key={p.id}
+                    style={{ ...typo.caption, color: p.id === ent.plan ? color.action : color.inkSecondary, width: 62, textAlign: "center" }}
+                    numberOfLines={1}
+                  >
+                    {p.name.toUpperCase()}
+                  </Text>
+                ))}
+              </View>
+              {COMPARE.map(([key, label]) => (
+                <View key={key} style={{ flexDirection: "row", alignItems: "center", paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: color.border }}>
+                  <Text style={{ ...typo.small, color: color.ink, flex: 1, paddingRight: space.sm }}>{label}</Text>
+                  {all.map((p) => {
+                    const has = p.features.includes(key);
+                    return (
+                      <Text
+                        key={p.id}
+                        accessibilityLabel={`${label}, ${p.name}: ${has ? "included" : "not included"}`}
+                        style={{ ...typo.small, color: has ? color.success : color.inkTertiary, width: 62, textAlign: "center", fontWeight: "700" }}
+                      >
+                        {has ? "✓" : "—"}
+                      </Text>
+                    );
+                  })}
+                </View>
+              ))}
+              <View style={{ flexDirection: "row", alignItems: "center", paddingVertical: 7 }}>
+                <Text style={{ ...typo.small, color: color.ink, flex: 1, paddingRight: space.sm }}>Introductions a week</Text>
+                {all.map((p) => (
+                  <Text key={p.id} style={{ ...typo.small, color: color.ink, width: 62, textAlign: "center" }}>
+                    up to {p.weekly_intro_cap}
+                  </Text>
+                ))}
+              </View>
+              <Divider />
+              <Text style={{ ...typo.small, color: color.inkTertiary }}>
+                Safety tools, blocking, reporting, check-ins and appeals are on every plan including the free one, and
+                always will be. No plan buys boosts, priority reach or access to a specific person.
+              </Text>
             </Card>
           )}
 

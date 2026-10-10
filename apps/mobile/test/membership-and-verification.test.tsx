@@ -38,12 +38,19 @@ jest.mock("expo-web-browser", () => ({ openBrowserAsync: jest.fn() }));
 import Membership from "../app/(app)/you/membership";
 import VerificationCentre from "../app/(app)/you/verification";
 
+const prices = (monthly: number) => ({
+  monthly: { cents: monthly, monthly_equivalent_cents: monthly, period_days: 30 },
+  annual: { cents: monthly * 10, monthly_equivalent_cents: Math.round((monthly * 10) / 12), period_days: 365 },
+});
+
 const PLANS = {
-  renewal_terms: "Monthly, cancel any time.",
+  cadences: ["monthly", "annual"],
+  renewal_terms: "Renews until you cancel.",
   principles: ["No boosts, super-likes or pay-to-reach."],
   plans: [
-    { id: "free", name: "Verified", price_cents: 0, currency: "EUR", cadence: "monthly", weekly_intro_cap: 1, included: ["Verified profile"], not_included: ["Weekly curated introductions"] },
-    { id: "pro", name: "Matchmaker Pro", price_cents: 3900, currency: "EUR", cadence: "monthly", weekly_intro_cap: 3, included: ["Weekly curated introductions"], not_included: ["Boosts"] },
+    { id: "free", name: "Verified", tagline: "See how we match.", currency: "EUR", weekly_intro_cap: 1, features: [], included: ["Verified profile"], not_included: ["Weekly curated introductions"], prices: prices(0), annual_saving_cents: 0, price_cents: 0 },
+    { id: "pro", name: "Matchmaker Pro", tagline: "The whole method.", currency: "EUR", weekly_intro_cap: 3, features: ["weekly_introductions", "ai_wingman"], included: ["Weekly curated introductions", "AI Wingman drafts"], not_included: ["Human matchmaker review", "Boosts"], prices: prices(3900), annual_saving_cents: 7800, price_cents: 3900 },
+    { id: "concierge", name: "Concierge", tagline: "With a person watching.", currency: "EUR", weekly_intro_cap: 3, features: ["weekly_introductions", "ai_wingman", "human_review"], included: ["Weekly curated introductions", "AI Wingman drafts", "Human matchmaker review"], not_included: ["Boosts"], prices: prices(8900), annual_saving_cents: 17800, price_cents: 8900 },
   ],
 };
 
@@ -59,7 +66,14 @@ const entitlements = (over: Record<string, unknown> = {}) => ({
   adaptive_refresh: false,
   travel_mode: false,
   dating_passport: false,
+  weekly_introductions: false,
+  human_review: false,
+  priority_coordination: false,
   protected_credits: 0,
+  earns_protected_credits: false,
+  cadence: "monthly",
+  price_cents: 0,
+  currency: "EUR",
   safety_tools: true,
   messaging: true,
   manual_date_planning: true,
@@ -100,6 +114,7 @@ describe("Membership", () => {
     const s = await renderScreen(<Membership />);
 
     expect(s.hasText("Matchmaker Pro")).toBe(true);
+    expect(s.hasText("Concierge")).toBe(true);
     expect(s.joined()).toContain("€39");
     // The compliance property, asserted as the absence of a purchase rather than the presence of
     // a disclaimer: no checkout call site, and no button a member could read as one.
@@ -113,7 +128,34 @@ describe("Membership", () => {
   it("tells a free member why, rather than leaving a dead button", async () => {
     billing(entitlements());
     const s = await renderScreen(<Membership />);
-    expect(s.joined()).toContain("not sold in the app");
+    expect(s.joined()).toContain("Neither paid plan is sold in the app");
+  });
+
+  it("shows the annual price as money, with what it works out at per month", async () => {
+    billing(entitlements());
+    const s = await renderScreen(<Membership />);
+    const text = s.joined();
+    // The saving stated in euros rather than as a percentage of a base nobody says out loud.
+    expect(text).toContain("Or €390 a year");
+    expect(text).toContain("€33 a month, billed once");
+    expect(text).toContain("ten months for twelve");
+    expect(text).toContain("saving €78");
+  });
+
+  it("shows what the dearer tier buys that the cheaper one does not", async () => {
+    // The defect this screen existed through: Concierge cost more than twice Pro and granted
+    // exactly the same thing. A comparison built from each plan's own feature list is what makes
+    // that impossible to ship again unnoticed.
+    billing(entitlements());
+    const s = await renderScreen(<Membership />);
+    expect(s.hasText("Human matchmaker review")).toBe(true);
+    expect(s.hasText("Compare")).toBe(true);
+  });
+
+  it("shows a paying member the price they actually agreed to, not today's", async () => {
+    billing(entitlements({ plan: "pro", plan_name: "Matchmaker Pro", paid: true, status: "active", cadence: "annual", price_cents: 33000, renews_at: "2027-01-01T10:00:00Z" }));
+    const s = await renderScreen(<Membership />);
+    expect(s.joined()).toContain("€330 / year");
   });
 
   it("lets a paying member see the plan they are on and cancel it", async () => {

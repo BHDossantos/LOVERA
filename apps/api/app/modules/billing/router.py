@@ -19,6 +19,8 @@ router = APIRouter(tags=["billing"])
 
 class CheckoutIn(BaseModel):
     plan: str
+    # Defaulted, so a client written before annual existed still buys the thing it meant to buy.
+    cadence: str = "monthly"
 
 
 class CancelIn(BaseModel):
@@ -37,7 +39,19 @@ def plans() -> dict:
 
 @router.post("/subscriptions/checkout")
 def checkout(data: CheckoutIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function"), idempotency_key: str | None = Header(default=None)) -> dict:
-    return service.create_checkout(db, principal.member, data.plan, idempotency_key)
+    return service.create_checkout(db, principal.member, data.plan, idempotency_key, data.cadence)
+
+
+@router.get("/subscriptions/checkout/{provider_ref}")
+def checkout_detail(provider_ref: str, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
+    """What this checkout is actually for.
+
+    The hosted checkout page had no way to ask, so it rendered Pro at the monthly price whatever
+    had been started — meaning somebody buying Concierge annually was shown "Matchmaker Pro,
+    EUR 39 / month" on the page where they confirm the charge. A payment screen that names the
+    wrong product and the wrong amount is the one screen that must never be approximated.
+    """
+    return service.checkout_detail(db, principal.member, provider_ref)
 
 
 @router.get("/subscriptions/current")

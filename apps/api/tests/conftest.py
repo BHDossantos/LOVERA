@@ -149,8 +149,8 @@ def onboard(actor: Actor, *, gender: str, seeking: list[str], zone: str = "rome:
     return me
 
 
-def subscribe(actor: Actor, plan: str = "pro"):
-    r = actor.post("/subscriptions/checkout", json={"plan": plan}, headers={"Idempotency-Key": str(uuid.uuid4())})
+def subscribe(actor: Actor, plan: str = "pro", cadence: str = "monthly"):
+    r = actor.post("/subscriptions/checkout", json={"plan": plan, "cadence": cadence}, headers={"Idempotency-Key": str(uuid.uuid4())})
     assert r.status_code == 200, r.text
     ref = r.json()["provider_ref"]
     r = actor.post("/subscriptions/sandbox/pay", json={"checkout_ref": ref, "outcome": "paid"})

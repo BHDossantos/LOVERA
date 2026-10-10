@@ -10,12 +10,23 @@ export type Capabilities = {
     translation: boolean;
     date_concierge: boolean;
     adaptive_refresh: boolean;
+    weekly_introductions: boolean;
+    /** Concierge only: a human matchmaker reviews the matching periodically. */
+    human_review: boolean;
+    /** Concierge only: priority date coordination, including venue booking help. */
+    priority_coordination: boolean;
     travel_mode: boolean;
     dating_passport: boolean;
+    /** The balance. Whether the plan earns them is `earns_protected_credits`. */
     protected_credits: number;
+    earns_protected_credits: boolean;
     safety_tools: boolean;
     messaging: boolean;
     manual_date_planning: boolean;
+    cadence: string;
+    /** What this member agreed to pay, which is not necessarily today's catalog price. */
+    price_cents: number;
+    currency: string;
     renews_at: string | null;
     cancel_at_period_end: boolean;
     status: string;

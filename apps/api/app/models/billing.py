@@ -45,6 +45,34 @@ class CheckoutSession(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class BillingTerm(Base):
+    """Which cadence a checkout or a subscription is on, and what it cost.
+
+    A side table rather than two columns on `subscriptions` and `checkout_sessions`, because the
+    schema here is created by `Base.metadata.create_all` under an advisory lock — which creates
+    missing tables and never alters existing ones. A new column would simply never appear on a
+    database that already has the table, and the first write would fail in production and nowhere
+    else. So every schema change in this repository is a new table; this is that.
+
+    `price_cents` is stored rather than read back from the catalog at renewal, because the catalog
+    is the price we are selling at *today* and this is the price the member agreed to. Changing
+    the former must not silently change the latter.
+    """
+
+    __tablename__ = "billing_terms"
+    __table_args__ = (UniqueConstraint("subject_type", "subject_id", name="uq_billing_term_subject"),)
+
+    id: Mapped[str] = id_column()
+    subject_type: Mapped[str] = mapped_column(String(16), nullable=False)  # checkout | subscription
+    subject_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    plan: Mapped[str] = mapped_column(String(16), nullable=False)
+    cadence: Mapped[str] = mapped_column(String(8), nullable=False)  # monthly | annual
+    price_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="EUR", nullable=False)
+    period_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = created_at_column()
+
+
 class CreditLedger(Base):
     __tablename__ = "credit_ledger"
 
