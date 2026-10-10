@@ -10,7 +10,18 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.catalog.plans import PAID_PLANS, PLANS, RENEWAL_TERMS
+from app.catalog.plans import (
+    CADENCES,
+    FEATURES,
+    PAID_PLANS,
+    PERIOD_DAYS,
+    PLANS,
+    RENEWAL_TERMS,
+    STORE_PRODUCTS,
+    grants,
+    plan_payload,
+    price_cents,
+)
 from app.core.analytics import track
 from app.core.audit import audit
 from app.core.config import get_settings
@@ -18,7 +29,7 @@ from app.core.errors import ApiError
 from app.core.security import verify_webhook
 from app.core.timeutil import iso, utcnow
 from app.models.account import Member
-from app.models.billing import CheckoutSession, CreditLedger, Subscription, WebhookReceipt
+from app.models.billing import BillingTerm, CheckoutSession, CreditLedger, StorePurchase, Subscription, WebhookReceipt
 from app.models.introductions import Introduction
 
 
@@ -46,55 +57,126 @@ def trial_used(db: Session, member_id: str) -> int:
     ).scalar() or 0
 
 
+def term_for(db: Session, subject_type: str, subject_id: str) -> BillingTerm | None:
+    return db.execute(
+        select(BillingTerm).where(BillingTerm.subject_type == subject_type, BillingTerm.subject_id == subject_id)
+    ).scalar_one_or_none()
+
+
+def record_term(db: Session, subject_type: str, subject_id: str, plan_id: str, cadence: str) -> BillingTerm:
+    existing = term_for(db, subject_type, subject_id)
+    if existing:
+        return existing
+    term = BillingTerm(
+        subject_type=subject_type,
+        subject_id=subject_id,
+        plan=plan_id,
+        cadence=cadence,
+        price_cents=price_cents(plan_id, cadence),
+        currency=PLANS[plan_id]["currency"],
+        period_days=PERIOD_DAYS[cadence],
+    )
+    db.add(term)
+    db.flush()
+    return term
+
+
 def entitlements_for(db: Session, member: Member) -> dict[str, Any]:
     settings = get_settings()
     sub = current_subscription(db, member.id)
     plan_id = sub.plan if sub else "free"
     paid = plan_id in PAID_PLANS
     used = trial_used(db, member.id)
-    return {
-        "plan": plan_id,
-        "plan_name": PLANS[plan_id]["name"],
-        "paid": paid,
-        "weekly_intro_cap": PLANS[plan_id]["weekly_intro_cap"],
-        "trial_introductions_remaining": 0 if paid else max(settings.trial_introductions - used, 0),
-        "ai_wingman": paid,
-        "translation": paid,
-        "date_concierge": paid,
-        "adaptive_refresh": paid,
-        "travel_mode": False,  # deferred until after the single city pilot
-        "dating_passport": False,
-        "protected_credits": credit_balance(db, member.id),
-        "safety_tools": True,
-        "messaging": True,
-        "manual_date_planning": True,
-        "renews_at": iso(sub.current_period_end) if sub else None,
-        "cancel_at_period_end": bool(sub.cancel_at_period_end) if sub else False,
-        "status": sub.status if sub else "none",
-    }
+    term = term_for(db, "subscription", sub.id) if sub else None
+    # Every feature flag comes from the plan's own feature list, so a plan cannot advertise
+    # something in `included` that it does not actually grant. These used to be written out one
+    # by one as `paid`, which meant Concierge granted exactly what Pro did at more than twice the
+    # price while its bullets promised two things it never delivered.
+    out: dict[str, Any] = {FEATURE: grants(plan_id, FEATURE) for FEATURE in FEATURES}
+    out.update(
+        {
+            "plan": plan_id,
+            "plan_name": PLANS[plan_id]["name"],
+            "paid": paid,
+            "weekly_intro_cap": PLANS[plan_id]["weekly_intro_cap"],
+            "trial_introductions_remaining": 0 if paid else max(settings.trial_introductions - used, 0),
+            "travel_mode": False,  # deferred until after the single city pilot
+            "dating_passport": False,
+            # The balance, not the entitlement. `protected_credits` is a count everywhere it is
+            # rendered, so it keeps that meaning and overwrites the boolean from the loop above.
+            "protected_credits": credit_balance(db, member.id),
+            "earns_protected_credits": grants(plan_id, "protected_credits"),
+            "safety_tools": True,
+            "messaging": True,
+            "manual_date_planning": True,
+            "cadence": term.cadence if term else "monthly",
+            "price_cents": term.price_cents if term else price_cents(plan_id, "monthly"),
+            "currency": term.currency if term else PLANS[plan_id]["currency"],
+            "renews_at": iso(sub.current_period_end) if sub else None,
+            "cancel_at_period_end": bool(sub.cancel_at_period_end) if sub else False,
+            "status": sub.status if sub else "none",
+        }
+    )
+    return out
+
+
+def store_status() -> dict[str, Any]:
+    """Whether the phone may offer an in-app purchase, and why not when it may not.
+
+    The client asks rather than assumes. A purchase button that leads to a refusal is worse than
+    no button, and on iOS a non-functional purchase path is a guideline 2.1 rejection on its own.
+    """
+    settings = get_settings()
+    mode = settings.store_validation
+    enabled = mode in ("sandbox", "app_store", "play_store") and not (mode == "sandbox" and settings.is_production)
+    reason = None
+    if mode == "disabled":
+        reason = "In-app purchase is not configured for this deployment yet."
+    elif mode == "sandbox" and settings.is_production:
+        reason = "Sandbox receipt validation is never accepted in production."
+    elif mode in ("app_store", "play_store"):
+        reason = None
+    return {"enabled": enabled, "validation": mode, "reason": reason, "products": dict(STORE_PRODUCTS)}
 
 
 def plans_payload() -> dict[str, Any]:
-    return {"plans": list(PLANS.values()), "renewal_terms": RENEWAL_TERMS, "principles": ["No boosts, super-likes or pay-to-reach.", "Verification, blocking, reporting and check-ins are always free.", "Protected credit when no qualified introduction is available in a paid week."]}
+    return {
+        "plans": [plan_payload(p) for p in PLANS],
+        "cadences": list(CADENCES),
+        "store": store_status(),
+        "renewal_terms": RENEWAL_TERMS,
+        "principles": [
+            "No boosts, super-likes or pay-to-reach.",
+            "Verification, blocking, reporting and check-ins are always free.",
+            "Protected credit when no qualified introduction is available in a paid week.",
+            "Annual is ten months for twelve, and the monthly price is always shown beside it.",
+        ],
+    }
 
 
-def create_checkout(db: Session, member: Member, plan_id: str, idempotency_key: str | None) -> dict[str, Any]:
+def create_checkout(db: Session, member: Member, plan_id: str, idempotency_key: str | None, cadence: str = "monthly") -> dict[str, Any]:
     if plan_id not in PAID_PLANS:
         raise ApiError("VALIDATION_ERROR", "Choose a paid plan.", field_errors={"plan": "invalid"})
+    if cadence not in CADENCES:
+        raise ApiError("VALIDATION_ERROR", "Choose monthly or annual.", field_errors={"cadence": "invalid"})
     if idempotency_key:
         existing = db.execute(select(CheckoutSession).where(CheckoutSession.member_id == member.id, CheckoutSession.idempotency_key == idempotency_key)).scalar_one_or_none()
         if existing:
-            return checkout_payload(existing)
+            return checkout_payload(db, existing)
     settings = get_settings()
     session = CheckoutSession(member_id=member.id, plan=plan_id, provider=settings.payments_provider, provider_ref=f"cs_{secrets.token_urlsafe(10)}", idempotency_key=idempotency_key)
     db.add(session)
     db.flush()
-    audit(db, actor_type="member", actor_id=member.id, action="billing.checkout_created", resource_type="checkout", resource_id=session.id, metadata={"plan": plan_id})
-    return checkout_payload(session)
+    record_term(db, "checkout", session.id, plan_id, cadence)
+    audit(db, actor_type="member", actor_id=member.id, action="billing.checkout_created", resource_type="checkout", resource_id=session.id, metadata={"plan": plan_id, "cadence": cadence})
+    return checkout_payload(db, session)
 
 
-def checkout_payload(session: CheckoutSession) -> dict[str, Any]:
+def checkout_payload(db: Session, session: CheckoutSession) -> dict[str, Any]:
     plan = PLANS[session.plan]
+    term = term_for(db, "checkout", session.id)
+    cadence = term.cadence if term else "monthly"
+    cents = term.price_cents if term else price_cents(session.plan, cadence)
     return {
         "checkout_id": session.id,
         "provider": session.provider,
@@ -102,25 +184,99 @@ def checkout_payload(session: CheckoutSession) -> dict[str, Any]:
         "hosted_url": f"/you/membership/checkout?ref={session.provider_ref}",
         "status": session.status,
         "plan": plan["id"],
-        "price_cents": plan["price_cents"],
+        "plan_name": plan["name"],
+        "cadence": cadence,
+        "price_cents": cents,
+        "period_days": term.period_days if term else PERIOD_DAYS[cadence],
         "currency": plan["currency"],
         "renewal_terms": RENEWAL_TERMS,
         "inventory_notice": "Introductions depend on qualified, verified inventory in your city. If we cannot introduce you in a paid week, you receive a protected credit.",
     }
 
 
-def activate_subscription(db: Session, member_id: str, plan_id: str, provider: str, provider_subscription_ref: str, period_days: int = 30) -> Subscription:
+def checkout_detail(db: Session, member: Member, provider_ref: str) -> dict[str, Any]:
+    session = db.execute(select(CheckoutSession).where(CheckoutSession.provider_ref == provider_ref)).scalar_one_or_none()
+    # Same answer for "no such checkout" and "somebody else's checkout": a distinguishable error
+    # would turn this into a way to probe whether a reference is real.
+    if session is None or session.member_id != member.id:
+        raise ApiError("NOT_FOUND", "We could not find that checkout.")
+    return checkout_payload(db, session)
+
+
+def record_store_purchase(db: Session, member: Member, store: str, product_id: str, transaction_id: str) -> dict[str, Any]:
+    """Turn a store receipt into a subscription, or refuse to.
+
+    The refusals come first and on purpose. `store-purchase` is an endpoint any signed-in member
+    can call with any JSON they like, so the only thing separating it from a free upgrade to the
+    most expensive tier is that an unverified receipt is never honoured. There is no configuration
+    that makes this trust the client in production: `store_validation=sandbox` exists for the
+    simulator and is refused outright once `is_production` is set, and the real validators are not
+    written yet and say so rather than falling through.
+    """
+    settings = get_settings()
+    if store not in ("app_store", "play_store"):
+        raise ApiError("VALIDATION_ERROR", "Unknown store.", field_errors={"store": "invalid"})
+
+    existing = db.execute(
+        select(StorePurchase).where(StorePurchase.store == store, StorePurchase.transaction_id == transaction_id)
+    ).scalar_one_or_none()
+    if existing:
+        # A replay — a retry, a restore-purchases, or somebody trying it on. Same answer either
+        # way, and no second subscription.
+        return {"status": existing.status, "duplicate": True, "entitlements": entitlements_for(db, member)}
+
+    mapped = STORE_PRODUCTS.get(product_id)
+    if mapped is None:
+        db.add(StorePurchase(member_id=member.id, store=store, product_id=product_id, transaction_id=transaction_id, plan="", cadence="", status="refused_unknown_product", validated_by=settings.store_validation))
+        db.flush()
+        raise ApiError("VALIDATION_ERROR", "That product is not one of ours.", field_errors={"product_id": "unknown"})
+    plan_id, cadence = mapped
+
+    status = store_status()
+    if not status["enabled"]:
+        db.add(StorePurchase(member_id=member.id, store=store, product_id=product_id, transaction_id=transaction_id, plan=plan_id, cadence=cadence, status="refused_unverified", validated_by=settings.store_validation))
+        db.flush()
+        audit(db, actor_type="member", actor_id=member.id, action="billing.store_purchase_refused", resource_type="member", resource_id=member.id, metadata={"product_id": product_id, "validation": settings.store_validation})
+        raise ApiError(
+            "DEPENDENCY_UNAVAILABLE",
+            status["reason"] or "Purchases cannot be verified right now. You have not been charged by us, and anything the store charged will be refunded by the store.",
+        )
+
+    if settings.store_validation in ("app_store", "play_store"):
+        # Deliberately not implemented rather than stubbed as success. A stub here is the one bug
+        # whose symptom is "everybody has Concierge".
+        db.add(StorePurchase(member_id=member.id, store=store, product_id=product_id, transaction_id=transaction_id, plan=plan_id, cadence=cadence, status="refused_unverified", validated_by=settings.store_validation))
+        db.flush()
+        raise ApiError("DEPENDENCY_UNAVAILABLE", "Receipt verification with the store is not available yet.")
+
+    sub = activate_subscription(db, member.id, plan_id, store, f"{store}:{transaction_id}", cadence=cadence)
+    db.add(StorePurchase(member_id=member.id, store=store, product_id=product_id, transaction_id=transaction_id, plan=plan_id, cadence=cadence, status="granted", validated_by=settings.store_validation, subscription_id=sub.id))
+    db.flush()
+    audit(db, actor_type="member", actor_id=member.id, action="billing.store_purchase_granted", resource_type="subscription", resource_id=sub.id, metadata={"product_id": product_id, "store": store})
+    return {"status": "granted", "duplicate": False, "entitlements": entitlements_for(db, member)}
+
+
+def activate_subscription(db: Session, member_id: str, plan_id: str, provider: str, provider_subscription_ref: str, cadence: str = "monthly") -> Subscription:
+    """Start a subscription on the cadence the member actually bought.
+
+    `period_days` used to be a parameter defaulting to 30, and every caller took the default — so
+    an annual purchase would have renewed in a month. The cadence decides the period now, and the
+    agreed price is copied onto the subscription and its term rather than read back out of the
+    catalog, so repricing the catalog never reprices somebody who already bought.
+    """
     existing = db.execute(select(Subscription).where(Subscription.provider_subscription_ref == provider_subscription_ref)).scalar_one_or_none()
     if existing:
         return existing
     for old in db.execute(select(Subscription).where(Subscription.member_id == member_id, Subscription.status.in_(("active", "trialing", "past_due")))).scalars():
         old.status = "cancelled"
         old.cancelled_at = utcnow()
-    sub = Subscription(member_id=member_id, provider=provider, provider_subscription_ref=provider_subscription_ref, plan=plan_id, status="active", price_cents=PLANS[plan_id]["price_cents"], currency="EUR", current_period_end=utcnow() + timedelta(days=period_days))
+    cents = price_cents(plan_id, cadence)
+    sub = Subscription(member_id=member_id, provider=provider, provider_subscription_ref=provider_subscription_ref, plan=plan_id, status="active", price_cents=cents, currency=PLANS[plan_id]["currency"], current_period_end=utcnow() + timedelta(days=PERIOD_DAYS[cadence]))
     db.add(sub)
     db.flush()
-    track(db, "subscription_started", member_id, plan=plan_id, price=PLANS[plan_id]["price_cents"], currency="EUR", channel=provider)
-    audit(db, actor_type="vendor", actor_id=None, action="billing.subscription_activated", resource_type="subscription", resource_id=sub.id, metadata={"plan": plan_id})
+    record_term(db, "subscription", sub.id, plan_id, cadence)
+    track(db, "subscription_started", member_id, plan=plan_id, price=cents, currency=PLANS[plan_id]["currency"], channel=provider, cadence=cadence)
+    audit(db, actor_type="vendor", actor_id=None, action="billing.subscription_activated", resource_type="subscription", resource_id=sub.id, metadata={"plan": plan_id, "cadence": cadence})
     return sub
 
 
@@ -171,7 +327,15 @@ def handle_payment_webhook(db: Session, body: bytes, timestamp: str, signature: 
         if session.status != "completed":
             session.status = "completed"
             session.completed_at = utcnow()
-            activate_subscription(db, session.member_id, session.plan, session.provider, data.get("subscription_ref") or f"sub_{session.provider_ref}")
+            bought = term_for(db, "checkout", session.id)
+            activate_subscription(
+                db,
+                session.member_id,
+                session.plan,
+                session.provider,
+                data.get("subscription_ref") or f"sub_{session.provider_ref}",
+                cadence=bought.cadence if bought else "monthly",
+            )
     elif event_type == "invoice.payment_failed":
         sub = db.execute(select(Subscription).where(Subscription.provider_subscription_ref == data.get("subscription_ref"))).scalar_one_or_none()
         if sub:

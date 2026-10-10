@@ -34,7 +34,10 @@ export type TranslationResult = {
 /** POST /conversations/{id}/close */
 export type CloseResult = { conversation_id: string; status: string; blocked: boolean };
 
-export type SendPayload = { client_message_id: string; text: string; translation_id?: string; source_lang?: string; draft_id?: string };
+export type SendPayload = { client_message_id: string; text: string; translation_id?: string; source_lang?: string; draft_id?: string; prompt_key?: string };
+
+/** One of the other person's prompt answers, offered as something specific to reply to. */
+export type Opener = { key: string; label: string; answer: string };
 
 /** A message the member composed that has not (yet) been confirmed by the server. */
 export type PendingMessage = { client_message_id: string; text: string; state: "sending" | "failed"; error?: string; translation_id?: string; source_lang?: string };

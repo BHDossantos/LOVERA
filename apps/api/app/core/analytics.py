@@ -35,7 +35,7 @@ ALLOWED: dict[str, set[str]] = {
     "safety_report_submitted": {"category", "severity", "evidence_count"},
     "protective_action_applied": {"action_type", "automated"},
     "appeal_submitted": {"action_type", "days_since_action"},
-    "subscription_started": {"plan", "price", "currency", "channel"},
+    "subscription_started": {"plan", "price", "currency", "channel", "cadence"},
     "credit_changed": {"delta", "reason", "balance"},
     "data_right_exercised": {"type"},
 }

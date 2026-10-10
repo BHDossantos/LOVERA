@@ -269,35 +269,83 @@ that has no reviews and no ranking.
 
 ---
 
-## 8. In-app purchase — required before you can sell on mobile
+## 8. In-app purchase — built, and off until you switch it on
 
-**This is not optional and it is not yet built.** Both stores require their own
-billing for digital subscriptions. Our paid plans (Pro €39/mo, Concierge €89/mo)
-are digital subscriptions, so:
+Both stores require their own billing for digital subscriptions. Our paid plans
+are digital subscriptions, so selling them through our own checkout inside the
+app is a rejection under App Store guideline 3.1.1, and linking out to a web
+checkout is a rejection too. The commission is 15–30% depending on tier and
+region.
 
-- Selling them through our own checkout inside the app is a **rejection** under
-  App Store guideline 3.1.1 and the equivalent Play policy.
-- Linking out to a web checkout from inside the app is also a rejection, in most
-  regions and for most account types.
-- The commission is **15–30%** depending on tier and region. On the Concierge
-  plan that is up to €26.70 per subscriber per month.
+**The integration is now in the repository.** It is deliberately inert until you
+do the four things below, and until all four are true the app shows no purchase
+UI at all — not a disabled button, not a "coming soon", nothing. That is both the
+honest state and the compliant one: a purchase path that does not work is a
+guideline 2.1 rejection on its own.
 
-Two ways forward, and they are genuinely different bets:
+### What is built
 
-1. **Ship v1 without in-app upgrades.** The mobile app serves free-tier members
-   and people who already subscribed on the web. Nothing in the app mentions
-   upgrading. This is submittable today and completely compliant.
-2. **Integrate StoreKit and Play Billing** plus server-side receipt validation
-   and subscription webhooks into the billing module, then charge on mobile.
+| Piece | Where |
+| --- | --- |
+| Product ids → plan and cadence | `apps/api/app/catalog/plans.py` (`STORE_PRODUCTS`) |
+| Receipt endpoint, idempotent on the store's transaction id | `POST /v1/subscriptions/store-purchase` |
+| Refusal when no validator is configured | `billing/service.record_store_purchase` |
+| Whether the phone may offer a purchase | `GET /v1/plans` → `store.enabled` |
+| Client wrapper, purchase and restore | `apps/mobile/src/lib/purchases.ts` |
+| Purchase UI, gated on all four preconditions | `apps/mobile/app/(app)/you/membership.tsx` |
 
-Option 1 gets you into the stores now and loses mobile-originated revenue.
-Option 2 is roughly a week of careful work and gives up a slice of every mobile
-subscription permanently. Most products in this position do 1 then 2 — but if
-mobile is expected to be the main signup channel, doing 2 first avoids training
-members to expect a free app.
+The server grants the plan; the client never decides its own entitlements. An
+unverified receipt is **never** honoured, and there is no setting that makes the
+API trust a client-asserted receipt in production — `MM_STORE_VALIDATION=sandbox`
+is refused outright once `MM_ENV=production`. The worst outcome of that is that
+nobody can buy. The worst outcome of the alternative is that everybody has
+Concierge for nothing.
 
-**The app as it stands does not show any upgrade path, so it is compliant with
-option 1 today.**
+### The four things you have to do
+
+1. **Create the products.** In App Store Connect and the Play Console, with
+   these exact identifiers on both stores:
+
+   | Product id | Plan | Term |
+   | --- | --- | --- |
+   | `pro_monthly` | Matchmaker Pro | monthly |
+   | `pro_annual` | Matchmaker Pro | annual |
+   | `concierge_monthly` | Concierge | monthly |
+   | `concierge_annual` | Concierge | annual |
+
+   Use the same ids on both stores. Two sets of names for the same four things
+   is how a receipt ends up granting the wrong tier. A product the store has no
+   price for simply gets no button, so you can launch with two and add two later.
+
+2. **Sign the banking and tax agreements.** Paid apps cannot sell anything until
+   these are complete, and they take days, not minutes. Start them first.
+
+3. **Set the RevenueCat public SDK keys** on the build:
+   `EXPO_PUBLIC_REVENUECAT_IOS_KEY` and `EXPO_PUBLIC_REVENUECAT_ANDROID_KEY`.
+   These are the *public* keys, designed to ship in a client binary — they can
+   start a purchase and read entitlements and cannot refund, grant, or read
+   anybody else's data. The secret key stays on the server and is not referenced
+   anywhere in the app.
+
+4. **Set `MM_STORE_VALIDATION`** on the API. `sandbox` for simulator testing in a
+   non-production environment; `app_store` / `play_store` for real verification —
+   which is the one piece still to be written, and the endpoint says so rather
+   than quietly succeeding.
+
+### What is not done
+
+Server-side receipt verification against Apple's and Google's servers
+(`MM_STORE_VALIDATION=app_store` / `play_store`) is not implemented. The endpoint
+refuses rather than stubbing a success, so the gap cannot be shipped by accident.
+Until it is written, the compliant launch posture is in-app purchase off
+(`MM_STORE_VALIDATION=disabled`, which is the default): the mobile app serves
+free-tier members and people who already subscribed on the web, and offers no
+upgrade path, which is fully submittable.
+
+**Not verified here:** the native module (`react-native-purchases`) has been
+installed, autolinks, and survives `expo prebuild` and all 24 native-config
+checks, but no iOS or Android binary has been compiled in this environment. The
+first EAS build is the first real compile.
 
 ---
 

@@ -7,7 +7,7 @@ export const metadata: Metadata = {
   description: "A verified, no-swipe matchmaker designed around the second date.",
 };
 
-export const viewport: Viewport = { width: "device-width", initialScale: 1, viewportFit: "cover", themeColor: "#faf7f1" };
+export const viewport: Viewport = { width: "device-width", initialScale: 1, viewportFit: "cover", themeColor: "#fdf7f4" };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (

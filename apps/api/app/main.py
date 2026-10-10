@@ -109,10 +109,39 @@ def check_identity_provider() -> None:
     log.info("identity: %s", settings.identity_provider)
 
 
+def check_store_validation() -> None:
+    """Say out loud whether the phone can sell anything, and why not.
+
+    This one warns rather than refusing to boot, because the failure is already closed: with no
+    validator configured, `/plans` tells the app the store is off and the app draws no purchase
+    UI, so nothing is broken and nothing is given away. What it must not be is *silent* — an
+    operator who sets up App Store Connect, ships a build and then finds nobody can buy should
+    read the reason in the first ten lines of the log rather than in a support ticket.
+
+    `sandbox` in production is the dangerous one, and it is refused at the endpoint rather than
+    here: taking the whole API down over a billing setting would be a worse outcome than the
+    purchases being off.
+    """
+    settings = get_settings()
+    mode = settings.store_validation
+    if mode == "disabled":
+        log.info("store: in-app purchase is off (MM_STORE_VALIDATION=disabled). The apps will not offer one.")
+    elif mode == "sandbox" and settings.is_production:
+        log.warning(
+            "MM_STORE_VALIDATION=sandbox in production: receipts would be taken at face value, so "
+            "in-app purchase is refused. Set MM_STORE_VALIDATION=app_store or play_store."
+        )
+    elif mode == "sandbox":
+        log.warning("MM_STORE_VALIDATION=sandbox: store receipts are trusted without verification. Never use this in production.")
+    else:
+        log.info("store: receipts verified by %s", mode)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     check_mail_transport()
     check_identity_provider()
+    check_store_validation()
     create_schema()
     from app.jobs import register_handlers
 

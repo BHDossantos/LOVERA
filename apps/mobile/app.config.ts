@@ -16,8 +16,9 @@ import type { ExpoConfig, ConfigContext } from "expo/config";
  */
 const BUNDLE_ID = process.env.EXPO_PUBLIC_BUNDLE_ID ?? "com.aimatchmaker.app";
 
-const BRAND_BACKGROUND = "#faf7f1";
-const BRAND_TEAL = "#0f766e";
+const BRAND_BACKGROUND = "#fdf7f4";
+/** The action colour from the shared tokens. Keep in step with `src/theme.ts` and `globals.css`. */
+const BRAND_ROSE = "#b42d55";
 
 /**
  * Where the app sends every request. There is no sensible default for a real build:
@@ -143,10 +144,18 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   orientation: "portrait",
   userInterfaceStyle: "light",
   icon: "./assets/icon.png",
-  primaryColor: BRAND_TEAL,
+  primaryColor: BRAND_ROSE,
   extra: {
     apiOrigin: apiOrigin(),
     eas: { projectId: easProjectId() },
+    // RevenueCat's *public* SDK keys, which are designed to ship in a client binary — they can
+    // start a purchase and read entitlements, and they cannot refund, grant or read anybody
+    // else's data. The secret key stays on the server and is not referenced here. Absent, the
+    // app simply never offers an in-app purchase; see src/lib/purchases.ts.
+    revenueCat: {
+      ios: process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY ?? null,
+      android: process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_KEY ?? null,
+    },
   },
   // Read from the native project rather than from `version`, so a native change cannot be served a
   // JS bundle that expects a different one. See `updates()`.
@@ -236,7 +245,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     [
       "expo-notifications",
       {
-        color: BRAND_TEAL,
+        color: BRAND_ROSE,
         defaultChannel: "introductions",
       },
     ],

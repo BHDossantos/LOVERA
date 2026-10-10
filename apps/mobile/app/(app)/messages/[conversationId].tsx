@@ -13,6 +13,8 @@ import { color, radius, space, type as typo } from "@/theme";
 
 type History = { items: Message[]; next_cursor: string | null; has_more: boolean };
 type Pending = { client_message_id: string; text: string; state: "sending" | "failed"; error?: string };
+/** One of the other person's prompt answers, offered as something specific to reply to. */
+type Opener = { key: string; label: string; answer: string };
 
 function mergeMessages(a: Message[], b: Message[]) {
   const by = new Map(a.map((m) => [m.id, m]));
@@ -58,6 +60,23 @@ export default function Conversation() {
   const items = history.data?.items ?? [];
   const maxSeq = items.length ? items[items.length - 1].sequence : 0;
 
+  /**
+   * Things to actually say, for a conversation nobody has spoken in yet.
+   *
+   * A blank box after a mutual yes is where most conversations die, and "hey" is what anybody
+   * writes when there is nothing specific to answer. These are the other person's own prompt
+   * answers — written to be replied to, chosen by them. Only fetched while the thread is empty:
+   * after the first message there is a conversation to continue, and still offering openers
+   * would be suggesting the two of them ignore each other.
+   */
+  const empty = !history.isLoading && items.length === 0 && pending.length === 0;
+  const openers = useQuery({
+    queryKey: ["openers", id],
+    queryFn: () => get<{ items: Opener[] }>(`/conversations/${id}/openers`),
+    enabled: !!me && !!id && empty,
+  });
+  const [replyingTo, setReplyingTo] = useState<Opener | null>(null);
+
   // Marking read is a side effect of having seen the last message, not of opening the
   // screen: opening and immediately backing out should not clear someone's unread count.
   useEffect(() => {
@@ -66,7 +85,7 @@ export default function Conversation() {
   }, [id, maxSeq]);
 
   const send = useCallback(
-    async (text: string, clientMessageId: string) => {
+    async (text: string, clientMessageId: string, promptKey?: string) => {
       setSendError(null);
       setPending((prev) => [
         ...prev.filter((x) => x.client_message_id !== clientMessageId),
@@ -76,6 +95,9 @@ export default function Conversation() {
         const msg = await post<Message>(`/conversations/${id}/messages`, {
           client_message_id: clientMessageId,
           text,
+          // The server validates this against what they actually wrote and stores the answer
+          // with the message, so the quote cannot be forged and cannot change later.
+          ...(promptKey ? { prompt_key: promptKey } : {}),
         });
         qc.setQueryData<History>(["messages", id], (old) =>
           old ? { ...old, items: mergeMessages(old.items, [msg]) } : { items: [msg], next_cursor: null, has_more: false },
@@ -101,7 +123,9 @@ export default function Conversation() {
     const text = draft.trim();
     if (!text) return;
     setDraft("");
-    void send(text, newIdempotencyKey());
+    const prompt = replyingTo?.key;
+    setReplyingTo(null);
+    void send(text, newIdempotencyKey(), prompt);
   };
 
   // The whole screen is the summary: the header, the banners, the safety row, the assistant, date
@@ -282,6 +306,17 @@ export default function Conversation() {
         </View>
       )}
 
+      {/* Hearing a voice before meeting a stranger is a reasonable thing to want, and so is not
+          wanting to. The screen exists on web and had no way in from the phone at all, which left
+          the second group with no explicit "this is normal either way" anywhere in the app. */}
+      {!onHold && !ended && (
+        <View style={{ paddingHorizontal: space.lg, paddingBottom: space.sm }}>
+          <Button variant="ghost" onPress={() => router.push(`/messages/${id}/readiness` as never)}>
+            Voice or video before we meet
+          </Button>
+        </View>
+      )}
+
       {/* The only route into the planner: a date belongs to a conversation, and the API
           creates at most one plan per conversation, so this either opens the existing plan
           or starts the first one. Hidden while a safety hold or an ending is in force. */}
@@ -309,10 +344,38 @@ export default function Conversation() {
         onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
         renderItem={({ item }) => (
           <View style={[s.bubble, item.mine ? s.mine : s.theirs]}>
+            {!!item.replying_to && (
+              <View style={[s.quote, item.mine && s.quoteMine]}>
+                <Text style={[s.quoteLabel, item.mine && { color: "rgba(255,255,255,0.75)" }]}>{item.replying_to.label}</Text>
+                <Text style={[s.quoteText, item.mine && { color: "rgba(255,255,255,0.9)" }]}>{item.replying_to.answer}</Text>
+              </View>
+            )}
             <Text style={[s.bubbleText, item.mine && { color: "#fff" }]}>{item.text}</Text>
             {item.moderation_state === "held" && <Text style={s.moderation}>Held for review</Text>}
           </View>
         )}
+        ListHeaderComponent={
+          empty && (openers.data?.items?.length ?? 0) > 0 ? (
+            <View style={{ marginBottom: space.lg }}>
+              <Text style={s.openerTitle}>Something to open with</Text>
+              <Text style={s.openerLede}>
+                Their words, not ours. Tap one to answer it — or ignore all of this and write your own.
+              </Text>
+              {openers.data?.items?.map((o) => (
+                <Pressable
+                  key={o.key}
+                  onPress={() => setReplyingTo(replyingTo?.key === o.key ? null : o)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: replyingTo?.key === o.key }}
+                  style={[s.opener, replyingTo?.key === o.key && s.openerOn]}
+                >
+                  <Text style={s.openerLabel}>{o.label}</Text>
+                  <Text style={s.openerAnswer}>{o.answer}</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null
+        }
         ListFooterComponent={
           <View>
             {pending.map((p) => (
@@ -380,6 +443,28 @@ const s = {
   bubble: { maxWidth: "82%", borderRadius: radius.lg, paddingHorizontal: space.md, paddingVertical: space.sm },
   mine: { alignSelf: "flex-end", backgroundColor: color.action },
   theirs: { alignSelf: "flex-start", backgroundColor: color.surface, borderWidth: 1, borderColor: color.border },
+  openerTitle: { ...typo.title, color: color.ink },
+  openerLede: { ...typo.small, color: color.inkSecondary, marginTop: 2, marginBottom: space.md },
+  opener: {
+    backgroundColor: color.surface,
+    borderWidth: 1,
+    borderColor: color.border,
+    borderRadius: radius.lg,
+    padding: space.md,
+    marginBottom: space.sm,
+  },
+  openerOn: { borderColor: color.action, backgroundColor: color.actionSoft },
+  openerLabel: { ...typo.caption, color: color.context },
+  openerAnswer: { ...typo.body, color: color.ink, marginTop: 2 },
+  quote: {
+    borderLeftWidth: 3,
+    borderLeftColor: color.action,
+    paddingLeft: space.sm,
+    marginBottom: space.sm,
+  },
+  quoteMine: { borderLeftColor: "rgba(255,255,255,0.6)" },
+  quoteLabel: { ...typo.caption, color: color.context },
+  quoteText: { ...typo.small, color: color.inkSecondary },
   bubbleText: { ...typo.body, color: color.ink },
   moderation: { ...typo.caption, color: color.contextSoft, marginTop: 2 },
   pendingState: { ...typo.caption, color: "#ffffffcc", marginTop: 2 },

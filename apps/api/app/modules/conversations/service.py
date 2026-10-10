@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.analytics import track
 from app.core.audit import audit
+from app.catalog.prompts import PROFILE_PROMPTS
 from app.core.errors import ApiError
 from app.core.ids import new_id
 from app.core.timeutil import iso, utcnow
@@ -78,6 +79,17 @@ def summary(db: Session, conv: Conversation, viewer: Member) -> dict[str, Any]:
         "public_reason": "This conversation has ended." if closed_neutral else None,
         "other": snapshot_for_viewer(db, other, viewer) if other and not closed_neutral else {"member_id": None, "display_name": "Member unavailable", "verified": False, "media": []},
         "last_message": {"text": last.body[:80] if last.moderation_state != "hidden" else "", "sent_at": iso(last.sent_at), "mine": last.sender_id == viewer.id} if last else None,
+        # Whose move it is, decided once on the server.
+        #
+        # Both clients could work this out from `last_message.mine`, and both of them working it
+        # out is exactly how the two apps end up disagreeing about whether somebody owes a reply
+        # — the shape this repository keeps finding. It is also the single most-loved thing about
+        # the apps that have it: the question "who is waiting on me" is the only one worth asking
+        # of a message list, and a list sorted by recency does not answer it.
+        #
+        # An empty conversation is the viewer's turn: somebody has to say the first thing, and a
+        # pair who both believe it is the other's move never speak.
+        "your_turn": conv.status == "active" and not conv.safety_hold and (last is None or last.sender_id != viewer.id),
         "unread": unread_count(db, conv, viewer.id),
         "date": date_status(db, conv),
         "opened_at": iso(conv.opened_at),
@@ -86,13 +98,50 @@ def summary(db: Session, conv: Conversation, viewer: Member) -> dict[str, Any]:
     }
 
 
+def openers_for(db: Session, conv: Conversation, viewer: Member) -> list[dict[str, Any]]:
+    """The other person's prompt answers, as things to respond to.
+
+    A blank message box after a mutual yes is the point at which most conversations die, and
+    "hey" is what people write when they have nothing specific to answer. A prompt answer is
+    something specific: it was written to be responded to, the other person chose it, and
+    replying to it is not a line anybody had to think of.
+
+    Only offered while the conversation is empty. After the first message there is a
+    conversation to continue, and continuing to offer openers would be suggesting people ignore
+    each other.
+    """
+    other = conv.other(viewer.id)
+    subject = db.get(Member, other) if other else None
+    if subject is None:
+        return []
+    from app.models.profile import Profile
+
+    profile = db.get(Profile, subject.id)
+    if profile is None:
+        return []
+    labels = dict(PROFILE_PROMPTS)
+    return [
+        {"key": p["key"], "label": labels[p["key"]], "answer": p["answer"]}
+        for p in (profile.prompts or [])
+        if p.get("key") in labels and str(p.get("answer", "")).strip()
+    ]
+
+
 def list_for(db: Session, viewer: Member) -> list[dict[str, Any]]:
     rows = db.execute(select(Conversation).where(or_(Conversation.member_a_id == viewer.id, Conversation.member_b_id == viewer.id)).order_by(Conversation.last_message_at.desc().nullslast(), Conversation.opened_at.desc())).scalars().all()
     return [summary(db, c, viewer) for c in rows]
 
 
 def message_payload(m: Message, viewer_id: str) -> dict[str, Any]:
-    return {"id": m.id, "client_message_id": m.client_message_id, "sequence": m.sequence, "sender_id": m.sender_id, "mine": m.sender_id == viewer_id, "type": m.type, "text": "" if m.moderation_state == "hidden" else m.body, "moderation_state": m.moderation_state, "meta": {k: v for k, v in (m.meta or {}).items() if k in ("source_lang", "draft_assisted", "translated_from")}, "sent_at": iso(m.sent_at)}
+    meta = m.meta or {}
+    out = {"id": m.id, "client_message_id": m.client_message_id, "sequence": m.sequence, "sender_id": m.sender_id, "mine": m.sender_id == viewer_id, "type": m.type, "text": "" if m.moderation_state == "hidden" else m.body, "moderation_state": m.moderation_state, "meta": {k: v for k, v in meta.items() if k in ("source_lang", "draft_assisted", "translated_from")}, "sent_at": iso(m.sent_at)}
+    # A reply to a prompt carries the prompt and the answer it is replying to, resolved at send
+    # time and stored with the message. Resolved here instead would mean re-reading a profile
+    # that the other person may since have edited, so the quote above a two-week-old message
+    # would silently change to something they never said when it was written.
+    if meta.get("prompt_key"):
+        out["replying_to"] = {"key": meta["prompt_key"], "label": meta.get("prompt_label", ""), "answer": meta.get("prompt_answer", "")}
+    return out
 
 
 def history(db: Session, conv: Conversation, viewer_id: str, cursor: int | None, limit: int = 50) -> dict[str, Any]:
@@ -103,6 +152,25 @@ def history(db: Session, conv: Conversation, viewer_id: str, cursor: int | None,
     has_more = len(rows) > limit
     rows = list(reversed(rows[:limit]))
     return {"items": [message_payload(m, viewer_id) for m in rows], "next_cursor": rows[0].sequence if has_more and rows else None, "has_more": has_more}
+
+
+def resolve_prompt_reply(db: Session, conv: Conversation, sender: Member, prompt_key: str) -> dict[str, str]:
+    """Turn a prompt key into the quote that will sit above the message, forever.
+
+    Validated against what the other member actually answered rather than trusted from the
+    client: a free-text "replying to" would let somebody put words into the other person's mouth
+    inside their own conversation, which is worse than it sounds because the quote renders as
+    *theirs*.
+    """
+    other = conv.other(sender.id)
+    from app.models.profile import Profile
+
+    profile = db.get(Profile, other) if other else None
+    labels = dict(PROFILE_PROMPTS)
+    for p in (profile.prompts if profile else None) or []:
+        if p.get("key") == prompt_key and str(p.get("answer", "")).strip():
+            return {"prompt_key": prompt_key, "prompt_label": labels.get(prompt_key, ""), "prompt_answer": str(p["answer"])[:240]}
+    raise ApiError("VALIDATION_ERROR", "That is not one of their prompts.", field_errors={"prompt_key": "unknown"})
 
 
 def send_message(db: Session, conv_id: str, sender: Member, client_message_id: str, text: str, msg_type: str = "text", meta: dict[str, Any] | None = None) -> Message:
@@ -116,6 +184,8 @@ def send_message(db: Session, conv_id: str, sender: Member, client_message_id: s
         raise ApiError("SAFETY_HOLD", "This conversation is paused while our safety team reviews a report.")
     if conv.status != "active":
         raise ApiError("CONFLICT", "This conversation has ended.")
+    if meta and meta.get("prompt_key"):
+        meta = {**meta, **resolve_prompt_reply(db, conv, sender, str(meta["prompt_key"]))}
     text = text.strip()
     if not text or len(text) > 4000:
         raise ApiError("VALIDATION_ERROR", "Write a message between 1 and 4000 characters.", field_errors={"text": "length"})

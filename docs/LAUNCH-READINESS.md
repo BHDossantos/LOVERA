@@ -6,7 +6,7 @@ endpoint it came from, so you can check any line of it.
 **Verdict: not ready**, and the reasons are now entirely in section A. Three things stop the
 product working at all in production, a fourth stops anything being validated at all, and
 every one of them needs an account or a decision only you can supply. The mobile app reaches
-81 of the 92 member-facing API endpoints; the web app reaches 84.
+86 of the 92 member-facing API endpoints; the web app reaches 84.
 
 Section B was the mobile feature gap. Most of it is closed; what is left is listed with the
 reason it is still open, and section B4 separates what is deferred by a decision you have not
@@ -129,7 +129,7 @@ in both apps:
 | | member endpoints reached |
 |---|---|
 | Web | 84 / 92 |
-| Mobile | 81 / 92 |
+| Mobile | 86 / 92 |
 
 Closed since the first audit: date proposal, response, cancellation, overlaps and venues; the
 safety check-in; AI drafts and translation; the notifications inbox; conversation close;
@@ -139,9 +139,26 @@ extension; case evidence; the introduction correction; and `explanation-viewed`.
 
 ### B1. What is left
 
+Six endpoints, and not one of them is a missing feature:
+
+- **`POST /subscriptions/checkout`** — deliberately never called from the phone. Apple guideline 3.1.1 requires in-app purchase for a digital subscription, there is no StoreKit here, and a link out to the web checkout is the specific thing the guideline prohibits. So the Membership screen shows the paid plan honestly and offers no way to buy it; a member who already pays sees everything and can cancel.
+- **`POST /calendar/connect`** — returns `not_available_in_pilot` and nothing else. There is nothing to connect to, which is why neither app calls it.
+- **`GET /realtime/token`** — mobile polls every 8s instead of holding a WebSocket. Works; slower and heavier on battery than the web app.
 - **`POST /safety/cases/{report_id}/appeal`** — the spec's "appeal the action attached to this case" path. Both apps appeal through `/account/review/{action_id}/appeal`, which covers the same ground, so this is a redundancy rather than a gap.
 - **`GET /blueprint/sessions/{session_id}`** — the interview's own POST responses already carry the session state, so nothing needs it.
 - **`GET /media/{media_id}`** — media arrive as URLs in their parent payloads.
+
+**Three screens the web app had and the phone did not** are now built, found by diffing the two
+route tables rather than by reading this document:
+
+- **Membership and credits (Y06).** The phone reached none of `/plans`, `/subscriptions/current` or `/subscriptions/cancel`, and the You tab did not link anywhere. A member who subscribed on the web could not see their plan, what it includes, their protected credits or their renewal date from the app, and could not cancel there — which is the half that actually matters, because cancelling should never require leaving the app or contacting anybody.
+- **Verification centre (Y05).** The You tab showed `verification_status` as a badge with nothing beside it to press — the same dead end this app has already been fixed for twice, and worse here because verification expires on a timer and introductions pause when it does. There is now an expiry warning thirty days out, the limits beside each badge, re-verification, and a route to a person. Reading "expired" with nothing to tap is being shown a locked door.
+- **Voice and video readiness (M05).** Both endpoints are pilot stubs, and the screen says so rather than miming a feature. It is worth having anyway for the half that is real today: that declining a call is never treated as suspicious, by us or in anything the other member sees.
+
+**Two screens deliberately not ported.** Travel mode (Y04) and the Dating Passport (X01) are both
+hard-coded `false` in `entitlements_for`, so the web screens are previews of features that do not
+exist. Two disabled forms on the phone would add exactly the incomplete-functionality surface
+Apple 2.1 asks about, for no member value.
 
 Closed since: locale and time zone could not be changed after sign-up on mobile — `PATCH /me`
 was the last member endpoint the app did not reach. The web app has always had `/you/settings`;

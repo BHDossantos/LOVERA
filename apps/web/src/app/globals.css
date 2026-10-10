@@ -1,39 +1,82 @@
 @import "tailwindcss";
 
-/* Design tokens (specification Section 3). Warm ivory canvas, deep navy ink, teal action, coral caution, muted gold context. */
+/*
+ * Design tokens, shared value-for-value with apps/mobile/src/theme.ts. Change one, change both in
+ * the same commit — a member who signs up here and opens the phone should not feel they moved.
+ *
+ * The first palette was a teal action on navy ink over a yellow-cream canvas. Every value in it
+ * was defensible and the whole of it read as a bank: teal belongs to insurance portals and dental
+ * practices, and navy-on-cream is a quarterly report. For an app whose proposition is that a
+ * person is going to meet another person, that is the wrong promise before a word is read.
+ *
+ * So: a warm rose action, a warm near-black ink with a plum cast rather than a blue one, and pink
+ * in the canvas instead of yellow. Deep saturated rose rather than bubblegum, because this is a
+ * matchmaker and not a party.
+ *
+ * Two of these are accessibility fixes rather than taste. `--context` was #b98a2e, which at the
+ * caption size it is used for gave 2.9:1 on the canvas — a WCAG AA failure on the eyebrow above
+ * the title of every screen. `--ink-tertiary` was #7a8598 for 4.3:1, also short. Both are darker
+ * than they look like they need to be, and that is why.
+ */
 :root {
-  --canvas: #faf7f1;
+  /* Warm bone. Almost no pink in it: the rose is an accent, and an accent is not a wash. */
+  --canvas: #fbf8f4;
   --surface: #ffffff;
-  --surface-muted: #f3efe6;
-  --ink: #16243a;
-  --ink-secondary: #4b586d;
-  --ink-tertiary: #7a8598;
-  --action: #0f766e;
-  --action-strong: #0b5f59;
-  --action-soft: #e0f2f0;
-  --caution: #d9553f;
-  --caution-soft: #fbe9e5;
-  --context: #b98a2e;
-  --context-soft: #f8efd9;
-  --success: #2f7d4f;
-  --success-soft: #e3f2e8;
-  --border: #e3ddd1;
+  --surface-muted: #f4efe8;
+  --surface-sunk: #eae2d8;
+  /* Deep plum-black, for a section that inverts: the opening hero, the safety control. */
+  --ink-surface: #221a1d;
+  --ink: #1b1517;
+  --ink-secondary: #5e5459;
+  --ink-tertiary: #7e7276;
+  --ink-inverse: #fbf8f4;
+  --action: #a62b4c;
+  --action-strong: #82203a;
+  --action-soft: #f8e9ec;
+  /* Rose light enough to sit on --ink-surface and still read as the brand. */
+  --action-on-dark: #f0a8b8;
+  --caution: #a8391e;
+  --caution-soft: #f9e8e2;
+  /* Bronze, not mustard. The gold this replaced read as a warning triangle on a filing cabinet. */
+  --context: #8a5a33;
+  --context-soft: #f5ebe1;
+  --success: #2e6f4a;
+  --success-soft: #e4efe8;
+  --border: #ebe3d9;
+  --border-strong: #dcd1c3;
   --focus: #1d4ed8;
-  --disabled: #b9bfc9;
+  --disabled: #bfb5ae;
+  --wash-1: #f7efe7;
+  --wash-2: #f2e2dc;
+  --wash-3: #ebcfc9;
+  /* Tighter than the first pass: 28px on a card is a toy, 22 is a considered object. */
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
-  --radius-xl: 24px;
-  --shadow-raised: 0 1px 2px rgba(22, 36, 58, 0.06), 0 4px 12px rgba(22, 36, 58, 0.06);
+  --radius-xl: 22px;
+  --radius-pill: 999px;
+  /*
+   * Wide and faint rather than tight and dark. A small, visible drop shadow is the most dated
+   * thing a 2020s interface can have; what reads as expensive is a large blur at an opacity you
+   * would not notice if it were missing — you only notice that the card is sitting on something.
+   */
+  --shadow-raised: 0 1px 1px rgba(27, 21, 23, 0.03), 0 6px 20px rgba(27, 21, 23, 0.055);
+  --shadow-lifted: 0 2px 6px rgba(27, 21, 23, 0.05), 0 16px 40px rgba(27, 21, 23, 0.1);
+  /* The warm band behind a light hero. The phone stacks views for the same effect. */
+  --wash: linear-gradient(168deg, var(--wash-3) 0%, var(--wash-2) 40%, var(--wash-1) 74%, var(--canvas) 100%);
 }
 
 @theme inline {
   --color-canvas: var(--canvas);
   --color-surface: var(--surface);
   --color-surface-muted: var(--surface-muted);
+  --color-surface-sunk: var(--surface-sunk);
+  --color-ink-surface: var(--ink-surface);
   --color-ink: var(--ink);
   --color-ink-secondary: var(--ink-secondary);
   --color-ink-tertiary: var(--ink-tertiary);
+  --color-ink-inverse: var(--ink-inverse);
+  --color-action-on-dark: var(--action-on-dark);
   --color-action: var(--action);
   --color-action-strong: var(--action-strong);
   --color-action-soft: var(--action-soft);
@@ -44,13 +87,21 @@
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-focus: var(--focus);
   --color-disabled: var(--disabled);
   --radius-sm: var(--radius-sm);
   --radius-md: var(--radius-md);
   --radius-lg: var(--radius-lg);
   --radius-xl: var(--radius-xl);
+  --radius-pill: var(--radius-pill);
   --font-sans: "Source Sans 3", "Segoe UI", "Helvetica Neue", Arial, system-ui, sans-serif;
+  /*
+   * The display face, by platform name rather than a web font. A downloaded font would be better
+   * typography and a worse trade here: it blocks or flashes the first paint of the one screen that
+   * has to make an impression, and both platforms already ship a serif that is good large.
+   */
+  --font-serif: ui-serif, "New York", "Iowan Old Style", Georgia, "Palatino Linotype", Palatino, serif;
 }
 
 html {
@@ -110,4 +161,86 @@ input[type="radio"] {
 
 .prose-tight p + p {
   margin-top: 0.5rem;
+}
+
+/* The display face belongs to page and section titles, not to body copy or UI labels. */
+.display {
+  font-family: var(--font-serif);
+  letter-spacing: -0.025em;
+  line-height: 1.08;
+}
+
+.wash {
+  background: var(--wash);
+}
+
+/*
+ * The soft discs behind a hero, so the wash has somewhere for the eye to rest. Purely decorative,
+ * which is why they are pseudo-elements rather than markup.
+ */
+.hero-wash {
+  position: relative;
+  overflow: hidden;
+  background: var(--wash);
+}
+
+.hero-wash::before,
+.hero-wash::after {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+}
+
+.hero-wash::before {
+  top: -6rem;
+  right: -4rem;
+  width: 20rem;
+  height: 20rem;
+}
+
+.hero-wash::after {
+  bottom: -8rem;
+  left: -5rem;
+  width: 16rem;
+  height: 16rem;
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/*
+ * The inverted hero. A dark opening is the one move that reads as considered rather than merely
+ * tidy, and it makes the rose look like a decision instead of a default. The warmth comes from
+ * the two glows rather than from the ground, so the ground can stay nearly black.
+ */
+.hero-dark {
+  position: relative;
+  overflow: hidden;
+  background: var(--ink-surface);
+  color: var(--ink-inverse);
+}
+
+.hero-dark::before,
+.hero-dark::after {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  pointer-events: none;
+  filter: blur(40px);
+}
+
+.hero-dark::before {
+  top: -9rem;
+  right: -6rem;
+  width: 26rem;
+  height: 26rem;
+  background: radial-gradient(circle, rgba(166, 43, 76, 0.55) 0%, rgba(166, 43, 76, 0) 70%);
+}
+
+.hero-dark::after {
+  bottom: -11rem;
+  left: -7rem;
+  width: 22rem;
+  height: 22rem;
+  background: radial-gradient(circle, rgba(138, 90, 51, 0.45) 0%, rgba(138, 90, 51, 0) 70%);
 }

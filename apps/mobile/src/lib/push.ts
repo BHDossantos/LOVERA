@@ -38,17 +38,17 @@ export async function ensureAndroidChannels() {
   await Notifications.setNotificationChannelAsync("introductions", {
     name: "Introductions",
     importance: Notifications.AndroidImportance.DEFAULT,
-    lightColor: "#0f766e",
+    lightColor: "#b42d55",
   });
   await Notifications.setNotificationChannelAsync("messages", {
     name: "Messages",
     importance: Notifications.AndroidImportance.HIGH,
-    lightColor: "#0f766e",
+    lightColor: "#b42d55",
   });
   await Notifications.setNotificationChannelAsync("safety", {
     name: "Safety",
     importance: Notifications.AndroidImportance.MAX,
-    lightColor: "#d9553f",
+    lightColor: "#b3301c",
   });
 }
 

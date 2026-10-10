@@ -7,7 +7,7 @@ import { useRequireMember } from "@/lib/auth";
 import { hoursLeft, relative } from "@/lib/format";
 import type { Introduction } from "@/lib/types";
 import { AppShell } from "@/components/shell/AppShell";
-import { Card, ErrorState, PageTitle, Skeleton, VerificationBadge, cx } from "@/components/ui";
+import { Avatar, Card, ErrorState, PageTitle, Skeleton, VerificationBadge, cx } from "@/components/ui";
 import type { IntroductionList } from "@/components/introductions/types";
 import { INTRO_STATUS_LABEL } from "@/components/introductions/types";
 import { WaitingCard } from "@/components/introductions/WaitingCard";
@@ -77,7 +77,12 @@ function IntroRow({ intro }: { intro: Introduction }) {
   return (
     <Card as="li" className={cx("p-4", open && "border-action")}>
       <Link href={href} className="flex min-h-11 items-center justify-between gap-3">
-        <span className="min-w-0">
+        {/* The detail screen deliberately puts the reasons above the photo, because that is
+            where the decision is made. This is not that screen: here the photo is identity —
+            which of these am I looking at — and a list of names with no faces in it is what
+            made this read as a directory rather than as somewhere people are. */}
+        <Avatar name={name} url={intro.profile?.media?.find((m) => m.type === "photo" && m.url)?.url ?? null} size={52} />
+        <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-center gap-2">
             <span className="font-semibold text-ink">{name}</span>
             {intro.profile && <VerificationBadge verified={intro.profile.verified} small />}
