@@ -13,7 +13,7 @@ export function cx(...parts: (string | false | null | undefined)[]) {
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & { loading?: boolean; fullWidth?: boolean; variant?: "primary" | "secondary" | "ghost" | "danger"; size?: "md" | "sm" };
 
 const VARIANT: Record<NonNullable<ButtonProps["variant"]>, string> = {
-  primary: "bg-action text-ink-inverse hover:bg-action-strong border border-transparent shadow-[0_4px_12px_rgba(143,34,68,0.28)]",
+  primary: "bg-action text-ink-inverse hover:bg-action-strong border border-transparent",
   secondary: "bg-surface text-ink border border-border-strong hover:bg-surface-muted",
   ghost: "bg-transparent text-action hover:bg-action-soft border border-transparent",
   danger: "bg-surface text-caution border border-caution hover:bg-caution-soft",
@@ -25,7 +25,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       ref={ref}
       aria-busy={loading || undefined}
       disabled={disabled || loading}
-      className={cx("inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[var(--radius-pill)] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60", size === "md" ? "px-5 py-3 text-base" : "px-3 py-2 text-sm min-h-11", VARIANT[variant], fullWidth && "w-full", className)}
+      className={cx("inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[var(--radius-pill)] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60", size === "md" ? "px-6 py-3.5 text-base tracking-[-0.005em]" : "px-3.5 py-2 text-sm min-h-11", VARIANT[variant], fullWidth && "w-full", className)}
       {...rest}
     >
       {loading && <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden />}
@@ -52,14 +52,15 @@ export function LinkButton({ href, children, variant = "primary", fullWidth, cla
  * display face, which is most of the difference between "a product" and "a form with a heading
  * above it", and costs one font name.
  */
-export function Hero({ eyebrow, title, lede, children }: { eyebrow?: string; title: string; lede?: ReactNode; children?: ReactNode }) {
+export function Hero({ eyebrow, title, lede, children, tone = "light" }: { eyebrow?: string; title: string; lede?: ReactNode; children?: ReactNode; tone?: "light" | "dark" }) {
+  const dark = tone === "dark";
   return (
-    <div className="hero-wash -mx-4 -mt-4 mb-8 rounded-b-[var(--radius-xl)] px-6 py-12 sm:-mx-6 sm:-mt-6 sm:px-10 sm:py-16">
+    <div className={cx("-mx-4 -mt-4 mb-10 rounded-b-[var(--radius-xl)] px-6 py-14 sm:-mx-6 sm:-mt-6 sm:px-10 sm:py-20", dark ? "hero-dark" : "hero-wash")}>
       <div className="relative">
-        {eyebrow && <p className="mb-3 text-xs font-bold uppercase tracking-[0.09em] text-action-strong">{eyebrow}</p>}
-        <h1 className="display max-w-2xl text-4xl font-bold leading-[1.08] text-ink sm:text-5xl">{title}</h1>
-        {lede && <p className="mt-4 max-w-xl text-lg text-ink-secondary">{lede}</p>}
-        {children && <div className="mt-6">{children}</div>}
+        {eyebrow && <p className={cx("mb-4 text-[0.6875rem] font-bold uppercase tracking-[0.14em]", dark ? "text-action-on-dark" : "text-action")}>{eyebrow}</p>}
+        <h1 className={cx("display max-w-2xl text-[2.75rem] font-bold sm:text-6xl", dark ? "text-ink-inverse" : "text-ink")}>{title}</h1>
+        {lede && <p className={cx("mt-5 max-w-xl text-lg", dark ? "text-ink-inverse/70" : "text-ink-secondary")}>{lede}</p>}
+        {children && <div className="mt-8">{children}</div>}
       </div>
     </div>
   );
@@ -79,9 +80,9 @@ export function PageTitle({ eyebrow, title, lede }: { eyebrow?: string; title: s
       {/* Rose, not the gold it was: gold on the canvas gave 2.9:1 at this size, a WCAG AA failure
           on the line above the title of every screen, and the brand colour is the thing a member
           should see first anyway. */}
-      {eyebrow && <p className="mb-2 text-xs font-bold uppercase tracking-[0.09em] text-action">{eyebrow}</p>}
-      <h1 className="display text-3xl font-bold leading-tight text-ink sm:text-4xl">{title}</h1>
-      {lede && <p className="mt-2 text-base text-ink-secondary">{lede}</p>}
+      {eyebrow && <p className="mb-2.5 text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-action">{eyebrow}</p>}
+      <h1 className="display text-[2rem] font-bold text-ink sm:text-[2.5rem]">{title}</h1>
+      {lede && <p className="mt-3 max-w-prose text-base leading-relaxed text-ink-secondary">{lede}</p>}
     </header>
   );
 }

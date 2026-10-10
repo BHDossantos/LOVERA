@@ -58,6 +58,7 @@ export default function Welcome() {
           is not. */}
       <main className="mx-auto max-w-xl px-4 py-4">
         <Hero
+          tone="dark"
           eyebrow="Invite-only pilot · Rome"
           title="A matchmaker, not a feed."
           lede="One to three verified, reciprocal introductions a week — each with three plain reasons it was made."
@@ -106,7 +107,7 @@ export default function Welcome() {
             </form>
           )}
         </Card>
-        <p className="mt-6 text-xs text-ink-tertiary">We never claim to predict chemistry. We screen for feasibility, explain the evidence, and learn from real dates. Safety tools are free for everyone.</p>
+        <p className="mt-8 text-xs leading-relaxed text-ink-tertiary">We never claim to predict chemistry. We screen for feasibility, explain the evidence, and learn from real dates. Safety tools are free for everyone.</p>
       </main>
     </div>
   );

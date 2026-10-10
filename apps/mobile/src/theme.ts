@@ -23,42 +23,53 @@ import { Platform } from "react-native";
  * are now darker than they look like they need to be, and that is why.
  */
 export const color = {
-  canvas: "#fdf7f4",
+  /** Warm bone. Almost no pink in it: the rose is an accent, and an accent is not a wash. */
+  canvas: "#fbf8f4",
   surface: "#ffffff",
-  surfaceMuted: "#f9edea",
+  surfaceMuted: "#f4efe8",
   /** Behind a photo that has not loaded, and inside wells. Reads as a shape rather than a hole. */
-  surfaceSunk: "#f3e2de",
-  ink: "#2a1a21",
-  inkSecondary: "#6a5560",
-  inkTertiary: "#7d6872",
-  /** On the action colour and over the scrim on a photo. Not pure white: it belongs to this palette. */
-  inkInverse: "#fffaf8",
-  action: "#b42d55",
-  actionStrong: "#8f2244",
-  actionSoft: "#fceaef",
-  caution: "#b3301c",
-  cautionSoft: "#fceae4",
-  context: "#8a5a0f",
-  contextSoft: "#fbf0dc",
-  success: "#2f7d4f",
-  successSoft: "#e3f2e8",
-  border: "#f0e2de",
+  surfaceSunk: "#eae2d8",
+  /** Deep plum-black, for a section that inverts: the opening hero, the safety control. */
+  inkSurface: "#221a1d",
+  ink: "#1b1517",
+  inkSecondary: "#5e5459",
+  inkTertiary: "#7e7276",
+  /** On the action colour, on `inkSurface`, and over the scrim on a photo. Never pure white. */
+  inkInverse: "#fbf8f4",
+  action: "#a62b4c",
+  actionStrong: "#82203a",
+  actionSoft: "#f8e9ec",
+  /** Rose light enough to sit on `inkSurface` and still read as the brand. */
+  actionOnDark: "#f0a8b8",
+  caution: "#a8391e",
+  cautionSoft: "#f9e8e2",
+  /** Bronze, not mustard. The gold this replaced read as a warning triangle on a filing cabinet. */
+  context: "#8a5a33",
+  contextSoft: "#f5ebe1",
+  success: "#2e6f4a",
+  successSoft: "#e4efe8",
+  border: "#ebe3d9",
   /** Where a border has to carry a boundary on its own, with no shadow helping it. */
-  borderStrong: "#e4cdc7",
+  borderStrong: "#dcd1c3",
   focus: "#1d4ed8",
-  disabled: "#c6b7bb",
+  disabled: "#bfb5ae",
   /**
-   * The three stops of the warm wash. There is no gradient library in this app and adding a native
-   * module for a decoration would mean a new development build, so `Wash` stacks these instead.
+   * The three stops of the warm wash — dusty, not bubblegum. There is no gradient library in this
+   * app and adding a native module for a decoration would mean a new development build, so `Wash`
+   * stacks these instead.
    */
-  wash1: "#fdeaee",
-  wash2: "#fbd8dc",
-  wash3: "#f7c2c6",
+  wash1: "#f7efe7",
+  wash2: "#f2e2dc",
+  wash3: "#ebcfc9",
   /** Over a photo, so a name laid on it keeps its contrast whatever the photo is. */
-  scrim: "rgba(42, 26, 33, 0.55)",
+  scrim: "rgba(27, 21, 23, 0.55)",
 } as const;
 
-export const radius = { sm: 10, md: 14, lg: 20, xl: 28, pill: 999 } as const;
+/**
+ * Tighter than the first pass. 28px on a card is a toy; 22 is a considered object. The pill stays
+ * for buttons, where full-round is the one shape that reads as "press me" at any width.
+ */
+export const radius = { sm: 8, md: 12, lg: 16, xl: 22, pill: 999 } as const;
 export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 } as const;
 
 /**
@@ -73,14 +84,15 @@ const serif = Platform.select({ ios: "Georgia", android: "serif", default: "Geor
 export const font = { serif } as const;
 
 export const type = {
-  /** The one-per-app size: the sign-in screen and nothing else. */
-  hero: { fontSize: 40, lineHeight: 44, fontWeight: "700", fontFamily: serif, letterSpacing: -0.8 },
-  display: { fontSize: 32, lineHeight: 38, fontWeight: "700", fontFamily: serif, letterSpacing: -0.5 },
-  title: { fontSize: 24, lineHeight: 30, fontWeight: "700", fontFamily: serif, letterSpacing: -0.3 },
-  heading: { fontSize: 17, lineHeight: 24, fontWeight: "700" },
-  body: { fontSize: 16, lineHeight: 24, fontWeight: "400" },
-  small: { fontSize: 14, lineHeight: 20, fontWeight: "400" },
-  caption: { fontSize: 12, lineHeight: 16, fontWeight: "700", letterSpacing: 0.9 },
+  /** The one-per-app size: the opening hero and nothing else. */
+  hero: { fontSize: 44, lineHeight: 47, fontWeight: "700", fontFamily: serif, letterSpacing: -1.2 },
+  display: { fontSize: 34, lineHeight: 38, fontWeight: "700", fontFamily: serif, letterSpacing: -0.8 },
+  title: { fontSize: 24, lineHeight: 28, fontWeight: "700", fontFamily: serif, letterSpacing: -0.4 },
+  heading: { fontSize: 17, lineHeight: 24, fontWeight: "700", letterSpacing: -0.1 },
+  body: { fontSize: 16, lineHeight: 25, fontWeight: "400" },
+  small: { fontSize: 14, lineHeight: 21, fontWeight: "400" },
+  /** Small caps in everything but name. The wide tracking is what makes it read as a label. */
+  caption: { fontSize: 11, lineHeight: 15, fontWeight: "700", letterSpacing: 1.4 },
 } as const;
 
 /**
@@ -88,18 +100,24 @@ export const type = {
  * which is why it read as a form rather than as something to touch.
  */
 export const shadow = {
+  /**
+   * Wide and faint rather than tight and dark. A small, visible drop shadow is the single most
+   * dated thing a 2020s interface can have; what reads as expensive is a large blur at an opacity
+   * you would not notice if it were missing — you only notice that the card is sitting on
+   * something.
+   */
   raised: {
-    shadowColor: "#2a1a21",
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
+    shadowColor: "#1b1517",
+    shadowOpacity: 0.055,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 6 },
     elevation: 2,
   },
   lifted: {
-    shadowColor: "#2a1a21",
-    shadowOpacity: 0.12,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 10 },
+    shadowColor: "#1b1517",
+    shadowOpacity: 0.1,
+    shadowRadius: 40,
+    shadowOffset: { width: 0, height: 16 },
     elevation: 6,
   },
 } as const;

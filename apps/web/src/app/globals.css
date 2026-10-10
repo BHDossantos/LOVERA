@@ -19,39 +19,51 @@
  * than they look like they need to be, and that is why.
  */
 :root {
-  --canvas: #fdf7f4;
+  /* Warm bone. Almost no pink in it: the rose is an accent, and an accent is not a wash. */
+  --canvas: #fbf8f4;
   --surface: #ffffff;
-  --surface-muted: #f9edea;
-  --surface-sunk: #f3e2de;
-  --ink: #2a1a21;
-  --ink-secondary: #6a5560;
-  --ink-tertiary: #7d6872;
-  --ink-inverse: #fffaf8;
-  --action: #b42d55;
-  --action-strong: #8f2244;
-  --action-soft: #fceaef;
-  --caution: #b3301c;
-  --caution-soft: #fceae4;
-  --context: #8a5a0f;
-  --context-soft: #fbf0dc;
-  --success: #2f7d4f;
-  --success-soft: #e3f2e8;
-  --border: #f0e2de;
-  --border-strong: #e4cdc7;
+  --surface-muted: #f4efe8;
+  --surface-sunk: #eae2d8;
+  /* Deep plum-black, for a section that inverts: the opening hero, the safety control. */
+  --ink-surface: #221a1d;
+  --ink: #1b1517;
+  --ink-secondary: #5e5459;
+  --ink-tertiary: #7e7276;
+  --ink-inverse: #fbf8f4;
+  --action: #a62b4c;
+  --action-strong: #82203a;
+  --action-soft: #f8e9ec;
+  /* Rose light enough to sit on --ink-surface and still read as the brand. */
+  --action-on-dark: #f0a8b8;
+  --caution: #a8391e;
+  --caution-soft: #f9e8e2;
+  /* Bronze, not mustard. The gold this replaced read as a warning triangle on a filing cabinet. */
+  --context: #8a5a33;
+  --context-soft: #f5ebe1;
+  --success: #2e6f4a;
+  --success-soft: #e4efe8;
+  --border: #ebe3d9;
+  --border-strong: #dcd1c3;
   --focus: #1d4ed8;
-  --disabled: #c6b7bb;
-  --wash-1: #fdeaee;
-  --wash-2: #fbd8dc;
-  --wash-3: #f7c2c6;
-  --radius-sm: 10px;
-  --radius-md: 14px;
-  --radius-lg: 20px;
-  --radius-xl: 28px;
+  --disabled: #bfb5ae;
+  --wash-1: #f7efe7;
+  --wash-2: #f2e2dc;
+  --wash-3: #ebcfc9;
+  /* Tighter than the first pass: 28px on a card is a toy, 22 is a considered object. */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
   --radius-pill: 999px;
-  --shadow-raised: 0 1px 2px rgba(42, 26, 33, 0.04), 0 4px 12px rgba(42, 26, 33, 0.06);
-  --shadow-lifted: 0 2px 4px rgba(42, 26, 33, 0.05), 0 10px 24px rgba(42, 26, 33, 0.12);
-  /* The warm band behind a hero. Both apps have one; this is the real gradient, the phone stacks views. */
-  --wash: linear-gradient(170deg, var(--wash-3) 0%, var(--wash-2) 38%, var(--wash-1) 72%, var(--canvas) 100%);
+  /*
+   * Wide and faint rather than tight and dark. A small, visible drop shadow is the most dated
+   * thing a 2020s interface can have; what reads as expensive is a large blur at an opacity you
+   * would not notice if it were missing — you only notice that the card is sitting on something.
+   */
+  --shadow-raised: 0 1px 1px rgba(27, 21, 23, 0.03), 0 6px 20px rgba(27, 21, 23, 0.055);
+  --shadow-lifted: 0 2px 6px rgba(27, 21, 23, 0.05), 0 16px 40px rgba(27, 21, 23, 0.1);
+  /* The warm band behind a light hero. The phone stacks views for the same effect. */
+  --wash: linear-gradient(168deg, var(--wash-3) 0%, var(--wash-2) 40%, var(--wash-1) 74%, var(--canvas) 100%);
 }
 
 @theme inline {
@@ -59,10 +71,12 @@
   --color-surface: var(--surface);
   --color-surface-muted: var(--surface-muted);
   --color-surface-sunk: var(--surface-sunk);
+  --color-ink-surface: var(--ink-surface);
   --color-ink: var(--ink);
   --color-ink-secondary: var(--ink-secondary);
   --color-ink-tertiary: var(--ink-tertiary);
   --color-ink-inverse: var(--ink-inverse);
+  --color-action-on-dark: var(--action-on-dark);
   --color-action: var(--action);
   --color-action-strong: var(--action-strong);
   --color-action-soft: var(--action-soft);
@@ -87,7 +101,7 @@
    * typography and a worse trade here: it blocks or flashes the first paint of the one screen that
    * has to make an impression, and both platforms already ship a serif that is good large.
    */
-  --font-serif: Georgia, "Iowan Old Style", "Palatino Linotype", Palatino, "Times New Roman", serif;
+  --font-serif: ui-serif, "New York", "Iowan Old Style", Georgia, "Palatino Linotype", Palatino, serif;
 }
 
 html {
@@ -152,7 +166,8 @@ input[type="radio"] {
 /* The display face belongs to page and section titles, not to body copy or UI labels. */
 .display {
   font-family: var(--font-serif);
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
+  line-height: 1.08;
 }
 
 .wash {
@@ -191,4 +206,41 @@ input[type="radio"] {
   width: 16rem;
   height: 16rem;
   background: rgba(255, 255, 255, 0.25);
+}
+
+/*
+ * The inverted hero. A dark opening is the one move that reads as considered rather than merely
+ * tidy, and it makes the rose look like a decision instead of a default. The warmth comes from
+ * the two glows rather than from the ground, so the ground can stay nearly black.
+ */
+.hero-dark {
+  position: relative;
+  overflow: hidden;
+  background: var(--ink-surface);
+  color: var(--ink-inverse);
+}
+
+.hero-dark::before,
+.hero-dark::after {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  pointer-events: none;
+  filter: blur(40px);
+}
+
+.hero-dark::before {
+  top: -9rem;
+  right: -6rem;
+  width: 26rem;
+  height: 26rem;
+  background: radial-gradient(circle, rgba(166, 43, 76, 0.55) 0%, rgba(166, 43, 76, 0) 70%);
+}
+
+.hero-dark::after {
+  bottom: -11rem;
+  left: -7rem;
+  width: 22rem;
+  height: 22rem;
+  background: radial-gradient(circle, rgba(138, 90, 51, 0.45) 0%, rgba(138, 90, 51, 0) 70%);
 }
