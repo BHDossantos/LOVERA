@@ -1,19 +1,23 @@
 {
   "cli": {
-    "version": ">= 16.0.0"
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote"
   },
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "environment": "development"
     },
     "preview": {
       "distribution": "internal",
-      "channel": "preview"
+      "channel": "preview",
+      "environment": "preview"
     },
     "production": {
       "autoIncrement": true,
-      "channel": "production"
+      "channel": "production",
+      "environment": "production"
     }
   },
   "submit": {
@@ -22,7 +26,9 @@
         "track": "internal",
         "releaseStatus": "completed"
       },
-      "ios": {}
+      "ios": {
+        "appleTeamId": "XLRMB5G792"
+      }
     }
   }
 }

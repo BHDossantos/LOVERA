@@ -52,21 +52,43 @@ class Settings(BaseSettings):
     #               told the store is not configured so it shows no purchase UI at all.
     #   sandbox   — the receipt is taken at face value. Refused outright in production, because a
     #               client-asserted receipt is a self-service upgrade to the most expensive tier.
-    #   app_store / play_store — verify with the store's own server. Not implemented yet, and the
-    #               endpoint says so rather than falling through to trusting the client.
+    #   app_store / play_store — verify with the store's own server, in modules/billing/stores.py.
+    #               Set the matching credentials below; without them `/plans` reports the store as
+    #               off and the phone draws no purchase UI, rather than offering a button that
+    #               fails.
     #
     # There is deliberately no value that trusts the client in production. A missing validator has
     # to fail closed: the worst outcome of refusing is that nobody can buy, and the worst outcome
     # of trusting is that everybody gets Concierge for nothing.
     store_validation: str = "disabled"  # disabled | sandbox | app_store | play_store
+
+    # App Store Server API. The issuer id and key id come from App Store Connect → Users and
+    # Access → Integrations → App Store Connect API; the private key is the contents of the .p8
+    # that page downloads once and never shows again. Three shapes of the key are accepted (PEM,
+    # PEM with literal \n, or base64 of the file) because a multi-line secret in an environment
+    # variable is where this otherwise quietly breaks.
+    app_store_issuer_id: str | None = None
+    app_store_key_id: str | None = None
+    app_store_private_key: str | None = None
+    app_store_bundle_id: str = "com.joinlovera.app"
+    # auto asks production and falls back to sandbox on "no such transaction", which is the only
+    # way to tell which environment an id belongs to. Pin it to production for a deployment that
+    # must never honour a sandbox purchase.
+    app_store_environment: str = "auto"  # auto | production | sandbox
+
+    # Google Play Developer API. The JSON key of a service account that has been granted "View
+    # app information" and "Release apps to testing tracks" on this app in the Play Console —
+    # membership of the developer account alone is not enough. JSON or base64 of it.
+    play_service_account_json: str | None = None
+    play_package_name: str = "com.joinlovera.app"
     payments_webhook_secret: str = "sandbox-payments-secret"
     stripe_api_key: str | None = None
 
     # Outbound email. Any provider that speaks SMTP works; none of this is vendor-specific.
     # transport: auto picks smtp when a host is set and console when it is not. See core/mail.py.
     mail_transport: str = "auto"  # auto | smtp | console
-    mail_product_name: str = "AI Matchmaker"
-    mail_from: str = "AI Matchmaker <no-reply@localhost>"
+    mail_product_name: str = "Lovera"
+    mail_from: str = "Lovera <no-reply@localhost>"
     mail_reply_to: str | None = None
     smtp_host: str | None = None
     smtp_port: int = 587

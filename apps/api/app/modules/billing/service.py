@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import secrets
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.catalog.plans import (
@@ -23,14 +25,18 @@ from app.catalog.plans import (
     price_cents,
 )
 from app.core.analytics import track
+from app.modules.billing import stores
 from app.core.audit import audit
 from app.core.config import get_settings
+from app.core.db import session_factory
 from app.core.errors import ApiError
 from app.core.security import verify_webhook
 from app.core.timeutil import iso, utcnow
 from app.models.account import Member
 from app.models.billing import BillingTerm, CheckoutSession, CreditLedger, StorePurchase, Subscription, WebhookReceipt
 from app.models.introductions import Introduction
+
+log = logging.getLogger(__name__)
 
 
 def current_subscription(db: Session, member_id: str) -> Subscription | None:
@@ -128,15 +134,19 @@ def store_status() -> dict[str, Any]:
     """
     settings = get_settings()
     mode = settings.store_validation
-    enabled = mode in ("sandbox", "app_store", "play_store") and not (mode == "sandbox" and settings.is_production)
     reason = None
     if mode == "disabled":
         reason = "In-app purchase is not configured for this deployment yet."
     elif mode == "sandbox" and settings.is_production:
         reason = "Sandbox receipt validation is never accepted in production."
     elif mode in ("app_store", "play_store"):
-        reason = None
-    return {"enabled": enabled, "validation": mode, "reason": reason, "products": dict(STORE_PRODUCTS)}
+        # Choosing the mode is not the same as being able to use it. A missing key would otherwise
+        # surface as a member tapping Subscribe, being charged by the store, and then being told we
+        # cannot verify it — so the absence is reported here, before anything is drawn.
+        reason = stores.missing_configuration(mode)
+    elif mode != "sandbox":
+        reason = f"Unknown MM_STORE_VALIDATION value {mode!r}."
+    return {"enabled": reason is None, "validation": mode, "reason": reason, "products": dict(STORE_PRODUCTS)}
 
 
 def plans_payload() -> dict[str, Any]:
@@ -210,8 +220,8 @@ def record_store_purchase(db: Session, member: Member, store: str, product_id: s
     can call with any JSON they like, so the only thing separating it from a free upgrade to the
     most expensive tier is that an unverified receipt is never honoured. There is no configuration
     that makes this trust the client in production: `store_validation=sandbox` exists for the
-    simulator and is refused outright once `is_production` is set, and the real validators are not
-    written yet and say so rather than falling through.
+    simulator and is refused outright once `is_production` is set, and `app_store`/`play_store`
+    ask the store itself (see `stores.py`).
     """
     settings = get_settings()
     if store not in ("app_store", "play_store"):
@@ -227,42 +237,100 @@ def record_store_purchase(db: Session, member: Member, store: str, product_id: s
 
     mapped = STORE_PRODUCTS.get(product_id)
     if mapped is None:
-        db.add(StorePurchase(member_id=member.id, store=store, product_id=product_id, transaction_id=transaction_id, plan="", cadence="", status="refused_unknown_product", validated_by=settings.store_validation))
-        db.flush()
+        _refuse(db, member, store, product_id, transaction_id, "", "", "refused_unknown_product")
         raise ApiError("VALIDATION_ERROR", "That product is not one of ours.", field_errors={"product_id": "unknown"})
     plan_id, cadence = mapped
 
     status = store_status()
     if not status["enabled"]:
-        db.add(StorePurchase(member_id=member.id, store=store, product_id=product_id, transaction_id=transaction_id, plan=plan_id, cadence=cadence, status="refused_unverified", validated_by=settings.store_validation))
-        db.flush()
-        audit(db, actor_type="member", actor_id=member.id, action="billing.store_purchase_refused", resource_type="member", resource_id=member.id, metadata={"product_id": product_id, "validation": settings.store_validation})
+        _refuse(db, member, store, product_id, transaction_id, plan_id, cadence, "refused_unverified")
         raise ApiError(
             "DEPENDENCY_UNAVAILABLE",
             status["reason"] or "Purchases cannot be verified right now. You have not been charged by us, and anything the store charged will be refunded by the store.",
         )
 
+    period_end: datetime | None = None
     if settings.store_validation in ("app_store", "play_store"):
-        # Deliberately not implemented rather than stubbed as success. A stub here is the one bug
-        # whose symptom is "everybody has Concierge".
-        db.add(StorePurchase(member_id=member.id, store=store, product_id=product_id, transaction_id=transaction_id, plan=plan_id, cadence=cadence, status="refused_unverified", validated_by=settings.store_validation))
-        db.flush()
-        raise ApiError("DEPENDENCY_UNAVAILABLE", "Receipt verification with the store is not available yet.")
+        if store != settings.store_validation:
+            # An iOS receipt arriving at a deployment that only verifies Play, or the reverse. We
+            # cannot check it, so we do not honour it.
+            _refuse(db, member, store, product_id, transaction_id, plan_id, cadence, "refused_wrong_store")
+            raise ApiError("VALIDATION_ERROR", "That store is not the one this deployment sells through.", field_errors={"store": "unsupported"})
+        try:
+            receipt = stores.verify(store, product_id, transaction_id)
+        except stores.ReceiptRefused as exc:
+            # The store answered and said no. The member is told plainly, and the reason is kept:
+            # "a receipt arrived and we would not honour it" is exactly what you want in the log
+            # when somebody says they paid and have nothing.
+            _refuse(db, member, store, product_id, transaction_id, plan_id, cadence, f"refused_{exc.reason}")
+            raise ApiError("VALIDATION_ERROR", exc.message, field_errors={"transaction_id": exc.reason}) from exc
+        except stores.ReceiptUnavailable as exc:
+            # We never got an answer, which is our problem and not theirs — and the store may well
+            # have charged them, so the message must not imply the purchase failed.
+            log.error("store: could not verify a %s purchase: %s", store, exc.detail)
+            _refuse(db, member, store, product_id, transaction_id, plan_id, cadence, "refused_unavailable")
+            raise ApiError(
+                "DEPENDENCY_UNAVAILABLE",
+                "We could not check that purchase with the store just now. Nothing has been lost: "
+                "reopen Membership in a few minutes and tap Restore purchases.",
+            ) from exc
 
-    sub = activate_subscription(db, member.id, plan_id, store, f"{store}:{transaction_id}", cadence=cadence)
+        if receipt.environment == "sandbox" and settings.is_production:
+            # A sandbox receipt is free to produce. Honouring one in production is a free Concierge.
+            _refuse(db, member, store, product_id, transaction_id, plan_id, cadence, "refused_sandbox_receipt")
+            raise ApiError("VALIDATION_ERROR", "That purchase was made in the store's test environment.", field_errors={"transaction_id": "sandbox"})
+        # The store's own expiry, not our arithmetic. A member who bought a year gets a year even
+        # if they bought it through an offer whose first period is not the catalog's.
+        period_end = receipt.expires_at
+
+    sub = activate_subscription(db, member.id, plan_id, store, f"{store}:{transaction_id}", cadence=cadence, period_end=period_end)
     db.add(StorePurchase(member_id=member.id, store=store, product_id=product_id, transaction_id=transaction_id, plan=plan_id, cadence=cadence, status="granted", validated_by=settings.store_validation, subscription_id=sub.id))
     db.flush()
     audit(db, actor_type="member", actor_id=member.id, action="billing.store_purchase_granted", resource_type="subscription", resource_id=sub.id, metadata={"product_id": product_id, "store": store})
     return {"status": "granted", "duplicate": False, "entitlements": entitlements_for(db, member)}
 
 
-def activate_subscription(db: Session, member_id: str, plan_id: str, provider: str, provider_subscription_ref: str, cadence: str = "monthly") -> Subscription:
+def _refuse(db: Session, member: Member, store: str, product_id: str, transaction_id: str, plan_id: str, cadence: str, status: str) -> None:
+    """Write down that we were asked and said no, and why — in a transaction of its own.
+
+    The session of its own is the whole point, and the reason this is not three lines inline.
+    Every refusal here ends in an `ApiError`, `get_db` rolls the request back on any exception,
+    and a `db.add` on that session therefore vanishes with it. So `StorePurchase.status`, whose
+    docstring says it records refusals because "a receipt arrived and we would not honour it" is
+    the thing you most want when a member says they paid and have nothing, in fact recorded
+    nothing at all: the only rows that ever survived were the grants.
+
+    Two consequences, both of which the tests now pin. A member disputing a charge leaves a
+    trail. And because `(store, transaction_id)` is unique and the duplicate branch runs before
+    verification, a phone retrying a receipt the store has already rejected gets the same answer
+    back without us asking Apple or Google about a dead transaction on every retry.
+
+    An audit entry is written on the same independent session, for the same reason.
+    """
+    settings = get_settings()
+    with session_factory()() as side:
+        side.add(StorePurchase(member_id=member.id, store=store, product_id=product_id, transaction_id=transaction_id, plan=plan_id, cadence=cadence, status=status, validated_by=settings.store_validation))
+        audit(side, actor_type="member", actor_id=member.id, action="billing.store_purchase_refused", resource_type="member", resource_id=member.id, metadata={"product_id": product_id, "store": store, "status": status})
+        try:
+            side.commit()
+        except IntegrityError:
+            # Two phones, or two taps, racing the same receipt. The row exists either way, which
+            # is all this call was for.
+            side.rollback()
+
+
+def activate_subscription(db: Session, member_id: str, plan_id: str, provider: str, provider_subscription_ref: str, cadence: str = "monthly", period_end: datetime | None = None) -> Subscription:
     """Start a subscription on the cadence the member actually bought.
 
     `period_days` used to be a parameter defaulting to 30, and every caller took the default — so
     an annual purchase would have renewed in a month. The cadence decides the period now, and the
     agreed price is copied onto the subscription and its term rather than read back out of the
     catalog, so repricing the catalog never reprices somebody who already bought.
+
+    `period_end` overrides that arithmetic when the store told us when the period really ends,
+    which is the only number that is actually true for a store purchase: the member may have
+    bought through an introductory offer, or renewed mid-period, and our own addition would then
+    disagree with Apple's or Google's by days.
     """
     existing = db.execute(select(Subscription).where(Subscription.provider_subscription_ref == provider_subscription_ref)).scalar_one_or_none()
     if existing:
@@ -271,7 +339,7 @@ def activate_subscription(db: Session, member_id: str, plan_id: str, provider: s
         old.status = "cancelled"
         old.cancelled_at = utcnow()
     cents = price_cents(plan_id, cadence)
-    sub = Subscription(member_id=member_id, provider=provider, provider_subscription_ref=provider_subscription_ref, plan=plan_id, status="active", price_cents=cents, currency=PLANS[plan_id]["currency"], current_period_end=utcnow() + timedelta(days=PERIOD_DAYS[cadence]))
+    sub = Subscription(member_id=member_id, provider=provider, provider_subscription_ref=provider_subscription_ref, plan=plan_id, status="active", price_cents=cents, currency=PLANS[plan_id]["currency"], current_period_end=period_end or utcnow() + timedelta(days=PERIOD_DAYS[cadence]))
     db.add(sub)
     db.flush()
     record_term(db, "subscription", sub.id, plan_id, cadence)

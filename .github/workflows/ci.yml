@@ -3,9 +3,25 @@ on:
   push:
     branches: [main]
   pull_request:
+# Supersede a run when a newer commit arrives on the same pull request.
+#
+# Without this, every push to a branch starts a full run and leaves the previous one burning to
+# completion: five jobs including Playwright and two Docker builds, for a commit nobody will ever
+# look at again. Iterating on a PR costs a multiple of what the final run costs, and that is most
+# of how this repository reached 2,000 Actions minutes — its whole monthly allowance — by the
+# middle of October.
+#
+# `cancel-in-progress` is deliberately true only for pull requests. On `main` a run is building
+# and smoke-testing the images a deploy uses, and cancelling that halfway because another merge
+# landed would leave no record of whether the first one was sound.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   api:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:16
@@ -78,6 +94,7 @@ jobs:
           MM_ENV: test
   web:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: apps/web
@@ -94,6 +111,7 @@ jobs:
       - run: npm run build
   mobile:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: apps/mobile
@@ -156,17 +174,18 @@ jobs:
           }
           refuse "no API origin"            EXPO_PUBLIC_API_ORIGIN=  EXPO_PUBLIC_EAS_PROJECT_ID="$real_id"
           refuse "the eas.json placeholder" EXPO_PUBLIC_API_ORIGIN=https://api.example.com EXPO_PUBLIC_EAS_PROJECT_ID="$real_id"
-          refuse "a cleartext origin"       EXPO_PUBLIC_API_ORIGIN=http://api.aimatchmaker.app EXPO_PUBLIC_EAS_PROJECT_ID="$real_id"
-          refuse "no EAS project id"        EXPO_PUBLIC_API_ORIGIN=https://api.aimatchmaker.app
-          refuse "a placeholder project id" EXPO_PUBLIC_API_ORIGIN=https://api.aimatchmaker.app EXPO_PUBLIC_EAS_PROJECT_ID=REPLACE-ME-run-eas-init
+          refuse "a cleartext origin"       EXPO_PUBLIC_API_ORIGIN=http://api.joinlovera.com EXPO_PUBLIC_EAS_PROJECT_ID="$real_id"
+          refuse "no EAS project id"        EXPO_PUBLIC_API_ORIGIN=https://api.joinlovera.com
+          refuse "a placeholder project id" EXPO_PUBLIC_API_ORIGIN=https://api.joinlovera.com EXPO_PUBLIC_EAS_PROJECT_ID=REPLACE-ME-run-eas-init
           accept "a real origin and project id" EAS_BUILD_PROFILE=production \
-                 EXPO_PUBLIC_API_ORIGIN=https://api.aimatchmaker.app EXPO_PUBLIC_EAS_PROJECT_ID="$real_id"
+                 EXPO_PUBLIC_API_ORIGIN=https://api.joinlovera.com EXPO_PUBLIC_EAS_PROJECT_ID="$real_id"
           accept "the development profile, unconfigured" EAS_BUILD_PROFILE=development
           accept "no profile at all, as \`expo start\` runs" EXPO_NO_TELEMETRY=1
         env:
           EXPO_NO_TELEMETRY: "1"
   e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     needs: [api, web]
     services:
       postgres:
@@ -221,6 +240,7 @@ jobs:
           if-no-files-found: ignore
   images:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     needs: [api, web]
     services:
       postgres:

@@ -14,7 +14,7 @@ import type { ExpoConfig, ConfigContext } from "expo/config";
  * careless at best, and a reviewer who cannot find the feature behind a declared
  * permission rejects the build.
  */
-const BUNDLE_ID = process.env.EXPO_PUBLIC_BUNDLE_ID ?? "com.aimatchmaker.app";
+const BUNDLE_ID = process.env.EXPO_PUBLIC_BUNDLE_ID ?? "com.joinlovera.app";
 
 const BRAND_BACKGROUND = "#fdf7f4";
 /** The action colour from the shared tokens. Keep in step with `src/theme.ts` and `globals.css`. */
@@ -128,9 +128,9 @@ function updates(projectId: string | undefined): ExpoConfig["updates"] {
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
-  name: "AI Matchmaker",
-  slug: "ai-matchmaker",
-  scheme: "aimatchmaker",
+  name: "Lovera",
+  slug: "lovera",
+  scheme: "lovera",
   version: "1.0.0",
   /**
    * Declared, because the default is not what it looks like: Expo adds "web" to this list whenever
@@ -167,13 +167,140 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // rejections under guideline 2.4.1, and we have no tablet layouts.
     supportsTablet: false,
     config: { usesNonExemptEncryption: false },
+    /**
+     * The privacy manifest. There was none at all, which is an upload rejection: since 2024 every
+     * app on the App Store has to carry one, and the app-level obligations — whether it tracks,
+     * and what it collects — are the app's own and are not covered by the manifests its SDKs
+     * ship for themselves.
+     *
+     * Everything below has to match the App Privacy answers in App Store Connect, because a
+     * reviewer compares them. Two of these are worth saying out loud:
+     *
+     *   - **Sensitive Info.** Who somebody is seeking is sexual-orientation data under Apple's
+     *     taxonomy. A dating app that does not declare it is not making an oversight, it is
+     *     making a claim that will not survive review.
+     *   - **No location.** The city and zone are chosen from a list, not read from the device —
+     *     `blockedPermissions` below removes both location permissions on Android, and no
+     *     location purpose string exists on iOS. Member-entered geography is not device location,
+     *     so it is not declared here; declaring what we do not collect is as wrong as omitting
+     *     what we do.
+     *
+     * Nothing here is for tracking: there is no advertising SDK, no attribution SDK and no
+     * analytics vendor in this binary — `track()` writes to our own API.
+     */
+    privacyManifests: {
+      NSPrivacyTracking: false,
+      NSPrivacyTrackingDomains: [],
+      NSPrivacyAccessedAPITypes: [
+        {
+          // The app reads and writes its own user defaults and nothing else's.
+          NSPrivacyAccessedAPIType: "NSPrivacyAccessedAPICategoryUserDefaults",
+          NSPrivacyAccessedAPITypeReasons: ["CA92.1"],
+        },
+      ],
+      NSPrivacyCollectedDataTypes: [
+        {
+          NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeEmailAddress",
+          NSPrivacyCollectedDataTypeLinked: true,
+          NSPrivacyCollectedDataTypeTracking: false,
+          NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"],
+        },
+        {
+          NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeName",
+          NSPrivacyCollectedDataTypeLinked: true,
+          NSPrivacyCollectedDataTypeTracking: false,
+          NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"],
+        },
+        {
+          NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeUserID",
+          NSPrivacyCollectedDataTypeLinked: true,
+          NSPrivacyCollectedDataTypeTracking: false,
+          NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"],
+        },
+        {
+          // `deviceId()` in src/api/client.ts mints a random id on first launch, keeps it in the
+          // keychain and sends it with sign-in, every refresh and every push registration; the
+          // server keeps it on PushDevice. It is ours rather than the handset's and it is never
+          // used for advertising, but it is still a stable per-installation identifier, which is
+          // what Apple means by Device ID.
+          NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeDeviceID",
+          NSPrivacyCollectedDataTypeLinked: true,
+          NSPrivacyCollectedDataTypeTracking: false,
+          NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"],
+        },
+        {
+          NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypePhotosorVideos",
+          NSPrivacyCollectedDataTypeLinked: true,
+          NSPrivacyCollectedDataTypeTracking: false,
+          NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"],
+        },
+        {
+          // Who somebody is seeking, and the identity-verification result.
+          NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeSensitiveInfo",
+          NSPrivacyCollectedDataTypeLinked: true,
+          NSPrivacyCollectedDataTypeTracking: false,
+          NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"],
+        },
+        {
+          // Declared even though no location permission is requested and none ever will be: the
+          // member chooses a city and a neighbourhood from `catalog/cities.py`, we store both on
+          // the member, and matching measures distance from the zone's centroid. A neighbourhood
+          // is finer than the 3 km² that separates coarse from nothing at all, so this is coarse
+          // location whatever route it took to get here.
+          //
+          // This is a declaration, not a permission. ACCESS_FINE_LOCATION and
+          // ACCESS_COARSE_LOCATION stay in `blockedPermissions` below and there is no location
+          // purpose string in `infoPlist`; check-native-config.py enforces both. Do not "make
+          // these consistent" by adding a permission — they are answering different questions.
+          NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeCoarseLocation",
+          NSPrivacyCollectedDataTypeLinked: true,
+          NSPrivacyCollectedDataTypeTracking: false,
+          NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"],
+        },
+        {
+          // Messages, prompt answers, the bio, and what a member says in a safety report.
+          NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeOtherUserContent",
+          NSPrivacyCollectedDataTypeLinked: true,
+          NSPrivacyCollectedDataTypeTracking: false,
+          NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"],
+        },
+        {
+          // Date of birth, the Blueprint answers, availability.
+          NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeOtherDataTypes",
+          NSPrivacyCollectedDataTypeLinked: true,
+          NSPrivacyCollectedDataTypeTracking: false,
+          NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"],
+        },
+        {
+          NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeProductInteraction",
+          NSPrivacyCollectedDataTypeLinked: true,
+          NSPrivacyCollectedDataTypeTracking: false,
+          NSPrivacyCollectedDataTypePurposes: [
+            "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+            "NSPrivacyCollectedDataTypePurposeAnalytics",
+          ],
+        },
+        {
+          // Activating a subscription writes a `subscription_started` analytics event carrying the
+          // plan, price, currency, channel and cadence (modules/billing/service.py), so this is
+          // read for analytics as well as for deciding what the member is entitled to.
+          NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypePurchaseHistory",
+          NSPrivacyCollectedDataTypeLinked: true,
+          NSPrivacyCollectedDataTypeTracking: false,
+          NSPrivacyCollectedDataTypePurposes: [
+            "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+            "NSPrivacyCollectedDataTypePurposeAnalytics",
+          ],
+        },
+      ],
+    },
     infoPlist: {
       NSCameraUsageDescription:
-        "AI Matchmaker uses the camera so you can take a profile photo and complete identity verification.",
+        "Lovera uses the camera so you can take a profile photo and complete identity verification.",
       NSPhotoLibraryUsageDescription:
-        "AI Matchmaker needs your photo library so you can choose the photos that appear on your profile.",
+        "Lovera needs your photo library so you can choose the photos that appear on your profile.",
       NSUserTrackingUsageDescription:
-        "AI Matchmaker does not track you across other companies' apps or websites.",
+        "Lovera does not track you across other companies' apps or websites.",
     },
   },
   android: {
@@ -233,9 +360,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       "expo-image-picker",
       {
         photosPermission:
-          "AI Matchmaker needs your photo library so you can choose the photos that appear on your profile.",
+          "Lovera needs your photo library so you can choose the photos that appear on your profile.",
         cameraPermission:
-          "AI Matchmaker uses the camera so you can take a profile photo and complete identity verification.",
+          "Lovera uses the camera so you can take a profile photo and complete identity verification.",
         // The picker declares microphone access because it can capture video. We only
         // ever take stills, so this comes off: an unused permission with a boilerplate
         // purpose string is exactly what App Review looks for.

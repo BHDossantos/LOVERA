@@ -1,4 +1,4 @@
-# AI Matchmaker
+# Lovera
 
 A verified, no-swipe dating concierge built around the second date. One to three reciprocal
 introductions a week, each with three plain-language reasons, one honest friction and an explicit

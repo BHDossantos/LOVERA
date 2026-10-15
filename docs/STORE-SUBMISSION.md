@@ -1,4 +1,4 @@
-# Shipping AI Matchmaker to the App Store and Google Play
+# Shipping Lovera to the App Store and Google Play
 
 Everything here is either done, or is something only the account holder can do.
 The second kind is marked **You**.
@@ -32,39 +32,58 @@ policy for social and dating apps asks for the same set.
 
 ---
 
-## 2. Before you can build — **You**
+## 2. Before you can build
 
-Both accounts exist. What remains is linking them to this app.
+Most of this is done. What exists, so nobody redoes it:
 
-**Apple**
-1. App Store Connect → My Apps → **+** → New App.
-   - Platform: iOS. Name: `AI Matchmaker` (see §7 — the name may need changing).
-   - Bundle ID: must match `EXPO_PUBLIC_BUNDLE_ID`, default `com.aimatchmaker.app`.
-     Register it first at Certificates, Identifiers & Profiles if it is not listed.
-   - SKU: anything internal, e.g. `aimatchmaker-ios`.
-2. Note the **App Store Connect app ID** (the numeric `ascAppId`) and your
-   **Team ID**. Put both in `apps/mobile/eas.json` under `submit.production.ios`,
-   with your Apple ID email.
+| Thing | Value | State |
+| --- | --- | --- |
+| Apple Team ID | `XLRMB5G792` | — |
+| App ID (identifier) | `com.joinlovera.app`, Push Notifications capability only | Registered |
+| App Store Connect app | **Lovera**, SKU `lovera` | Created |
+| App Store Connect API key | `GNB9AWW5WM` | Uploaded to Expo |
+| APNs key | `673H6R39JM` | Team-scoped, reusable |
+| Play app | **Lovera**, `com.joinlovera.app` | Draft |
+| Play upload service account | `lovera-eas-submit@lovera-511722.iam.gserviceaccount.com` | Active in Users and permissions |
 
-**Google**
-1. Play Console → Create app. Package name must match the same bundle ID.
-2. Create a service account for uploads:
-   Play Console → Setup → API access → create a Google Cloud service account,
-   grant it *Release manager*, download the JSON key.
-3. Save it as `apps/mobile/play-service-account.json`. That exact filename is
-   gitignored. **Never commit it** — anyone holding that key can publish a build
-   to your listing. If it ever lands in a commit, revoke it in Google Cloud and
-   issue a new one; deleting the file from a later commit does not help, because
-   the key is still in the history.
+The bundle identifier and the Android package are the same string by design, and both are now
+bound to their listings permanently.
 
-**Expo**
-```bash
-cd apps/mobile
-npx eas login
-npx eas init          # creates the EAS project, prints a project ID
-```
-Put that project ID in `EXPO_PUBLIC_EAS_PROJECT_ID`. Push tokens cannot be
-issued without it.
+**What is left**
+
+1. **Give the Play service account its permissions.** Being listed under *Users and permissions*
+   is not the same as being allowed to upload. Play Console → Users and permissions → that
+   account → Manage → *App permissions* → add **Lovera**, and grant **Release apps to testing
+   tracks** and **View app information**. Without the first, `eas submit` fails at the upload with
+   a permission error that names neither the account nor the missing right.
+2. **Hand the JSON key to EAS** so submissions do not depend on a file on one laptop:
+   ```bash
+   cd apps/mobile
+   npx eas-cli@latest credentials -p android
+   # → Google Service Account
+   # → Set up a Google Service Account Key for Play Store Submissions
+   ```
+   Point it at the JSON you downloaded. EAS stores it server-side; `eas submit` then works from
+   any machine and from an EAS Workflow run, which is what `.eas/workflows/deploy.yml` needs.
+
+   If you would rather keep it local, save it as `apps/mobile/play-service-account.json` — that
+   exact filename is gitignored — and add `serviceAccountKeyPath` under
+   `submit.production.android` in `eas.json`. **Never commit it.** Anyone holding that key can
+   publish to your listing, and deleting it in a later commit does not help: it is still in the
+   history. If that happens, revoke the key in Google Cloud and issue a new one.
+3. **Create the Android upload keystore** (EAS generates and keeps it; losing it later means a new
+   listing, so let EAS hold it rather than a laptop):
+   ```bash
+   npx eas-cli@latest credentials:configure-build -p android -e production
+   ```
+4. **Create the EAS project** and note the id:
+   ```bash
+   npx eas-cli@latest login
+   npx eas-cli@latest init          # prints a project ID
+   ```
+   That id goes in `EXPO_PUBLIC_EAS_PROJECT_ID` (§3). Push tokens cannot be issued without it, and
+   `app.config.ts` refuses a shipping build that does not have it — deliberately, because the
+   failure it prevents is silent.
 
 ---
 
@@ -254,18 +273,20 @@ worst outcome is their own app spinning. No data is exposed.
 `expo-router` drops `query-string` — then take the fix. Verify with a real
 deep-link open on a device, not just a green bundle.
 
-## 7. Two decisions worth making before you submit — **You**
+## 7. The name and the bundle ID — decided
 
-**The name.** "AI Matchmaker" is descriptive rather than distinctive, which
-makes it weak as a trademark and awkward in search. Apple has also been
-tightening review of "AI" in app names where the claim is doing marketing work.
-A distinctive name is cheaper to change now than after launch, because the
-bundle ID and the listing are permanent.
+Both of these were permanent from the first upload, so they are recorded here rather than left as
+an open question.
 
-**The bundle ID.** Default is `com.aimatchmaker.app`. Change
-`EXPO_PUBLIC_BUNDLE_ID` *before* the first upload if you want something else.
-After the first upload it cannot be changed — only replaced with a new listing
-that has no reviews and no ranking.
+**The name is Lovera.** The working title, "AI Matchmaker", was descriptive rather than
+distinctive — weak as a trademark, awkward in search, and carrying an "AI" claim that Apple has
+been reviewing more sceptically where it is doing marketing work. The rename went through the
+whole repository: app config, permission strings, mail sender, brand assets, the generated iOS
+target name, and the native-config checks that assert it.
+
+**The bundle ID is `com.joinlovera.app`**, on both platforms, overridable only by
+`EXPO_PUBLIC_BUNDLE_ID` for a developer's own build. It is bound to both listings now; changing it
+means a new listing with no reviews and no ranking.
 
 ---
 
@@ -289,6 +310,7 @@ guideline 2.1 rejection on its own.
 | --- | --- |
 | Product ids → plan and cadence | `apps/api/app/catalog/plans.py` (`STORE_PRODUCTS`) |
 | Receipt endpoint, idempotent on the store's transaction id | `POST /v1/subscriptions/store-purchase` |
+| Receipt verification with Apple and Google | `apps/api/app/modules/billing/stores.py` |
 | Refusal when no validator is configured | `billing/service.record_store_purchase` |
 | Whether the phone may offer a purchase | `GET /v1/plans` → `store.enabled` |
 | Client wrapper, purchase and restore | `apps/mobile/src/lib/purchases.ts` |
@@ -327,25 +349,86 @@ Concierge for nothing.
    anybody else's data. The secret key stays on the server and is not referenced
    anywhere in the app.
 
-4. **Set `MM_STORE_VALIDATION`** on the API. `sandbox` for simulator testing in a
-   non-production environment; `app_store` / `play_store` for real verification —
-   which is the one piece still to be written, and the endpoint says so rather
-   than quietly succeeding.
+4. **Set `MM_STORE_VALIDATION`** on the API, and the credentials that go with it.
+   `sandbox` is for simulator testing in a non-production environment and is
+   refused outright in production. For real verification:
 
-### What is not done
+   **`app_store`** needs an App Store Connect API key — App Store Connect →
+   Users and Access → Integrations → App Store Connect API. Download the `.p8`
+   once; that page never shows it again.
 
-Server-side receipt verification against Apple's and Google's servers
-(`MM_STORE_VALIDATION=app_store` / `play_store`) is not implemented. The endpoint
-refuses rather than stubbing a success, so the gap cannot be shipped by accident.
-Until it is written, the compliant launch posture is in-app purchase off
-(`MM_STORE_VALIDATION=disabled`, which is the default): the mobile app serves
-free-tier members and people who already subscribed on the web, and offers no
-upgrade path, which is fully submittable.
+   ```bash
+   fly secrets set \
+     MM_STORE_VALIDATION=app_store \
+     MM_APP_STORE_ISSUER_ID=<the issuer id on that page> \
+     MM_APP_STORE_KEY_ID=<the key id> \
+     MM_APP_STORE_PRIVATE_KEY="$(base64 -w0 AuthKey_XXXXXXXXXX.p8)"
+   ```
 
-**Not verified here:** the native module (`react-native-purchases`) has been
-installed, autolinks, and survives `expo prebuild` and all 24 native-config
-checks, but no iOS or Android binary has been compiled in this environment. The
-first EAS build is the first real compile.
+   The key is base64'd because a PEM is multi-line and environment variables are
+   where multi-line strings get mangled. The raw PEM and a PEM with literal `\n`
+   are both accepted too — all three shapes are tested.
+
+   **`play_store`** needs the service account JSON whose account has *View app
+   information* and *Release apps to testing tracks* on this app in the Play
+   Console. Membership of the developer account alone is not enough, and the
+   error Google returns when it is missing does not say so — ours does.
+
+   ```bash
+   fly secrets set \
+     MM_STORE_VALIDATION=play_store \
+     MM_PLAY_SERVICE_ACCOUNT_JSON="$(base64 -w0 play-service-account.json)"
+   ```
+
+   Set one or the other per deployment: a receipt from the store the deployment
+   cannot verify is refused rather than guessed at.
+
+   If a credential is missing or unreadable, `GET /plans` reports the store as
+   off with the reason, the app draws no purchase UI, and the boot log says
+   which setting is unset. Nothing half-works.
+
+### How verification actually decides
+
+`stores.py` asks the store and believes nothing else. Worth knowing before you
+switch it on:
+
+- **A refusal and an outage are different answers.** Expired, revoked,
+  cancelled, for another app, for another product — the store said no, the
+  member is told plainly, and nothing is granted. If we simply could not reach
+  Apple or Google, the member is told their money is safe and to try Restore
+  purchases shortly, because the store may well have charged them. Telling
+  somebody their purchase failed when it did not is how a chargeback starts.
+- **Every refusal is written down, in its own transaction.** The request rolls
+  back when it raises, so a refusal row added to the request's session would
+  vanish with it — which is what used to happen, meaning the only rows that ever
+  survived were the grants. A member disputing a charge now leaves a trail, and
+  a phone retrying a dead receipt gets the same answer without us re-asking the
+  store every time.
+- **The period end comes from the store**, not from our arithmetic, so an
+  introductory offer or a mid-period upgrade does not drift from what Apple or
+  Google thinks the member paid for.
+- **Play purchases are acknowledged.** Google automatically refunds and revokes
+  anything unacknowledged within three days; missing that shows up as churn with
+  no cancellations, which looks nothing like its cause.
+- **Sandbox receipts are refused in production.** They are free to make.
+
+### What is not verified here
+
+No iOS or Android binary has been compiled in this environment, and no real
+receipt has been through this code — every test uses a mock transport, which
+pins the requests we send and the decisions we make from the answers, not
+Apple's or Google's live behaviour. The first sandbox purchase on a TestFlight
+build is the first end-to-end proof.
+
+The compliant launch posture if you would rather not switch it on yet is in-app
+purchase off (`MM_STORE_VALIDATION=disabled`, the default): the mobile app
+serves free-tier members and people who already subscribed on the web, offers no
+upgrade path, and is fully submittable.
+
+**Not verified here either:** the native module (`react-native-purchases`) has
+been installed, autolinks, and survives `expo prebuild` and all 34 native-config
+checks, but nothing has been compiled. The first EAS build is the first real
+compile.
 
 ---
 
@@ -368,7 +451,7 @@ The second is safer. Whichever you choose, say so explicitly in the notes.
 
 **Review notes — paste this in:**
 
-> AI Matchmaker is an invite-only, verified dating service. Sign-in uses a
+> Lovera is an invite-only, verified dating service. Sign-in uses a
 > one-time code sent by email; the demo account below accepts the fixed code
 > shown, so no mailbox access is needed.
 >
@@ -386,7 +469,15 @@ The second is safer. Whichever you choose, say so explicitly in the notes.
 > reachable from the You tab and from every conversation and date. Account
 > deletion is in the You tab and takes effect in-app.
 >
-> The app does not sell subscriptions in-app and contains no purchase flow.
+> **Subscriptions.** Delete whichever of these two paragraphs does not describe the
+> build you are uploading — getting this wrong is a guideline 3.1.1 or 2.1 rejection.
+>
+> *If in-app purchase is switched on (§8):* Paid plans are sold only through
+> Apple's in-app purchase. There is no web checkout link anywhere in the app.
+> "Restore purchases" is on the Membership screen under the You tab.
+>
+> *If it is not:* The app sells nothing. No purchase UI is reachable — not a
+> disabled button, not a "coming soon" — and every plan shows as unavailable.
 
 ---
 
@@ -399,7 +490,7 @@ The second is safer. Whichever you choose, say so explicitly in the notes.
 > one honest friction. Private decisions. Chat only when you both say yes.
 
 **Description:**
-> AI Matchmaker is a matchmaker, not a feed.
+> Lovera is a matchmaker, not a feed.
 >
 > Every week you receive one to three introductions chosen for you — never a
 > stack to swipe through. Each comes with three plain-language reasons the
@@ -448,9 +539,9 @@ reject stock-photo profiles that imply real members.
 
 ## 12. Order of operations
 
-1. Decide the name and bundle ID (§7). Everything downstream is permanent.
-2. Create both listings and the EAS project (§2).
-3. Put the real API origins in `eas.json` (§3).
+1. ~~Decide the name and bundle ID~~ — done, and permanent (§7).
+2. Finish the Play service-account permissions and create the EAS project (§2).
+3. Put the real API origin in the EAS environment (§3).
 4. Provision the demo account with a fixed code (§9).
 5. Build both platforms, submit to internal/TestFlight, install on a real device
    and walk the whole journey — including push, which cannot be tested in a

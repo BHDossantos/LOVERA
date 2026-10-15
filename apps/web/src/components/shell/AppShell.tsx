@@ -57,7 +57,7 @@ export function AppShell({ children, title }: { children: React.ReactNode; title
         <div className="mx-auto flex h-14 max-w-3xl items-center justify-between px-4">
           <Link href="/today" className="flex items-center gap-2 text-ink" aria-label="Matchmaker, home">
             <Icon name="introductions" className="h-6 w-6 text-action" />
-            <span className="display text-xl font-bold tracking-tight">Matchmaker</span>
+            <span className="display text-xl font-bold tracking-tight">Lovera</span>
           </Link>
           <nav aria-label="Global" className="flex items-center gap-1">
             {isStaff && (
@@ -103,7 +103,7 @@ export function OnboardingShell({ children, step, total = 8 }: { children: React
     <div className="min-h-dvh bg-canvas">
       <header className="border-b border-border">
         <div className="mx-auto flex h-14 max-w-xl items-center justify-between px-4">
-          <span className="display text-xl font-bold tracking-tight text-ink">Matchmaker</span>
+          <span className="display text-xl font-bold tracking-tight text-ink">Lovera</span>
           <div className="flex items-center gap-3">
             <span className="text-sm text-ink-secondary">
               Step {step} of {total}

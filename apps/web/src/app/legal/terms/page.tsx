@@ -1,6 +1,6 @@
 import { DocHeader, Fact, H2, P, UL } from "../_components";
 
-export const metadata = { title: "Terms of Service · AI Matchmaker" };
+export const metadata = { title: "Terms of Service · Lovera" };
 
 export default function Terms() {
   return (
@@ -15,7 +15,7 @@ export default function Terms() {
 
       <H2>What we provide</H2>
       <P>
-        AI Matchmaker is an invite-only introduction service. We offer you between one and
+        Lovera is an invite-only introduction service. We offer you between one and
         three introductions a week, chosen for you, each with the reasons behind it. We do
         not provide a browsable directory of people, and there is no way to pay for more
         visibility.

@@ -37,7 +37,7 @@ primary_region = "fra"
   # Outbound mail. The host and credentials are secrets (see docs/DEPLOY.md); only the
   # non-secret shape belongs in a committed file. MM_MAIL_TRANSPORT is left unset on
   # purpose so "auto" applies and the API refuses to start without a mail host.
-  MM_MAIL_PRODUCT_NAME = "AI Matchmaker"
+  MM_MAIL_PRODUCT_NAME = "Lovera"
   MM_SMTP_PORT = "587"
   MM_SMTP_SECURITY = "starttls"
 

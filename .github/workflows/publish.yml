@@ -6,9 +6,15 @@ on:
 permissions:
   contents: read
   packages: write
+# Never cancel a publish: a half-built image set is worse than a slow one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       matrix:
         service: [api, web]

@@ -26,8 +26,11 @@ ROOT = Path(__file__).resolve().parent.parent
 # Permissions we must not ask for, each with the reason, so a future reader knows whether
 # removing one from this list is a decision or a mistake.
 MUST_NOT_REQUEST = {
-    "ACCESS_FINE_LOCATION": "matching works on coarse zones; we never read a precise fix",
-    "ACCESS_COARSE_LOCATION": "the member types their zone; we do not read location at all",
+    "ACCESS_FINE_LOCATION": "matching works on zone centroids; we never read a fix from the device",
+    # The privacy manifest *does* declare coarse location, and that is not a contradiction: the
+    # member picks their zone from a list, so we hold location data without ever asking the
+    # handset for it. Asking would be a permission prompt with no feature behind it.
+    "ACCESS_COARSE_LOCATION": "the member picks their zone from a list; we never read the device",
     "RECORD_AUDIO": "there is no voice feature",
     "SYSTEM_ALERT_WINDOW": "React Native's default; we draw no overlays",
     "WRITE_EXTERNAL_STORAGE": "the image picker's default; we write nothing to shared storage",
@@ -65,7 +68,7 @@ def check(ok: bool, label: str, why: str = "") -> None:
 
 def main() -> int:
     manifest_path = ROOT / "android/app/src/main/AndroidManifest.xml"
-    plist_path = ROOT / "ios/AIMatchmaker/Info.plist"
+    plist_path = ROOT / "ios/Lovera/Info.plist"
     if not manifest_path.exists() or not plist_path.exists():
         print("Native projects are missing. Run:", file=sys.stderr)
         print("  npx expo prebuild --platform all --no-install --clean", file=sys.stderr)
@@ -106,7 +109,7 @@ def main() -> int:
     for key in IOS_MEMBER_FACING:
         value = plist.get(key, "")
         check(
-            value.startswith("AI Matchmaker"),
+            value.startswith("Lovera"),
             f"ios: {key} is written for the member",
             f"got {value!r}, which is a plugin default",
         )
@@ -131,7 +134,7 @@ def main() -> int:
     # iOS keeps none of this in Info.plist — it is a separate Expo.plist, which is the kind of thing
     # this script exists to find out rather than assume. The first version of these checks read
     # Info.plist and reported the runtime version as absent.
-    expo_plist_path = ROOT / "ios/AIMatchmaker/Supporting/Expo.plist"
+    expo_plist_path = ROOT / "ios/Lovera/Supporting/Expo.plist"
     expo_plist = plistlib.load(expo_plist_path.open("rb")) if expo_plist_path.exists() else {}
 
     for label, is_on, url_value, runtime_value in (
@@ -152,6 +155,66 @@ def main() -> int:
         check(not is_on or runtime_value == "file:fingerprint",
               f"{label}: the runtime version is the fingerprint policy",
               f"got {runtime_value!r}")
+
+    # ---- iOS privacy manifest -------------------------------------------------------------
+    #
+    # There was none at all, which is an upload rejection: since 2024 every app on the App Store
+    # has to carry one. The app-level obligations — whether it tracks, and what it collects — are
+    # the app's own and are *not* covered by the manifests its SDKs ship for themselves, so an
+    # empty or missing file is not "the SDKs have it handled".
+    #
+    # These assertions are about the two answers a reviewer compares against App Store Connect,
+    # and about the one that is easy to get quietly wrong: a dating app that does not declare
+    # sensitive info is not making an oversight, it is making a claim that will not survive
+    # review, because who somebody is seeking is sexual-orientation data under Apple's taxonomy.
+    privacy_path = ROOT / "ios/Lovera/PrivacyInfo.xcprivacy"
+    check(privacy_path.exists(), "ios: a privacy manifest was generated", f"expected {privacy_path}")
+    if privacy_path.exists():
+        privacy = plistlib.loads(privacy_path.read_bytes())
+        collected = {c.get("NSPrivacyCollectedDataType") for c in privacy.get("NSPrivacyCollectedDataTypes", [])}
+        check(privacy.get("NSPrivacyTracking") is False,
+              "ios: the manifest declares no cross-app tracking",
+              f"got {privacy.get('NSPrivacyTracking')!r}")
+        check(privacy.get("NSPrivacyTrackingDomains") == [],
+              "ios: no tracking domains are declared",
+              f"got {privacy.get('NSPrivacyTrackingDomains')!r}")
+        check("NSPrivacyCollectedDataTypeSensitiveInfo" in collected,
+              "ios: sensitive info is declared (who a member is seeking)",
+              f"collected: {sorted(collected)}")
+        check("NSPrivacyCollectedDataTypeOtherUserContent" in collected,
+              "ios: member-written content is declared (messages, prompts, reports)")
+        # `deviceId()` keeps a random id in the keychain for the life of the install and sends it
+        # with sign-in, refresh and push registration. We mint it rather than read it off the
+        # handset and it never touches advertising, but it is stable and per-installation, and
+        # that is what Apple's Device ID covers.
+        check("NSPrivacyCollectedDataTypeDeviceID" in collected,
+              "ios: the installation identifier is declared as a device id",
+              f"collected: {sorted(collected)}")
+        # Location is the one line in this file where the manifest and the permissions disagree on
+        # purpose, and they are meant to. No location permission is requested — the two Android
+        # ones are blocked and there is no iOS purpose string, both asserted above — because the
+        # app never reads the device. But a member picks a city *and a neighbourhood* from
+        # `catalog/cities.py`, we keep both, and matching measures distance from the zone's
+        # centroid. A neighbourhood is finer than the 3 km² that separates coarse location from
+        # nothing, so withholding the declaration on the grounds that the member typed it is a
+        # distinction Apple's taxonomy does not draw. Declared coarse, never precise.
+        check("NSPrivacyCollectedDataTypeCoarseLocation" in collected,
+              "ios: the chosen city and zone are declared as coarse location",
+              f"collected: {sorted(collected)}")
+        # Declaring what we do not collect is as wrong as omitting what we do.
+        check("NSPrivacyCollectedDataTypePreciseLocation" not in collected,
+              "ios: no precise location is declared, because none is collected",
+              f"collected: {sorted(collected)}")
+        # Purchase history is read twice: once to decide entitlements, once as the
+        # `subscription_started` analytics event. Both purposes have to be on the entry.
+        purchase = next((c for c in privacy.get("NSPrivacyCollectedDataTypes", [])
+                         if c.get("NSPrivacyCollectedDataType") == "NSPrivacyCollectedDataTypePurchaseHistory"), None)
+        check(purchase is not None
+              and "NSPrivacyCollectedDataTypePurposeAnalytics" in purchase.get("NSPrivacyCollectedDataTypePurposes", []),
+              "ios: purchase history declares the analytics purpose as well as app functionality",
+              f"got {purchase.get('NSPrivacyCollectedDataTypePurposes') if purchase else None!r}")
+        check(all(not c.get("NSPrivacyCollectedDataTypeTracking") for c in privacy.get("NSPrivacyCollectedDataTypes", [])),
+              "ios: nothing collected is used for tracking")
 
     print()
     if failures:

@@ -11,7 +11,7 @@ export default function Index() {
   if (loading)
     return (
       <Screen scroll={false}>
-        <Loading label="Opening AI Matchmaker" />
+        <Loading label="Opening Lovera" />
       </Screen>
     );
   if (!me) return <Redirect href="/welcome" />;

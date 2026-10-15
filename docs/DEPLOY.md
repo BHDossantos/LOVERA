@@ -1,4 +1,4 @@
-# Deploying AI Matchmaker
+# Deploying Lovera
 
 Target: **Fly.io, Frankfurt (`fra`)**. Why that choice is at the bottom; it is a
 small `.toml` either way, so moving off it later is a day, not a migration.
@@ -130,7 +130,7 @@ fly secrets set --app matchmaker-api \
   MM_SMTP_HOST='smtp.yourprovider.test' \
   MM_SMTP_USERNAME='<provider username or API key id>' \
   MM_SMTP_PASSWORD='<provider password or API key>' \
-  MM_MAIL_FROM='AI Matchmaker <no-reply@yourdomain>' \
+  MM_MAIL_FROM='Lovera <no-reply@yourdomain>' \
   MM_MAIL_REPLY_TO='help@yourdomain'
 ```
 
@@ -252,7 +252,7 @@ fly apps create matchmaker-api-staging
 fly secrets set --app matchmaker-api-staging \
   MM_SMTP_HOST='smtp.yourprovider.com' \
   MM_SMTP_USERNAME='...' MM_SMTP_PASSWORD='...' \
-  MM_MAIL_FROM='AI Matchmaker <no-reply@yourdomain>'
+  MM_MAIL_FROM='Lovera <no-reply@yourdomain>'
 
 fly deploy --config infra/fly/api-staging.toml --app matchmaker-api-staging
 ```

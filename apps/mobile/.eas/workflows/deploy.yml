@@ -1,0 +1,105 @@
+# Ship Lovera: an update when nothing native changed, a build when something did.
+#
+# This runs on EAS, not on GitHub Actions. That is partly because the build already runs there and
+# orchestrating it from somewhere else only adds a hop — and partly because this repository's
+# Actions allowance is a shared monthly quota that it has already exhausted once, while EAS build
+# minutes are a separate budget.
+#
+# The shape is Expo's own deploy template, and the interesting part is `fingerprint`. A fingerprint
+# is a hash of everything that ends up in the native project: the native dependencies, the config
+# plugins, app.config.ts. If it has not changed since a build we already have, that binary can run
+# this JavaScript, so the change ships as an over-the-air update — live in seconds, no review
+# queue. If it has changed, no existing binary can run it and a real build is the only honest
+# answer.
+#
+# That is also exactly the rule `runtimeVersion: { policy: "fingerprint" }` in app.config.ts
+# enforces on the client, so the two cannot disagree about which binaries an update is for. Getting
+# this wrong in the other direction — shipping an update to a binary whose native layer does not
+# match — is a crash on launch that the member cannot get out of, which is why neither side is
+# allowed to guess.
+#
+# Submission goes to TestFlight and the Play internal track (see `submit.production` in eas.json).
+# Nothing here releases to the public: that stays a decision somebody makes in App Store Connect
+# and the Play Console.
+
+name: Deploy Lovera
+
+on:
+  push:
+    branches: ['main']
+
+jobs:
+  fingerprint:
+    name: Fingerprint
+    type: fingerprint
+
+  # Has this exact native layer already been built? If so we reuse it and send an update instead.
+  get_android_build:
+    name: Check for an existing Android build
+    needs: [fingerprint]
+    type: get-build
+    params:
+      fingerprint_hash: ${{ needs.fingerprint.outputs.android_fingerprint_hash }}
+      profile: production
+
+  get_ios_build:
+    name: Check for an existing iOS build
+    needs: [fingerprint]
+    type: get-build
+    params:
+      fingerprint_hash: ${{ needs.fingerprint.outputs.ios_fingerprint_hash }}
+      profile: production
+
+  # Native changed: build. `autoIncrement` plus `appVersionSource: remote` in eas.json means the
+  # build number comes from EAS and climbs on its own — there is nowhere in this repository for it
+  # to live, because `ios/` and `android/` are generated and gitignored.
+  build_android:
+    name: Build Android
+    needs: [get_android_build]
+    if: ${{ !needs.get_android_build.outputs.build_id }}
+    type: build
+    params:
+      platform: android
+      profile: production
+
+  build_ios:
+    name: Build iOS
+    needs: [get_ios_build]
+    if: ${{ !needs.get_ios_build.outputs.build_id }}
+    type: build
+    params:
+      platform: ios
+      profile: production
+
+  submit_android_build:
+    name: Submit Android build
+    needs: [build_android]
+    type: submit
+    params:
+      build_id: ${{ needs.build_android.outputs.build_id }}
+
+  submit_ios_build:
+    name: Submit iOS build
+    needs: [build_ios]
+    type: submit
+    params:
+      build_id: ${{ needs.build_ios.outputs.build_id }}
+
+  # Native unchanged: the binaries already out there can run this. Ship it over the air.
+  publish_android_update:
+    name: Publish Android update
+    needs: [get_android_build]
+    if: ${{ needs.get_android_build.outputs.build_id }}
+    type: update
+    params:
+      branch: production
+      platform: android
+
+  publish_ios_update:
+    name: Publish iOS update
+    needs: [get_ios_build]
+    if: ${{ needs.get_ios_build.outputs.build_id }}
+    type: update
+    params:
+      branch: production
+      platform: ios

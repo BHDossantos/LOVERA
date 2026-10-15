@@ -1,6 +1,6 @@
 import { DocHeader, Fact, H2, P, UL } from "../_components";
 
-export const metadata = { title: "Privacy Notice · AI Matchmaker" };
+export const metadata = { title: "Privacy Notice · Lovera" };
 
 /**
  * The URL both stores require as a listing field, and the one a member reads before
@@ -14,7 +14,7 @@ export default function Privacy() {
       <DocHeader title="Privacy Notice" version="2026-09" updated="23 September 2026" />
 
       <P>
-        This notice describes what AI Matchmaker collects, what it deliberately does not,
+        This notice describes what Lovera collects, what it deliberately does not,
         and how you get any of it back or deleted. It is written to be read, not to be
         survived.
       </P>
