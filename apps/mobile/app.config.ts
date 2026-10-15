@@ -179,11 +179,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
      *   - **Sensitive Info.** Who somebody is seeking is sexual-orientation data under Apple's
      *     taxonomy. A dating app that does not declare it is not making an oversight, it is
      *     making a claim that will not survive review.
-     *   - **No location.** The city and zone are chosen from a list, not read from the device —
-     *     `blockedPermissions` below removes both location permissions on Android, and no
-     *     location purpose string exists on iOS. Member-entered geography is not device location,
-     *     so it is not declared here; declaring what we do not collect is as wrong as omitting
-     *     what we do.
+     *   - **Coarse location, and no permission for it.** These answer different questions and
+     *     the answers differ on purpose. We never read the handset: `blockedPermissions` below
+     *     removes both Android location permissions and no location purpose string exists on
+     *     iOS. But a member picks a *neighbourhood* from `catalog/cities.py`, we keep it, and
+     *     matching measures distance from its centroid — finer than the 3 km² that separates
+     *     coarse location from nothing, and neither store's taxonomy has a category for
+     *     "location the member typed in". So coarse is declared and precise is not. An earlier
+     *     version of this comment reasoned the other way and declared neither.
      *
      * Nothing here is for tracking: there is no advertising SDK, no attribution SDK and no
      * analytics vendor in this binary — `track()` writes to our own API.
