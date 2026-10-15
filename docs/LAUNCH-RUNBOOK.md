@@ -180,27 +180,72 @@ store's own price on the button.
 
 ---
 
-## 7. Build the app
+## 7. Build the app — automated
 
-<https://expo.dev> · access tokens: <https://expo.dev/settings/access-tokens> · docs:
-<https://docs.expo.dev/build/setup/>
+<https://expo.dev> · access tokens: <https://expo.dev/settings/access-tokens>
+
+### One-time setup
 
 ```bash
 cd apps/mobile
 npx eas-cli@latest login
-npx eas-cli@latest init          # creates the EAS project, writes the project id
-npx eas-cli@latest build --profile production --platform all
+npx eas-cli@latest init        # creates the EAS project and prints the project id
 ```
 
-Set `EXPO_PUBLIC_API_ORIGIN` as an EAS environment variable for each profile, pointing at your
-production API. A build without it fails deliberately rather than shipping a binary that cannot
-reach anything.
+Then tell EAS the two values the build inlines, per environment, so they stay out of git:
 
-To build from CI instead, add an `EXPO_TOKEN` repository secret
-(<https://github.com/BHDossantos/LOVERA/settings/secrets/actions>) and run the **Mobile build**
-workflow — which needs step 0 done first.
+```bash
+npx eas-cli@latest env:create --environment production \
+  --name EXPO_PUBLIC_API_ORIGIN --value https://<your-api-app>.fly.dev --visibility plaintext
+npx eas-cli@latest env:create --environment production \
+  --name EXPO_PUBLIC_EAS_PROJECT_ID --value <the id eas init printed> --visibility plaintext
+```
 
-**Done when:** an `.ipa` and an `.aab` exist in your EAS dashboard.
+Each build profile in `eas.json` is bound to a matching environment, so a production build picks
+these up automatically. Without them `app.config.ts` refuses to build rather than shipping a
+binary that can reach nothing — deliberately, and it will tell you which one is missing.
+
+Credentials, once each (the first two generate signing keys; the last two let EAS submit for you):
+
+```bash
+npx eas-cli@latest credentials:configure-build -p ios     -e production
+npx eas-cli@latest credentials:configure-build -p android -e production
+npx eas-cli@latest credentials -p ios       # → App Store Connect: Manage your API Key
+npx eas-cli@latest credentials -p android   # → Google Service Account for Play submissions
+```
+
+### Then it runs itself
+
+`apps/mobile/.eas/workflows/deploy.yml` runs on every push to `main` and decides what the change
+actually needs:
+
+```
+fingerprint the native layer
+├─ unchanged  → publish an over-the-air update      (seconds, no review)
+└─ changed    → build, then submit to TestFlight / Play internal track
+```
+
+The fingerprint is a hash of everything that reaches the native project — native dependencies,
+config plugins, `app.config.ts`. If it matches a build EAS already has, the binaries in people's
+hands can run the new JavaScript, so it ships over the air. If it does not, no existing binary can
+run it and a real build is the only honest answer. This is the same rule
+`runtimeVersion: { policy: "fingerprint" }` enforces on the client, so the two cannot disagree —
+and getting it wrong the other way is a crash on launch the member cannot escape.
+
+**Nothing auto-releases to the public.** Submission lands in TestFlight and the Play internal
+track; promoting a build stays a decision you make in the consoles.
+
+Run it by hand, or watch one:
+
+```bash
+npx eas-cli@latest workflow:run .eas/workflows/deploy.yml
+npx eas-cli@latest workflow:list
+```
+
+The GitHub Actions workflow (`.github/workflows/mobile-build.yml`) stays as a manual escape hatch
+and costs nothing unless you dispatch it. The automation deliberately does not live there: Actions
+minutes are a shared monthly quota this account has already exhausted once, and EAS build minutes
+are a separate budget.
 
 ---
 
