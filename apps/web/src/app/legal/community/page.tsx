@@ -1,6 +1,6 @@
 import { DocHeader, Fact, H2, P, UL } from "../_components";
 
-export const metadata = { title: "Community Agreement · AI Matchmaker" };
+export const metadata = { title: "Community Agreement · Lovera" };
 
 export default function Community() {
   return (

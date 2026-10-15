@@ -28,7 +28,7 @@ primary_region = "fra"
   # only the non-secret shape belongs in a committed file. MM_MAIL_TRANSPORT is
   # left unset on purpose: "auto" means the API refuses to start if MM_SMTP_HOST
   # is missing, rather than booting healthy while no member can sign in.
-  MM_MAIL_PRODUCT_NAME = "AI Matchmaker"
+  MM_MAIL_PRODUCT_NAME = "Lovera"
   MM_SMTP_PORT = "587"
   MM_SMTP_SECURITY = "starttls"
 

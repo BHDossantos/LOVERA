@@ -1,7 +1,7 @@
 [project]
 name = "matchmaker-api"
 version = "0.1.0"
-description = "AI Matchmaker pilot API: verified, no-swipe dating concierge"
+description = "Lovera pilot API: verified, no-swipe dating concierge"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115",

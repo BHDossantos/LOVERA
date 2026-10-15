@@ -159,7 +159,7 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title="AI Matchmaker API", version="0.1.0", lifespan=lifespan, docs_url="/v1/docs", openapi_url="/v1/openapi.json")
+    app = FastAPI(title="Lovera API", version="0.1.0", lifespan=lifespan, docs_url="/v1/docs", openapi_url="/v1/openapi.json")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,

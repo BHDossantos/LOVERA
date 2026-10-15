@@ -65,7 +65,7 @@ def check(ok: bool, label: str, why: str = "") -> None:
 
 def main() -> int:
     manifest_path = ROOT / "android/app/src/main/AndroidManifest.xml"
-    plist_path = ROOT / "ios/AIMatchmaker/Info.plist"
+    plist_path = ROOT / "ios/Lovera/Info.plist"
     if not manifest_path.exists() or not plist_path.exists():
         print("Native projects are missing. Run:", file=sys.stderr)
         print("  npx expo prebuild --platform all --no-install --clean", file=sys.stderr)
@@ -106,7 +106,7 @@ def main() -> int:
     for key in IOS_MEMBER_FACING:
         value = plist.get(key, "")
         check(
-            value.startswith("AI Matchmaker"),
+            value.startswith("Lovera"),
             f"ios: {key} is written for the member",
             f"got {value!r}, which is a plugin default",
         )
@@ -131,7 +131,7 @@ def main() -> int:
     # iOS keeps none of this in Info.plist — it is a separate Expo.plist, which is the kind of thing
     # this script exists to find out rather than assume. The first version of these checks read
     # Info.plist and reported the runtime version as absent.
-    expo_plist_path = ROOT / "ios/AIMatchmaker/Supporting/Expo.plist"
+    expo_plist_path = ROOT / "ios/Lovera/Supporting/Expo.plist"
     expo_plist = plistlib.load(expo_plist_path.open("rb")) if expo_plist_path.exists() else {}
 
     for label, is_on, url_value, runtime_value in (
@@ -164,7 +164,7 @@ def main() -> int:
     # and about the one that is easy to get quietly wrong: a dating app that does not declare
     # sensitive info is not making an oversight, it is making a claim that will not survive
     # review, because who somebody is seeking is sexual-orientation data under Apple's taxonomy.
-    privacy_path = ROOT / "ios/AIMatchmaker/PrivacyInfo.xcprivacy"
+    privacy_path = ROOT / "ios/Lovera/PrivacyInfo.xcprivacy"
     check(privacy_path.exists(), "ios: a privacy manifest was generated", f"expected {privacy_path}")
     if privacy_path.exists():
         privacy = plistlib.loads(privacy_path.read_bytes())

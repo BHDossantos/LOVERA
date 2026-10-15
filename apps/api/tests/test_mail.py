@@ -27,7 +27,7 @@ def parse(raw: str) -> email.message.EmailMessage:
 def smtp_settings(port: int, **over) -> Settings:
     base = dict(
         mail_transport="smtp",
-        mail_from="AI Matchmaker <no-reply@example.test>",
+        mail_from="Lovera <no-reply@example.test>",
         smtp_host="127.0.0.1",
         smtp_port=port,
         smtp_security="none",
@@ -72,13 +72,13 @@ def test_console_sender_logs_the_body_so_local_work_has_an_inbox(caplog):
 def test_sends_a_multipart_message_over_a_real_socket():
     with StubSmtpServer() as server:
         sender = SmtpSender(smtp_settings(server.port, smtp_username="u", smtp_password="p"))
-        sender.send(login_code_message(to="member@example.test", code="482913", product="AI Matchmaker", minutes=10))
+        sender.send(login_code_message(to="member@example.test", code="482913", product="Lovera", minutes=10))
 
     assert server.recipients == ["member@example.test"]
     assert server.authenticated, "credentials were configured but never offered"
     msg = parse(server.messages[0])
     assert msg["To"] == "member@example.test"
-    assert msg["From"] == "AI Matchmaker <no-reply@example.test>"
+    assert msg["From"] == "Lovera <no-reply@example.test>"
     assert "482913" in msg["Subject"]
     assert msg["Auto-Submitted"] == "auto-generated"
     types = {part.get_content_type() for part in msg.walk() if not part.is_multipart()}
@@ -134,7 +134,7 @@ def test_reply_to_is_set_when_configured():
 
 @pytest.mark.parametrize("locale", ["en", "it", "es", "pt"])
 def test_every_supported_locale_carries_the_code_and_the_expiry(locale):
-    msg = login_code_message(to="m@example.test", code="100200", product="AI Matchmaker", minutes=10, locale=locale)
+    msg = login_code_message(to="m@example.test", code="100200", product="Lovera", minutes=10, locale=locale)
     assert "100200" in msg.subject
     for body in (msg.text, msg.html):
         assert "100200" in body
@@ -149,7 +149,7 @@ def test_an_unknown_locale_falls_back_to_english():
 def test_the_product_name_is_not_hardcoded_in_the_template():
     msg = login_code_message(to="m@example.test", code="100200", product="Something Else", minutes=10)
     assert "Something Else" in msg.subject
-    assert "AI Matchmaker" not in msg.text
+    assert "Lovera" not in msg.text
 
 
 def test_the_message_offers_no_link_to_click():

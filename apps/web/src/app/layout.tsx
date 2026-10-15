@@ -3,7 +3,7 @@ import "./globals.css";
 import { Providers } from "@/lib/providers";
 
 export const metadata: Metadata = {
-  title: "AI Matchmaker",
+  title: "Lovera",
   description: "A verified, no-swipe matchmaker designed around the second date.",
 };
 

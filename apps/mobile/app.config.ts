@@ -14,7 +14,7 @@ import type { ExpoConfig, ConfigContext } from "expo/config";
  * careless at best, and a reviewer who cannot find the feature behind a declared
  * permission rejects the build.
  */
-const BUNDLE_ID = process.env.EXPO_PUBLIC_BUNDLE_ID ?? "com.aimatchmaker.app";
+const BUNDLE_ID = process.env.EXPO_PUBLIC_BUNDLE_ID ?? "com.joinlovera.app";
 
 const BRAND_BACKGROUND = "#fdf7f4";
 /** The action colour from the shared tokens. Keep in step with `src/theme.ts` and `globals.css`. */
@@ -128,9 +128,9 @@ function updates(projectId: string | undefined): ExpoConfig["updates"] {
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
-  name: "AI Matchmaker",
-  slug: "ai-matchmaker",
-  scheme: "aimatchmaker",
+  name: "Lovera",
+  slug: "lovera",
+  scheme: "lovera",
   version: "1.0.0",
   /**
    * Declared, because the default is not what it looks like: Expo adds "web" to this list whenever
@@ -263,11 +263,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     },
     infoPlist: {
       NSCameraUsageDescription:
-        "AI Matchmaker uses the camera so you can take a profile photo and complete identity verification.",
+        "Lovera uses the camera so you can take a profile photo and complete identity verification.",
       NSPhotoLibraryUsageDescription:
-        "AI Matchmaker needs your photo library so you can choose the photos that appear on your profile.",
+        "Lovera needs your photo library so you can choose the photos that appear on your profile.",
       NSUserTrackingUsageDescription:
-        "AI Matchmaker does not track you across other companies' apps or websites.",
+        "Lovera does not track you across other companies' apps or websites.",
     },
   },
   android: {
@@ -327,9 +327,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       "expo-image-picker",
       {
         photosPermission:
-          "AI Matchmaker needs your photo library so you can choose the photos that appear on your profile.",
+          "Lovera needs your photo library so you can choose the photos that appear on your profile.",
         cameraPermission:
-          "AI Matchmaker uses the camera so you can take a profile photo and complete identity verification.",
+          "Lovera uses the camera so you can take a profile photo and complete identity verification.",
         // The picker declares microphone access because it can capture video. We only
         // ever take stills, so this comes off: an unused permission with a boilerplate
         // purpose string is exactly what App Review looks for.

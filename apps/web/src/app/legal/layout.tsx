@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "Legal · AI Matchmaker",
+  title: "Legal · Lovera",
   description: "Terms of Service, Privacy Notice and Community Agreement.",
 };
 
@@ -23,7 +23,7 @@ export default function LegalLayout({ children }: { children: React.ReactNode })
       <header className="border-b border-border bg-surface">
         <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-4 px-4 py-4">
           <Link href="/welcome" className="font-bold text-ink">
-            AI Matchmaker
+            Lovera
           </Link>
           <nav className="flex gap-4 text-sm">
             {DOCS.map((d) => (
