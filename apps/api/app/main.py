@@ -134,7 +134,17 @@ def check_store_validation() -> None:
     elif mode == "sandbox":
         log.warning("MM_STORE_VALIDATION=sandbox: store receipts are trusted without verification. Never use this in production.")
     else:
-        log.info("store: receipts verified by %s", mode)
+        # Choosing a validator is not the same as being able to run it, and the difference is
+        # invisible until the first member taps Subscribe. `/plans` already reports the store as
+        # off in that case so no button is drawn — but the operator who set this up deliberately
+        # should read why in the boot log, not work it out from an empty Membership screen.
+        from app.modules.billing import stores
+
+        missing = stores.missing_configuration(mode)
+        if missing:
+            log.warning("MM_STORE_VALIDATION=%s but %s In-app purchase stays off.", mode, missing)
+        else:
+            log.info("store: receipts verified by %s", mode)
 
 
 @asynccontextmanager

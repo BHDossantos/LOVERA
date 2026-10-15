@@ -10,7 +10,7 @@ dependencies = [
   "psycopg[binary]>=3.1",
   "pydantic-settings",
   "email-validator",
-  "pyjwt",
+  "pyjwt[crypto]",
   "httpx",
   "anthropic",
   "python-multipart",

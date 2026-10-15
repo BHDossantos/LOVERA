@@ -310,6 +310,7 @@ guideline 2.1 rejection on its own.
 | --- | --- |
 | Product ids → plan and cadence | `apps/api/app/catalog/plans.py` (`STORE_PRODUCTS`) |
 | Receipt endpoint, idempotent on the store's transaction id | `POST /v1/subscriptions/store-purchase` |
+| Receipt verification with Apple and Google | `apps/api/app/modules/billing/stores.py` |
 | Refusal when no validator is configured | `billing/service.record_store_purchase` |
 | Whether the phone may offer a purchase | `GET /v1/plans` → `store.enabled` |
 | Client wrapper, purchase and restore | `apps/mobile/src/lib/purchases.ts` |
@@ -348,25 +349,86 @@ Concierge for nothing.
    anybody else's data. The secret key stays on the server and is not referenced
    anywhere in the app.
 
-4. **Set `MM_STORE_VALIDATION`** on the API. `sandbox` for simulator testing in a
-   non-production environment; `app_store` / `play_store` for real verification —
-   which is the one piece still to be written, and the endpoint says so rather
-   than quietly succeeding.
+4. **Set `MM_STORE_VALIDATION`** on the API, and the credentials that go with it.
+   `sandbox` is for simulator testing in a non-production environment and is
+   refused outright in production. For real verification:
 
-### What is not done
+   **`app_store`** needs an App Store Connect API key — App Store Connect →
+   Users and Access → Integrations → App Store Connect API. Download the `.p8`
+   once; that page never shows it again.
 
-Server-side receipt verification against Apple's and Google's servers
-(`MM_STORE_VALIDATION=app_store` / `play_store`) is not implemented. The endpoint
-refuses rather than stubbing a success, so the gap cannot be shipped by accident.
-Until it is written, the compliant launch posture is in-app purchase off
-(`MM_STORE_VALIDATION=disabled`, which is the default): the mobile app serves
-free-tier members and people who already subscribed on the web, and offers no
-upgrade path, which is fully submittable.
+   ```bash
+   fly secrets set \
+     MM_STORE_VALIDATION=app_store \
+     MM_APP_STORE_ISSUER_ID=<the issuer id on that page> \
+     MM_APP_STORE_KEY_ID=<the key id> \
+     MM_APP_STORE_PRIVATE_KEY="$(base64 -w0 AuthKey_XXXXXXXXXX.p8)"
+   ```
 
-**Not verified here:** the native module (`react-native-purchases`) has been
-installed, autolinks, and survives `expo prebuild` and all 24 native-config
-checks, but no iOS or Android binary has been compiled in this environment. The
-first EAS build is the first real compile.
+   The key is base64'd because a PEM is multi-line and environment variables are
+   where multi-line strings get mangled. The raw PEM and a PEM with literal `\n`
+   are both accepted too — all three shapes are tested.
+
+   **`play_store`** needs the service account JSON whose account has *View app
+   information* and *Release apps to testing tracks* on this app in the Play
+   Console. Membership of the developer account alone is not enough, and the
+   error Google returns when it is missing does not say so — ours does.
+
+   ```bash
+   fly secrets set \
+     MM_STORE_VALIDATION=play_store \
+     MM_PLAY_SERVICE_ACCOUNT_JSON="$(base64 -w0 play-service-account.json)"
+   ```
+
+   Set one or the other per deployment: a receipt from the store the deployment
+   cannot verify is refused rather than guessed at.
+
+   If a credential is missing or unreadable, `GET /plans` reports the store as
+   off with the reason, the app draws no purchase UI, and the boot log says
+   which setting is unset. Nothing half-works.
+
+### How verification actually decides
+
+`stores.py` asks the store and believes nothing else. Worth knowing before you
+switch it on:
+
+- **A refusal and an outage are different answers.** Expired, revoked,
+  cancelled, for another app, for another product — the store said no, the
+  member is told plainly, and nothing is granted. If we simply could not reach
+  Apple or Google, the member is told their money is safe and to try Restore
+  purchases shortly, because the store may well have charged them. Telling
+  somebody their purchase failed when it did not is how a chargeback starts.
+- **Every refusal is written down, in its own transaction.** The request rolls
+  back when it raises, so a refusal row added to the request's session would
+  vanish with it — which is what used to happen, meaning the only rows that ever
+  survived were the grants. A member disputing a charge now leaves a trail, and
+  a phone retrying a dead receipt gets the same answer without us re-asking the
+  store every time.
+- **The period end comes from the store**, not from our arithmetic, so an
+  introductory offer or a mid-period upgrade does not drift from what Apple or
+  Google thinks the member paid for.
+- **Play purchases are acknowledged.** Google automatically refunds and revokes
+  anything unacknowledged within three days; missing that shows up as churn with
+  no cancellations, which looks nothing like its cause.
+- **Sandbox receipts are refused in production.** They are free to make.
+
+### What is not verified here
+
+No iOS or Android binary has been compiled in this environment, and no real
+receipt has been through this code — every test uses a mock transport, which
+pins the requests we send and the decisions we make from the answers, not
+Apple's or Google's live behaviour. The first sandbox purchase on a TestFlight
+build is the first end-to-end proof.
+
+The compliant launch posture if you would rather not switch it on yet is in-app
+purchase off (`MM_STORE_VALIDATION=disabled`, the default): the mobile app
+serves free-tier members and people who already subscribed on the web, offers no
+upgrade path, and is fully submittable.
+
+**Not verified here either:** the native module (`react-native-purchases`) has
+been installed, autolinks, and survives `expo prebuild` and all 34 native-config
+checks, but nothing has been compiled. The first EAS build is the first real
+compile.
 
 ---
 
