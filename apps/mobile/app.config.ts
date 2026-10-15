@@ -218,6 +218,17 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
           NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"],
         },
         {
+          // `deviceId()` in src/api/client.ts mints a random id on first launch, keeps it in the
+          // keychain and sends it with sign-in, every refresh and every push registration; the
+          // server keeps it on PushDevice. It is ours rather than the handset's and it is never
+          // used for advertising, but it is still a stable per-installation identifier, which is
+          // what Apple means by Device ID.
+          NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeDeviceID",
+          NSPrivacyCollectedDataTypeLinked: true,
+          NSPrivacyCollectedDataTypeTracking: false,
+          NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"],
+        },
+        {
           NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypePhotosorVideos",
           NSPrivacyCollectedDataTypeLinked: true,
           NSPrivacyCollectedDataTypeTracking: false,
@@ -226,6 +237,22 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         {
           // Who somebody is seeking, and the identity-verification result.
           NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeSensitiveInfo",
+          NSPrivacyCollectedDataTypeLinked: true,
+          NSPrivacyCollectedDataTypeTracking: false,
+          NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"],
+        },
+        {
+          // Declared even though no location permission is requested and none ever will be: the
+          // member chooses a city and a neighbourhood from `catalog/cities.py`, we store both on
+          // the member, and matching measures distance from the zone's centroid. A neighbourhood
+          // is finer than the 3 km² that separates coarse from nothing at all, so this is coarse
+          // location whatever route it took to get here.
+          //
+          // This is a declaration, not a permission. ACCESS_FINE_LOCATION and
+          // ACCESS_COARSE_LOCATION stay in `blockedPermissions` below and there is no location
+          // purpose string in `infoPlist`; check-native-config.py enforces both. Do not "make
+          // these consistent" by adding a permission — they are answering different questions.
+          NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeCoarseLocation",
           NSPrivacyCollectedDataTypeLinked: true,
           NSPrivacyCollectedDataTypeTracking: false,
           NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"],
@@ -254,10 +281,16 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
           ],
         },
         {
+          // Activating a subscription writes a `subscription_started` analytics event carrying the
+          // plan, price, currency, channel and cadence (modules/billing/service.py), so this is
+          // read for analytics as well as for deciding what the member is entitled to.
           NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypePurchaseHistory",
           NSPrivacyCollectedDataTypeLinked: true,
           NSPrivacyCollectedDataTypeTracking: false,
-          NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"],
+          NSPrivacyCollectedDataTypePurposes: [
+            "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+            "NSPrivacyCollectedDataTypePurposeAnalytics",
+          ],
         },
       ],
     },

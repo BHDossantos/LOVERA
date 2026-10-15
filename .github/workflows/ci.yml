@@ -174,11 +174,11 @@ jobs:
           }
           refuse "no API origin"            EXPO_PUBLIC_API_ORIGIN=  EXPO_PUBLIC_EAS_PROJECT_ID="$real_id"
           refuse "the eas.json placeholder" EXPO_PUBLIC_API_ORIGIN=https://api.example.com EXPO_PUBLIC_EAS_PROJECT_ID="$real_id"
-          refuse "a cleartext origin"       EXPO_PUBLIC_API_ORIGIN=http://api.aimatchmaker.app EXPO_PUBLIC_EAS_PROJECT_ID="$real_id"
-          refuse "no EAS project id"        EXPO_PUBLIC_API_ORIGIN=https://api.aimatchmaker.app
-          refuse "a placeholder project id" EXPO_PUBLIC_API_ORIGIN=https://api.aimatchmaker.app EXPO_PUBLIC_EAS_PROJECT_ID=REPLACE-ME-run-eas-init
+          refuse "a cleartext origin"       EXPO_PUBLIC_API_ORIGIN=http://api.joinlovera.com EXPO_PUBLIC_EAS_PROJECT_ID="$real_id"
+          refuse "no EAS project id"        EXPO_PUBLIC_API_ORIGIN=https://api.joinlovera.com
+          refuse "a placeholder project id" EXPO_PUBLIC_API_ORIGIN=https://api.joinlovera.com EXPO_PUBLIC_EAS_PROJECT_ID=REPLACE-ME-run-eas-init
           accept "a real origin and project id" EAS_BUILD_PROFILE=production \
-                 EXPO_PUBLIC_API_ORIGIN=https://api.aimatchmaker.app EXPO_PUBLIC_EAS_PROJECT_ID="$real_id"
+                 EXPO_PUBLIC_API_ORIGIN=https://api.joinlovera.com EXPO_PUBLIC_EAS_PROJECT_ID="$real_id"
           accept "the development profile, unconfigured" EAS_BUILD_PROFILE=development
           accept "no profile at all, as \`expo start\` runs" EXPO_NO_TELEMETRY=1
         env:

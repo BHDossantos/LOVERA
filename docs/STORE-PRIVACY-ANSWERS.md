@@ -29,25 +29,47 @@ Derived from `apps/api/app/modules/*/service.py` and the models under `apps/api/
 | Messages | `conversations/{id}/messages` | Yes | No |
 | Blueprint answers (values, lifestyle, intentions) | `blueprint/sessions` | Yes | No |
 | Availability windows | `availability` — coarse windows only, never calendar event titles or attendees | Yes | No |
-| City and zone | `me/intent`, chosen from a fixed list (`catalog/cities.py`) | Yes | No |
+| City and **neighbourhood zone** | `me/intent`, chosen from a fixed list (`catalog/cities.py`). Declared as coarse location — see below | Yes | No |
 | Date plans and venues | `date-plans` | Yes | No |
 | Safety reports and any evidence attached | `safety/reports` | Yes | No |
 | Identity verification **result** (pass/fail, over-18, dates) | `verification` — see §4 | Yes | No |
 | Subscription and store purchase records | `subscriptions`, `store_purchases` | Yes | No |
 | Push notification token | `notifications/devices` | Yes | No |
+| Installation identifier | `deviceId()` in `apps/mobile/src/api/client.ts` — a random id kept in the keychain, sent with sign-in, every refresh and every push registration, stored on `PushDevice.device_id` | Yes | No |
 | Product interaction events | `core/analytics.py` — an allow-listed set of event names and properties, written to our own database | Yes | No |
 | Crash/diagnostic data | **None.** There is no crash-reporting SDK in the binary | — | — |
 
+### Location: declared, but never read from the device
+
+These are two different questions and the app answers them differently, on purpose.
+
+**Do we read location from the handset?** No, and that is enforced.
+`apps/mobile/app.config.ts` lists `ACCESS_FINE_LOCATION` and `ACCESS_COARSE_LOCATION` under
+`blockedPermissions`, there is no location purpose string in the iOS `infoPlist`, and
+`apps/mobile/scripts/check-native-config.py` fails the build if either appears. No member is ever
+shown a location prompt.
+
+**Do we hold location data?** Yes, coarse. A member picks a city *and a neighbourhood zone* from
+`apps/api/app/catalog/cities.py`; both are stored on `Member` (`home_city_id`, `home_zone_id`), and
+matching measures distance from the zone's centroid. A neighbourhood is finer than the 3 km² that
+separates Apple's coarse location from nothing at all, and neither store's taxonomy has a category
+for "location the member typed in". So it is declared: **Coarse Location** on Apple,
+**Approximate location** on Play. Precise location is declared nowhere, because none exists —
+there are no raw coordinates for a member anywhere in the system.
+
+An earlier draft of this document withheld the location declaration on the grounds that the member
+entered it. That was the wrong call: under-declaring is a policy strike and over-declaring costs
+nothing, and in any case the zone centroid makes it collected location by any reading.
+
 ### What it does **not** collect, and why that is checkable
 
-- **Device location.** `apps/mobile/app.config.ts` lists `ACCESS_FINE_LOCATION` and
-  `ACCESS_COARSE_LOCATION` under `blockedPermissions`, there is no location purpose string in the
-  iOS `infoPlist`, and `apps/mobile/scripts/check-native-config.py` fails the build if either
-  appears. City and zone are picked from a list, not read from the device.
+- **Precise location.** No permission, no coordinates, no code path.
 - **Audio.** `RECORD_AUDIO` is blocked. Voice notes are a described, non-functional pilot stub
   (`messages/[conversationId]/readiness.tsx`) and record nothing.
-- **Contacts, calendar contents, advertising ID, identifiers for tracking.** No permission, no SDK,
-  no code path.
+- **Advertising identifier.** The installation identifier above is ours, is minted on the device,
+  and is never sent to an ad network — there is no ad SDK in the binary to send it to. It is still
+  declared as a Device ID, because it is stable for the life of the install.
+- **Contacts, calendar contents, identifiers for tracking.** No permission, no SDK, no code path.
 
 ---
 
@@ -64,19 +86,21 @@ Interaction adds **Analytics**).
 | User Content → Photos or Videos | profile photos |
 | User Content → Other User Content | messages, bio, prompts, safety reports |
 | Identifiers → User ID | member id, push token |
+| Identifiers → Device ID | the installation identifier from `deviceId()` |
 | Sensitive Info | **gender and who the member is seeking** |
-| Other Data | date of birth, Blueprint answers, availability, city/zone |
+| Location → Coarse Location | the chosen city and neighbourhood zone |
+| Other Data | date of birth, Blueprint answers, availability |
 | Usage Data → Product Interaction | the analytics events |
-| Purchases → Purchase History | subscription and store purchase records |
+| Purchases → Purchase History | subscription and store purchase records — purpose **App Functionality *and* Analytics**, because activating a subscription writes a `subscription_started` event carrying plan, price, currency, channel and cadence |
 
-**Do not declare Location.** The app collects none, and over-declaring is as wrong as
-under-declaring.
+**Declare Coarse Location, never Precise.** See §1 — the member chooses a neighbourhood, the app
+never reads the device. Answering "Precise Location" would be wrong in the other direction.
 
 **Tracking: No.** There is no advertising SDK, no attribution SDK and no third-party analytics
 vendor in the binary.
 
 These answers must match `ios.privacyManifests` in `apps/mobile/app.config.ts` exactly — they were
-written from the same facts, and seven assertions in `check-native-config.py` hold the manifest to
+written from the same facts, and ten assertions in `check-native-config.py` hold the manifest to
 them.
 
 ---
@@ -91,23 +115,22 @@ Play's categories differ from Apple's. The mapping:
 | Personal info → Email address | Yes | No | App functionality, Account management |
 | Personal info → User IDs | Yes | No | App functionality |
 | Personal info → **Sexual orientation** | Yes | No | App functionality |
-| Personal info → Other info (date of birth, city, Blueprint) | Yes | No | App functionality |
+| Personal info → Other info (date of birth, Blueprint) | Yes | No | App functionality |
+| **Location → Approximate location** | Yes | No | App functionality |
+| Device or other IDs | Yes | No | App functionality |
 | Photos and videos → Photos | Yes | No | App functionality |
 | Messages → Other in-app messages | Yes | No | App functionality |
 | App activity → Other actions | Yes | No | App functionality, Analytics |
-| Financial info → Purchase history | Yes | No | App functionality |
+| Financial info → Purchase history | Yes | No | App functionality, Analytics |
 
-**Location: declare nothing — but read this first.** Play's "Approximate location" means the
-user's physical location. The app never reads it from the device, and the only place a member's
-whereabouts enters the system is the venue *they choose* for a date, which the safety check-in can
-share with a contact they name, retained for 24 hours
-(`checkin_location_retention_hours`, `apps/api/app/core/config.py:32`). I have declared no
-location on the basis that this is member-entered content about a future plan rather than
-collected location. **This is the one judgement call in this document that a reviewer could
-reasonably see differently.** If you would rather be conservative, declare *Location →
-Approximate location*, collected, not shared, purpose "App functionality", and say in the privacy
-policy that it is the venue of a planned date, entered by the member. Being over-inclusive here
-costs nothing; being wrong the other way is a policy strike.
+**Location: declare Approximate, not Precise.** Two things put a member's whereabouts in the
+system, neither of them read from the handset: the neighbourhood zone they pick when they join
+(§1), and the venue they choose for a date, which the safety check-in can share with a contact
+they name, retained for 24 hours (`checkin_location_retention_hours`,
+`apps/api/app/core/config.py:32`). Declare *Location → Approximate location*, collected, not
+shared, purpose "App functionality", and say in the privacy policy that it is a neighbourhood the
+member chose from a list plus the venue of a date they planned. Do **not** declare Precise
+location: there are no device coordinates anywhere in the system.
 
 ### Security practices
 
@@ -143,9 +166,19 @@ settings, several of these are off.
 
 ## 5. Age rating
 
-- **Apple:** 18+. Frequent/Intense "Mature/Suggestive Themes"; everything else None. Answer **Yes**
-  to unrestricted web access only if you keep the in-app browser used for the verification vendor —
-  it opens one vendor URL and nothing else, so **No** is defensible and simpler.
+- **Apple:** 18+. Frequent/Intense "Mature/Suggestive Themes"; every other *content* category
+  None. The questionnaire also asks about capabilities, and three of them are Yes here — a dating
+  app that answers No to all of them is contradicted by its own screenshots:
+  - **User-generated content shown to others:** Yes — profiles, photos and prompt answers. The
+    follow-up asks whether you moderate and whether members can report and block; both are Yes
+    (`moderation_status` on profile media and messages, and a report/block control on every
+    surface that shows another member).
+  - **Messaging or chat between users:** Yes — `conversations`.
+  - **Collects identity or age information:** Yes — date of birth at `me/adult-consent`, and
+    identity verification under `modules/verification`.
+  - **Unrestricted web access:** answer **Yes** only if you keep the in-app browser used by the
+    verification vendor. It opens one vendor URL and nothing else, so **No** is defensible and
+    simpler.
 - **Play:** complete the IARC questionnaire as a dating app; declare the **Dating** app category,
   which triggers extra questions about user-generated content and moderation. The answers are:
   photos and text are moderated (`moderation_status` on profile media and messages), members can
@@ -168,9 +201,10 @@ settings, several of these are off.
 
 ```bash
 python tools/check_legal_facts.py --require-all     # the operator facts still unset
-python apps/mobile/scripts/check-native-config.py   # 31 checks, 7 on the privacy manifest
+npx expo prebuild --platform all --no-install --clean   # ios/ and android/ are generated
+python apps/mobile/scripts/check-native-config.py       # 34 checks, 10 on the privacy manifest
 ```
 
-The manifest the binary carries is `apps/mobile/ios/AIMatchmaker/PrivacyInfo.xcprivacy`, generated
+The manifest the binary carries is `apps/mobile/ios/Lovera/PrivacyInfo.xcprivacy`, generated
 from `ios.privacyManifests` in `apps/mobile/app.config.ts`. If those two and this document ever
 disagree, the manifest is what ships and this document is the one that is wrong.

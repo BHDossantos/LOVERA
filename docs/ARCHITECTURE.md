@@ -1,7 +1,7 @@
 # Architecture
 
 The pilot runs as independently deployable services with a shared PostgreSQL cluster, following the
-AI Matchmaker Implementation Specification v1.0: the backend enforces every trust boundary; the client
+Lovera Implementation Specification v1.0: the backend enforces every trust boundary; the client
 presents decisions but cannot create a conversation, reveal mutual interest, change safety state,
 grant a credit, or activate a subscription.
 
