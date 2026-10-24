@@ -135,6 +135,10 @@ jobs:
       - run: npx expo export --platform android --output-dir /tmp/mobile-export
         env:
           EXPO_NO_TELEMETRY: "1"
+      # iOS resolves platform-specific modules independently of Android.
+      - run: npx expo export --platform ios --output-dir /tmp/mobile-export-ios
+        env:
+          EXPO_NO_TELEMETRY: "1"
       # The stores read AndroidManifest.xml and Info.plist, not app.config.ts, and the
       # two can disagree: a plugin adds a purpose string for a permission we never use, a
       # blocked permission comes back in through manifest merging, an unconfigured splash
