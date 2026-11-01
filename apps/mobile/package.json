@@ -4,7 +4,7 @@
   "main": "expo-router/entry",
   "dependencies": {
     "@tanstack/react-query": "^5.103.2",
-    "expo": "~57.0.24",
+    "expo": "~58.0.22",
     "expo-constants": "~57.0.19",
     "expo-device": "~57.0.2",
     "expo-image-manipulator": "~57.0.21",
