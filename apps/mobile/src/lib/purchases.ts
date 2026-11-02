@@ -71,6 +71,7 @@ function publicKey(): string | null {
  */
 export function availability(store: StoreStatus | undefined): Availability {
   if (!store?.enabled) return { available: false, reason: store?.reason ?? "Memberships cannot be bought in the app yet." };
+  if (Platform.OS !== "ios") return { available: false, reason: "Google Play purchases are unavailable until purchase-token verification is connected." };
   if (!publicKey()) return { available: false, reason: "In-app purchase is not configured in this build." };
   if (!nativeModule()) return { available: false, reason: "This build does not include in-app purchase. It arrives in the next release." };
   return { available: true };
@@ -125,6 +126,7 @@ export type PurchaseResult =
  * the most expensive tier for anybody willing to edit a JSON body.
  */
 export async function purchase(productId: string): Promise<PurchaseResult> {
+  if (Platform.OS !== "ios") return { ok: false, cancelled: false, message: "Google Play purchases are unavailable until purchase-token verification is connected." };
   const mod = nativeModule();
   if (!mod) return { ok: false, cancelled: false, message: "In-app purchase is not available in this build." };
   let transactionId: string | undefined;
@@ -169,10 +171,13 @@ export async function purchase(productId: string): Promise<PurchaseResult> {
 export async function restore(): Promise<PurchaseResult> {
   const mod = nativeModule();
   if (!mod) return { ok: false, cancelled: false, message: "In-app purchase is not available in this build." };
+  if (Platform.OS !== "ios") return { ok: false, cancelled: false, message: "This build cannot verify restored Google Play purchase tokens. Please contact support to recover your membership." };
   try {
     const info = (await mod.restorePurchases()) as {
       nonSubscriptionTransactions?: { transactionIdentifier: string; productIdentifier: string }[];
       allPurchasedProductIdentifiers?: string[];
+      activeSubscriptions?: string[];
+      subscriptionsByProductIdentifier?: Record<string, { productIdentifier: string; storeTransactionId: string | null; store: string; isActive: boolean }>;
       latestExpirationDate?: string | null;
       originalPurchaseDate?: string | null;
     };
@@ -183,14 +188,21 @@ export async function restore(): Promise<PurchaseResult> {
       seen.add(t.transactionIdentifier);
       await post("/subscriptions/store-purchase", { store, product_id: t.productIdentifier, transaction_id: t.transactionIdentifier });
     }
-    // A subscription has no transaction list on every platform, so fall back to the product ids
-    // the store says this account owns. The transaction id is derived from the product and the
-    // app user id, which keeps the server's idempotency key stable across restores.
-    for (const productId of info.allPurchasedProductIdentifiers ?? []) {
-      const key = `${productId}:${configuredFor ?? "unknown"}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      await post("/subscriptions/store-purchase", { store, product_id: productId, transaction_id: key });
+    // RevenueCat 10 exposes real App Store subscription transaction IDs.
+    // Google order IDs are not purchase tokens; Android is guarded above.
+    const restoredProducts = new Set((info.nonSubscriptionTransactions ?? []).map(t => t.productIdentifier));
+    for (const subscription of Object.values(info.subscriptionsByProductIdentifier ?? {})) {
+      if (!subscription.isActive || subscription.store !== "APP_STORE" || !subscription.storeTransactionId) continue;
+      if (!seen.has(subscription.storeTransactionId)) {
+        await post("/subscriptions/store-purchase", { store, product_id: subscription.productIdentifier, transaction_id: subscription.storeTransactionId });
+        seen.add(subscription.storeTransactionId);
+      }
+      restoredProducts.add(subscription.productIdentifier);
+    }
+    // A product ID alone is never a receipt. Do not claim a partial restore
+    // succeeded when an active subscription has no verifiable transaction.
+    if ((info.activeSubscriptions ?? info.allPurchasedProductIdentifiers ?? []).some(id => !restoredProducts.has(id))) {
+      return { ok: false, cancelled: false, message: "The store found purchases, but did not return their subscription receipts. Please try restoring again or contact support to recover your membership." };
     }
     if (seen.size === 0) return { ok: false, cancelled: false, message: "No previous purchase was found for this store account." };
     return { ok: true, entitlementsChanged: true };
