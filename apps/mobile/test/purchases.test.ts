@@ -7,7 +7,7 @@ jest.mock('react-native-purchases', () => ({ restorePurchases: () => mockRestore
 import { restore, purchase, availability } from '../src/lib/purchases';
 import { Platform } from 'react-native';
 
-beforeEach(() => { jest.clearAllMocks(); Platform.OS = 'ios'; mockPost.mockResolvedValue({}); });
+beforeEach(() => { jest.clearAllMocks(); Platform.OS = 'ios'; mockPost.mockResolvedValue({ status: 'granted', entitlements: { paid: true } }); });
 test('never invents a receipt from a product identifier', async () => {
   mockRestore.mockResolvedValue({ allPurchasedProductIdentifiers: ['pro_monthly'] });
   expect((await restore()).ok).toBe(false);
@@ -65,4 +65,13 @@ test.each([
   } });
   expect((await restore()).ok).toBe(false);
   expect(mockPost).not.toHaveBeenCalled();
+});
+
+test.each([
+  { status: 'refused_unavailable', duplicate: true, entitlements: { paid: false } },
+  { status: 'granted', duplicate: true, entitlements: { paid: false } },
+])('does not claim a refused or foreign receipt replay restored membership: %j', async response => {
+  mockRestore.mockResolvedValue({ nonSubscriptionTransactions: [{ transactionIdentifier: 'store-123', productIdentifier: 'product-1' }] });
+  mockPost.mockResolvedValue(response);
+  expect((await restore()).ok).toBe(false);
 });

@@ -113,6 +113,16 @@ export async function products(productIds: string[]): Promise<StoreProduct[]> {
   }
 }
 
+/** A 200 response can be an idempotent replay of a refused receipt. */
+async function recordReceipt(store: string, productId: string, transactionId: string): Promise<void> {
+  const result = await post<{ status: string; entitlements?: { paid?: boolean } }>("/subscriptions/store-purchase", {
+    store, product_id: productId, transaction_id: transactionId,
+  });
+  if (result.status !== "granted" || result.entitlements?.paid !== true) {
+    throw new Error("The server could not grant this purchase to your membership. Please contact support.");
+  }
+}
+
 export type PurchaseResult =
   | { ok: true; entitlementsChanged: true }
   | { ok: false; cancelled: true }
@@ -143,11 +153,7 @@ export async function purchase(productId: string): Promise<PurchaseResult> {
     return { ok: false, cancelled: false, message: "The store did not return a receipt. If you were charged, restore purchases to finish." };
   }
   try {
-    await post("/subscriptions/store-purchase", {
-      store: Platform.OS === "ios" ? "app_store" : "play_store",
-      product_id: productId,
-      transaction_id: transactionId,
-    });
+    await recordReceipt("app_store", productId, transactionId);
     return { ok: true, entitlementsChanged: true };
   } catch (err) {
     // The store has taken the money and we could not record it. Restoring replays the same
@@ -186,7 +192,7 @@ export async function restore(): Promise<PurchaseResult> {
     for (const t of info.nonSubscriptionTransactions ?? []) {
       if (seen.has(t.transactionIdentifier)) continue;
       seen.add(t.transactionIdentifier);
-      await post("/subscriptions/store-purchase", { store, product_id: t.productIdentifier, transaction_id: t.transactionIdentifier });
+      await recordReceipt(store, t.productIdentifier, t.transactionIdentifier);
     }
     // RevenueCat 10 exposes real App Store subscription transaction IDs.
     // Google order IDs are not purchase tokens; Android is guarded above.
@@ -194,7 +200,7 @@ export async function restore(): Promise<PurchaseResult> {
     for (const subscription of Object.values(info.subscriptionsByProductIdentifier ?? {})) {
       if (!subscription.isActive || subscription.store !== "APP_STORE" || !subscription.storeTransactionId) continue;
       if (!seen.has(subscription.storeTransactionId)) {
-        await post("/subscriptions/store-purchase", { store, product_id: subscription.productIdentifier, transaction_id: subscription.storeTransactionId });
+        await recordReceipt(store, subscription.productIdentifier, subscription.storeTransactionId);
         seen.add(subscription.storeTransactionId);
       }
       restoredProducts.add(subscription.productIdentifier);
