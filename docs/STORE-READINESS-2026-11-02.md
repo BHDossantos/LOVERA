@@ -26,5 +26,5 @@ Direct iOS receipt verification remains available for its existing mode; Android
 - `python tools/check_query_keys.py`: 123 operations pass.
 - `python tools/check_upload_types.py`: 3 picker/API mappings pass.
 - `python tools/check_legal_facts.py`: no drift; 12 missing operator facts remain.
-- `CI=1 EXPO_NO_TELEMETRY=1 npm run lint` attempted: no ESLint config; automatic setup hits a proxy Forbidden response. Lint is not claimed as passed.
+- `CI=1 EXPO_NO_TELEMETRY=1 npm run lint` initially could not bootstrap its missing config through the proxy. A temporary SDK 57-aligned ESLint config/dependency installation subsequently ran and reported 33 errors / 10 warnings across existing screens and shared hooks (including React compiler rules). Temporary tooling changes were removed to avoid folding a broad lint migration into billing. Lint is not passed; this remains separate code-quality work.
 - Signed native builds, sandbox store accounts and live receipt services were not exercised.
