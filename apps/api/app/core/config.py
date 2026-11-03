@@ -60,7 +60,9 @@ class Settings(BaseSettings):
     # There is deliberately no value that trusts the client in production. A missing validator has
     # to fail closed: the worst outcome of refusing is that nobody can buy, and the worst outcome
     # of trusting is that everybody gets Concierge for nothing.
-    store_validation: str = "disabled"  # disabled | sandbox | app_store | play_store
+    store_validation: str = "disabled"  # disabled | sandbox | app_store | play_store | revenuecat
+    revenuecat_secret_api_key: str | None = None
+    revenuecat_webhook_authorization: str | None = None
 
     # App Store Server API. The issuer id and key id come from App Store Connect → Users and
     # Access → Integrations → App Store Connect API; the private key is the contents of the .p8

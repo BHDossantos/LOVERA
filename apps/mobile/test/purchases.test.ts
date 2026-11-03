@@ -1,10 +1,13 @@
 const mockRestore = jest.fn();
 const mockPost = jest.fn();
-jest.mock('expo-constants', () => ({ expoConfig: { extra: {} } }));
+const mockBuy = jest.fn();
+const mockConfigure = jest.fn();
+const mockLogin = jest.fn();
+jest.mock('expo-constants', () => ({ expoConfig: { extra: { revenueCat: { ios: 'ios-public-test', android: 'android-public-test' } } } }));
 jest.mock('react-native', () => ({ Platform: { OS: 'ios' } }));
 jest.mock('@/api/client', () => ({ post: (...args: unknown[]) => mockPost(...args) }));
-jest.mock('react-native-purchases', () => ({ restorePurchases: () => mockRestore() }));
-import { restore, purchase, availability } from '../src/lib/purchases';
+jest.mock('react-native-purchases', () => ({ restorePurchases: () => mockRestore(), purchaseProduct: (...args: unknown[]) => mockBuy(...args), configure: (...args: unknown[]) => mockConfigure(...args), logIn: (...args: unknown[]) => mockLogin(...args) }));
+import { restore, purchase, availability, configure } from '../src/lib/purchases';
 import { Platform } from 'react-native';
 
 beforeEach(() => { jest.clearAllMocks(); Platform.OS = 'ios'; mockPost.mockResolvedValue({ status: 'granted', entitlements: { paid: true } }); });
@@ -74,4 +77,40 @@ test.each([
   mockRestore.mockResolvedValue({ nonSubscriptionTransactions: [{ transactionIdentifier: 'store-123', productIdentifier: 'product-1' }] });
   mockPost.mockResolvedValue(response);
   expect((await restore()).ok).toBe(false);
+});
+
+test('enables Android only when a server RevenueCat verifier is available', () => {
+  Platform.OS = 'android';
+  expect(availability({ enabled: true, validation: 'revenuecat', reason: null, products: {} }).available).toBe(true);
+});
+test('purchases Android through the SDK and reconciles without sending an order ID as a token', async () => {
+  Platform.OS = 'android';
+  await configure('android-buyer');
+  mockBuy.mockResolvedValue({ transaction: { transactionIdentifier: 'GPA.order' } });
+  expect((await purchase('pro_monthly', 'revenuecat')).ok).toBe(true);
+  expect(mockPost).toHaveBeenCalledWith('/subscriptions/store-sync');
+  expect(mockPost).not.toHaveBeenCalledWith('/subscriptions/store-purchase', expect.anything());
+});
+test('restores Android and asks the server to verify instead of trusting CustomerInfo', async () => {
+  Platform.OS = 'android';
+  await configure('android-restorer');
+  mockRestore.mockResolvedValue({ entitlements: { active: { concierge: {} } } });
+  mockPost.mockResolvedValue({ status: 'no_active_purchase', entitlements: { paid: false } });
+  expect((await restore('revenuecat')).ok).toBe(false);
+  expect(mockRestore).toHaveBeenCalled();
+  expect(mockPost).toHaveBeenCalledWith('/subscriptions/store-sync');
+});
+test('tells a charged Android buyer to restore after a temporary verification outage', async () => {
+  Platform.OS = 'android';
+  await configure('android-outage');
+  mockBuy.mockResolvedValue({ transaction: { transactionIdentifier: 'GPA.order' } });
+  mockPost.mockRejectedValue(new Error('Network unavailable'));
+  expect(await purchase('pro_monthly', 'revenuecat')).toEqual(expect.objectContaining({ ok: false, message: expect.stringContaining('do not buy again') }));
+});
+test('waits for RevenueCat identity changes and fails closed when login fails', async () => {
+  await configure('identity-first');
+  mockLogin.mockRejectedValueOnce(new Error('Login failed'));
+  expect(await configure('identity-second')).toBe(false);
+  expect((await purchase('pro_monthly', 'revenuecat')).ok).toBe(false);
+  expect(mockBuy).not.toHaveBeenCalled();
 });

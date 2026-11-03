@@ -41,7 +41,7 @@ log = logging.getLogger(__name__)
 
 def current_subscription(db: Session, member_id: str) -> Subscription | None:
     sub = db.execute(select(Subscription).where(Subscription.member_id == member_id, Subscription.status.in_(("trialing", "active", "past_due"))).order_by(Subscription.started_at.desc())).scalars().first()
-    if sub and sub.current_period_end and sub.current_period_end <= utcnow() and sub.cancel_at_period_end:
+    if sub and sub.current_period_end and sub.current_period_end <= utcnow() and (sub.cancel_at_period_end or sub.provider in ("app_store", "play_store", "revenuecat")):
         sub.status = "expired"
         return None
     return sub
@@ -99,6 +99,10 @@ def entitlements_for(db: Session, member: Member) -> dict[str, Any]:
     # by one as `paid`, which meant Concierge granted exactly what Pro did at more than twice the
     # price while its bullets promised two things it never delivered.
     out: dict[str, Any] = {FEATURE: grants(plan_id, FEATURE) for FEATURE in FEATURES}
+    store = sub.provider if sub else None
+    if sub and sub.provider == "revenuecat":
+        store = db.scalar(select(StorePurchase.store).where(StorePurchase.subscription_id == sub.id).order_by(StorePurchase.created_at.desc()).limit(1))
+    management_url = "https://apps.apple.com/account/subscriptions" if store == "app_store" else "https://play.google.com/store/account/subscriptions" if store == "play_store" else None
     out.update(
         {
             "plan": plan_id,
@@ -119,6 +123,7 @@ def entitlements_for(db: Session, member: Member) -> dict[str, Any]:
             "price_cents": term.price_cents if term else price_cents(plan_id, "monthly"),
             "currency": term.currency if term else PLANS[plan_id]["currency"],
             "renews_at": iso(sub.current_period_end) if sub else None,
+            "management_url": management_url,
             "cancel_at_period_end": bool(sub.cancel_at_period_end) if sub else False,
             "status": sub.status if sub else "none",
         }
@@ -144,6 +149,9 @@ def store_status() -> dict[str, Any]:
         # surface as a member tapping Subscribe, being charged by the store, and then being told we
         # cannot verify it — so the absence is reported here, before anything is drawn.
         reason = stores.missing_configuration(mode)
+    elif mode == "revenuecat":
+        from app.modules.billing.revenuecat import missing_configuration
+        reason = missing_configuration()
     elif mode != "sandbox":
         reason = f"Unknown MM_STORE_VALIDATION value {mode!r}."
     return {"enabled": reason is None, "validation": mode, "reason": reason, "products": dict(STORE_PRODUCTS)}
@@ -231,9 +239,13 @@ def record_store_purchase(db: Session, member: Member, store: str, product_id: s
         select(StorePurchase).where(StorePurchase.store == store, StorePurchase.transaction_id == transaction_id)
     ).scalar_one_or_none()
     if existing:
-        # A replay — a retry, a restore-purchases, or somebody trying it on. Same answer either
-        # way, and no second subscription.
-        return {"status": existing.status, "duplicate": True, "entitlements": entitlements_for(db, member)}
+        if existing.member_id != member.id or existing.product_id != product_id:
+            raise ApiError("CONFLICT", "This receipt is associated with a different purchase or membership.")
+        if existing.status not in {"refused_unavailable", "refused_unverified", "refused_wrong_store"}:
+            return {"status": existing.status, "duplicate": True, "entitlements": entitlements_for(db, member)}
+        # A transient outage or missing configuration is not a permanent receipt
+        # verdict. Reverify and reuse the row; retain the original audit entry.
+
 
     mapped = STORE_PRODUCTS.get(product_id)
     if mapped is None:
@@ -248,6 +260,9 @@ def record_store_purchase(db: Session, member: Member, store: str, product_id: s
             "DEPENDENCY_UNAVAILABLE",
             status["reason"] or "Purchases cannot be verified right now. You have not been charged by us, and anything the store charged will be refunded by the store.",
         )
+
+    if settings.store_validation == "revenuecat":
+        raise ApiError("VALIDATION_ERROR", "Use store-sync for RevenueCat verification.")
 
     period_end: datetime | None = None
     if settings.store_validation in ("app_store", "play_store"):
@@ -284,7 +299,12 @@ def record_store_purchase(db: Session, member: Member, store: str, product_id: s
         period_end = receipt.expires_at
 
     sub = activate_subscription(db, member.id, plan_id, store, f"{store}:{transaction_id}", cadence=cadence, period_end=period_end)
-    db.add(StorePurchase(member_id=member.id, store=store, product_id=product_id, transaction_id=transaction_id, plan=plan_id, cadence=cadence, status="granted", validated_by=settings.store_validation, subscription_id=sub.id))
+    if existing:
+        existing.plan, existing.cadence = plan_id, cadence
+        existing.status, existing.validated_by = "granted", settings.store_validation
+        existing.subscription_id = sub.id
+    else:
+        db.add(StorePurchase(member_id=member.id, store=store, product_id=product_id, transaction_id=transaction_id, plan=plan_id, cadence=cadence, status="granted", validated_by=settings.store_validation, subscription_id=sub.id))
     db.flush()
     audit(db, actor_type="member", actor_id=member.id, action="billing.store_purchase_granted", resource_type="subscription", resource_id=sub.id, metadata={"product_id": product_id, "store": store})
     return {"status": "granted", "duplicate": False, "entitlements": entitlements_for(db, member)}
@@ -352,6 +372,8 @@ def cancel(db: Session, member: Member, reason: str | None) -> dict[str, Any]:
     sub = current_subscription(db, member.id)
     if sub is None:
         raise ApiError("CONFLICT", "You do not have an active subscription.")
+    if sub.provider in ("app_store", "play_store", "revenuecat"):
+        raise ApiError("CONFLICT", "Manage cancellation in the store where you subscribed. No cancellation has been made here.")
     sub.cancel_at_period_end = True
     sub.cancelled_at = utcnow()
     sub.cancel_reason = (reason or "")[:48] or None

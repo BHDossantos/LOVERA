@@ -71,7 +71,8 @@ function publicKey(): string | null {
  */
 export function availability(store: StoreStatus | undefined): Availability {
   if (!store?.enabled) return { available: false, reason: store?.reason ?? "Memberships cannot be bought in the app yet." };
-  if (Platform.OS !== "ios") return { available: false, reason: "Google Play purchases are unavailable until purchase-token verification is connected." };
+  if (Platform.OS !== "ios" && Platform.OS !== "android") return { available: false, reason: "Store purchases require an iOS or Android device." };
+  if (Platform.OS === "android" && store.validation !== "revenuecat") return { available: false, reason: "Google Play server verification is not configured." };
   if (!publicKey()) return { available: false, reason: "In-app purchase is not configured in this build." };
   if (!nativeModule()) return { available: false, reason: "This build does not include in-app purchase. It arrives in the next release." };
   return { available: true };
@@ -85,18 +86,35 @@ export function availability(store: StoreStatus | undefined): Availability {
  * work once per member and returns false when purchases are unavailable, so callers can treat it
  * as "did this work".
  */
-export function configure(memberId: string): boolean {
-  const mod = nativeModule();
-  const key = publicKey();
-  if (!mod || !key) return false;
-  if (configuredFor === memberId) return true;
-  try {
-    mod.configure({ apiKey: key, appUserID: memberId });
-    configuredFor = memberId;
-    return true;
-  } catch {
-    return false;
+let identityChange: Promise<boolean> = Promise.resolve(false);
+let initialized = false;
+export function configure(memberId: string): Promise<boolean> {
+  identityChange = identityChange.then(async () => {
+    const mod = nativeModule();
+    const key = publicKey();
+    if (!mod || !key || !memberId) return false;
+    if (configuredFor === memberId) return true;
+    configuredFor = null;
+    try {
+      if (!initialized) {
+        mod.configure({ apiKey: key, appUserID: memberId });
+        initialized = true;
+      } else {
+        await mod.logIn(memberId);
+      }
+      configuredFor = memberId;
+      return true;
+    } catch { return false; }
+  });
+  return identityChange;
+}
+
+async function reconcile(): Promise<PurchaseResult> {
+  const result = await post<{ status: string; entitlements?: { paid?: boolean } }>("/subscriptions/store-sync");
+  if (result.status !== "granted" || result.entitlements?.paid !== true) {
+    return { ok: false, cancelled: false, message: "No active verified membership was found. If you just paid, try Restore purchases again shortly." };
   }
+  return { ok: true, entitlementsChanged: true };
 }
 
 export type StoreProduct = { productId: string; priceLabel: string };
@@ -135,13 +153,19 @@ export type PurchaseResult =
  * to a plan and a cadence. A client that decided its own entitlements would be a free upgrade to
  * the most expensive tier for anybody willing to edit a JSON body.
  */
-export async function purchase(productId: string): Promise<PurchaseResult> {
-  if (Platform.OS !== "ios") return { ok: false, cancelled: false, message: "Google Play purchases are unavailable until purchase-token verification is connected." };
+export async function purchase(productId: string, validation = "app_store"): Promise<PurchaseResult> {
+  if (Platform.OS !== "ios" && validation !== "revenuecat") return { ok: false, cancelled: false, message: "Google Play purchases are unavailable until purchase-token verification is connected." };
   const mod = nativeModule();
   if (!mod) return { ok: false, cancelled: false, message: "In-app purchase is not available in this build." };
+  if (validation === "revenuecat" && !configuredFor) return { ok: false, cancelled: false, message: "Sign in again before purchasing." };
   let transactionId: string | undefined;
   try {
     const result = await mod.purchaseProduct(productId);
+    if (validation === "revenuecat") {
+      try { return await reconcile(); } catch {
+        return { ok: false, cancelled: false, message: "Your store purchase completed, but verification is temporarily unavailable. Try Restore purchases; do not buy again." };
+      }
+    }
     transactionId = result.transaction?.transactionIdentifier;
   } catch (err) {
     // RevenueCat reports a user cancelling as an error with a flag. Cancelling is not a failure
@@ -174,10 +198,19 @@ export async function purchase(productId: string): Promise<PurchaseResult> {
  * recovery route when a purchase succeeded at the store and failed to reach us. Every transaction
  * it finds is replayed to the server, which is idempotent on the transaction id.
  */
-export async function restore(): Promise<PurchaseResult> {
+export async function restore(validation = "app_store"): Promise<PurchaseResult> {
   const mod = nativeModule();
   if (!mod) return { ok: false, cancelled: false, message: "In-app purchase is not available in this build." };
-  if (Platform.OS !== "ios") return { ok: false, cancelled: false, message: "This build cannot verify restored Google Play purchase tokens. Please contact support to recover your membership." };
+  if (validation === "revenuecat") {
+    if (!configuredFor) return { ok: false, cancelled: false, message: "Sign in again before restoring." };
+    try {
+      await mod.restorePurchases();
+      return await reconcile();
+    } catch {
+      return { ok: false, cancelled: false, message: "We could not verify your purchases. Try Restore purchases again; no new purchase is needed." };
+    }
+  }
+  if (Platform.OS !== "ios") return { ok: false, cancelled: false, message: "Google Play server verification is not configured." };
   try {
     const info = (await mod.restorePurchases()) as {
       nonSubscriptionTransactions?: { transactionIdentifier: string; productIdentifier: string }[];

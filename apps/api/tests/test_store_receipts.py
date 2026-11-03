@@ -593,3 +593,22 @@ def test_a_refused_receipt_replayed_is_still_refused(client, monkeypatch, apple)
     assert second.json()["duplicate"] is True
     assert second.json()["status"] == "refused_expired"
     assert a.get("/subscriptions/current").json()["entitlements"]["plan"] == "free"
+
+
+def test_temporary_store_failure_is_reverified_on_restore(client, monkeypatch, apple):
+    a = member(client, 'store-transient-retry')
+    tx = uuid.uuid4().hex
+    body = {'store': 'app_store', 'product_id': 'pro_monthly', 'transaction_id': tx}
+    calls = []
+    def verify(*args):
+        calls.append(args)
+        if len(calls) == 1:
+            raise stores.ReceiptUnavailable('temporary test outage')
+        return stores.VerifiedReceipt('pro_monthly', tx, datetime.now(timezone.utc) + timedelta(days=30), 'production')
+    monkeypatch.setattr(stores, 'verify', verify)
+    assert a.post('/subscriptions/store-purchase', json=body).status_code == 503
+    response = a.post('/subscriptions/store-purchase', json=body)
+    assert response.status_code == 200, response.text
+    assert response.json()['status'] == 'granted'
+    assert response.json()['entitlements']['paid']
+    assert len(calls) == 2

@@ -2,11 +2,13 @@
 
 Keep this draft. Main pushes can trigger EAS production builds/submissions or OTA updates and container publishing. No merge, deployment, EAS lookup, native build, store submission, credential or setting change is authorized by this work.
 
-## Receipt correction
+## Receipt correction (updated 3 November)
 
-RevenueCat 10.12.2 exposes `subscriptionsByProductIdentifier` and `storeTransactionId` (verified in installed TypeScript declarations). iOS restore now submits genuine active App Store subscription transactions to the existing server verifier. Product/member concatenations are never submitted as receipts. Duplicate IDs are replayed once; missing receipts and partial restores return failure instead of claiming success. Existing non-subscription iOS replay remains supported. A 200 response only counts as success when the server reports a grant and paid entitlements; refused-receipt replays cannot become false success. The existing backend permanently caches refusal rows, including temporary verifier outages, so retryable-refusal reconciliation remains a backend release gate.
+Both native platforms now support authenticated RevenueCat server reconciliation when `MM_STORE_VALIDATION=revenuecat`. Set server-only `MM_REVENUECAT_SECRET_API_KEY`, configure the existing catalog SKUs in RevenueCat, and configure `MM_REVENUECAT_WEBHOOK_AUTHORIZATION` plus `/v1/webhooks/revenuecat`. Keep the existing platform public SDK keys in the mobile build. No credential or provider setting was changed here.
 
-Google Play verification expects a purchase token, while the current SDK path returns a transaction/order identifier. Android purchase availability and the purchase function now fail before charging; restore reports the limitation. Remaining work: an authenticated server-side RevenueCat reconciliation path or a native purchase-token bridge, renewal/refund handling and sandbox/device purchase/restore tests. No customer is charged in tests. No client-provided entitlement is trusted as a server grant.
+The server fetches only the signed-in member's customer record; mobile cannot select a different identity or claim a plan. Verified known store transactions, expiry/grace periods, sandbox rejection in production and receipt ownership determine access. Webhooks re-fetch provider state rather than trusting event grants. Expired/refunded subscriptions lose access. Temporary verification refusals can be retried. A charged purchase with an API outage tells the customer to restore instead of buy again. Store subscriptions use Apple/Google subscription management, not a misleading local cancel flag.
+
+Direct iOS receipt verification remains available for its existing mode; Android requires RevenueCat mode rather than treating an order ID as a Google purchase token. Real sandbox/device purchase, renewal, restore, refund and offline-recovery tests are still release gates. Decide RevenueCat account-transfer behavior and resolve ownership conflicts through support before enabling production billing.
 
 ## Existing PRs and safety
 
@@ -18,7 +20,8 @@ Google Play verification expects a purchase token, while the current SDK path re
 ## Validation
 
 - Mobile TypeScript passes.
-- Full mobile suite: 22 suites / 180 tests passed, including 13 receipt regressions.
+- Full mobile suite: 22 suites / 185 tests passed, including 18 purchase regressions.
+- Full API suite: 201 passed on isolated local PostgreSQL 17, including RevenueCat and retry regressions.
 - `python tools/check_safety_target.py`: 157 screens pass.
 - `python tools/check_query_keys.py`: 123 operations pass.
 - `python tools/check_upload_types.py`: 3 picker/API mappings pass.
