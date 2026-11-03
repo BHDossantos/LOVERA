@@ -129,3 +129,151 @@ def test_expired_store_access_does_not_survive_without_cancellation_flag(client,
         sub.cancel_at_period_end = False
         db.flush()
         assert not entitlements_for(db, db.get(Member, a.id))['paid']
+
+@pytest.mark.parametrize('change', [{'refunded_at': '2026-01-01T00:00:00Z'}, {'expires_date': '2020-01-01T00:00:00Z'}])
+def test_native_refund_or_expiry_preserves_separately_paid_subscription(client, provider, change):
+    from app.modules.billing import service
+    data, requests = provider
+    a = member(client, 'rc-overlap-' + uuid.uuid4().hex)
+    with session_factory()() as db:
+        paid = service.activate_subscription(db, a.id, 'concierge', 'payments', 'external-' + a.id)
+        paid_id = paid.id
+        db.commit()
+    assert a.post('/subscriptions/store-sync').json()['entitlements']['plan'] == 'concierge'
+    data['pro_monthly'].update(change)
+    assert a.post('/subscriptions/store-sync').json()['entitlements']['plan'] == 'concierge'
+    assert all(request.method == 'GET' for request in requests)
+    with session_factory()() as db:
+        assert db.get(Subscription, paid_id).status == 'active'
+        assert db.get(Subscription, paid_id).cancelled_at is None
+
+
+def test_native_products_renew_independently_and_fall_back_to_remaining_paid_tier(client, provider):
+    data, _ = provider
+    a = member(client, 'rc-two-products')
+    data['concierge_annual'] = {**data['pro_monthly'], 'store': 'app_store', 'store_transaction_id': 'apple-' + a.id}
+    assert a.post('/subscriptions/store-sync').json()['entitlements']['plan'] == 'concierge'
+    data['pro_monthly']['expires_date'] = (utcnow() + timedelta(days=90)).isoformat()
+    data['pro_monthly']['store_transaction_id'] += '-renewal'
+    assert a.post('/subscriptions/store-sync').json()['entitlements']['plan'] == 'concierge'
+    data['concierge_annual']['refunded_at'] = utcnow().isoformat()
+    result = a.post('/subscriptions/store-sync').json()['entitlements']
+    assert result['plan'] == 'pro'
+    assert result['renews_at'].startswith(data['pro_monthly']['expires_date'][:10])
+    with session_factory()() as db:
+        rows = db.scalars(select(Subscription).where(Subscription.member_id == a.id)).all()
+        assert len(rows) == 2
+        assert {row.plan: row.status for row in rows} == {'pro': 'active', 'concierge': 'expired'}
+
+
+def test_expired_newest_subscription_does_not_hide_older_paid_provider(client, provider):
+    from app.modules.billing import service
+    from app.models.account import Member
+    a = member(client, 'rc-expiry-fallback')
+    with session_factory()() as db:
+        external = service.activate_subscription(db, a.id, 'pro', 'payments', 'external-' + a.id)
+        native = service.activate_subscription(db, a.id, 'concierge', 'app_store', 'native-' + a.id, period_end=utcnow() - timedelta(seconds=1))
+        entitlement = service.entitlements_for(db, db.get(Member, a.id))
+        assert entitlement['plan'] == 'pro'
+        assert [row['id'] for row in entitlement['subscriptions']] == [external.id]
+        assert external.status == 'active'
+        assert native.status == 'expired'
+        db.commit()
+
+
+def test_subscription_reference_cannot_cross_members_or_providers(client):
+    from app.modules.billing import service
+    from app.core.errors import ApiError
+    a, b = member(client, 'ref-owner'), member(client, 'ref-thief')
+    with session_factory()() as db:
+        service.activate_subscription(db, a.id, 'pro', 'payments', 'owned-reference')
+        db.commit()
+    for owner, provider in ((b.id, 'payments'), (a.id, 'app_store')):
+        with session_factory()() as db, pytest.raises(ApiError):
+            service.activate_subscription(db, owner, 'pro', provider, 'owned-reference')
+
+
+def test_concurrent_same_member_reconcile_is_idempotent_and_preserves_other_provider(client, provider):
+    from concurrent.futures import ThreadPoolExecutor
+    from app.modules.billing import service
+    from app.models.account import Member
+    a = member(client, 'rc-parallel')
+    with session_factory()() as db:
+        service.activate_subscription(db, a.id, 'concierge', 'payments', 'external-' + a.id)
+        db.commit()
+    def reconcile(_):
+        with session_factory()() as db:
+            result = revenuecat.sync(db, db.get(Member, a.id))
+            db.commit()
+            return result['entitlements']['plan']
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert list(pool.map(reconcile, range(2))) == ['concierge', 'concierge']
+    with session_factory()() as db:
+        rows = db.scalars(select(Subscription).where(Subscription.member_id == a.id)).all()
+        assert len(rows) == 2
+        assert all(row.status == 'active' for row in rows)
+        assert db.scalar(select(func.count()).select_from(StorePurchase).where(StorePurchase.member_id == a.id)) == 1
+
+
+def test_paid_member_cannot_create_another_checkout(client, provider):
+    a = member(client, 'rc-no-second-checkout')
+    assert a.post('/subscriptions/store-sync').status_code == 200
+    response = a.post('/subscriptions/checkout', json={'plan': 'concierge', 'cadence': 'monthly'})
+    assert response.status_code == 409, response.text
+
+@pytest.mark.parametrize('field', ['aliases', 'original_app_user_id'])
+@pytest.mark.parametrize('change', ['refund', 'renewal'])
+def test_anonymous_webhook_resolves_known_identity_without_linking_accounts(client, provider, monkeypatch, field, change):
+    data, requests = provider
+    a = member(client, 'rc-alias-' + uuid.uuid4().hex)
+    assert a.post('/subscriptions/store-sync').status_code == 200
+    monkeypatch.setattr(get_settings(), 'revenuecat_webhook_authorization', 'test-alias-auth')
+    if change == 'refund':
+        data['pro_monthly']['refunded_at'] = utcnow().isoformat()
+    else:
+        data['pro_monthly']['expires_date'] = (utcnow() + timedelta(days=90)).isoformat()
+    event = {'app_user_id': '$RCAnonymousID:unknown', field: [a.id, a.id, 'unknown-identity'] if field == 'aliases' else a.id, 'plan': 'concierge'}
+    before = len(requests)
+    response = client.post('/v1/webhooks/revenuecat', json={'event': event}, headers={'Authorization': 'test-alias-auth'})
+    assert response.status_code == 200, response.text
+    assert len(requests) == before + 1
+    assert requests[-1].url.path.endswith('/' + a.id)
+    with session_factory()() as db:
+        sub = db.scalar(select(Subscription).where(Subscription.member_id == a.id))
+        assert sub.status == ('expired' if change == 'refund' else 'active')
+        if change == 'renewal':
+            assert sub.current_period_end > utcnow() + timedelta(days=89)
+
+
+def test_unknown_and_malformed_aliases_never_create_or_reconcile_members(client, provider, monkeypatch):
+    _, requests = provider
+    monkeypatch.setattr(get_settings(), 'revenuecat_webhook_authorization', 'test-alias-auth')
+    for aliases, expected in [(['unknown-member'], 200), ('not-an-array', 422)]:
+        response = client.post('/v1/webhooks/revenuecat', json={'event': {'app_user_id': '$RCAnonymousID:unknown', 'aliases': aliases}}, headers={'Authorization': 'test-alias-auth'})
+        assert response.status_code == expected, response.text
+    assert not requests
+
+
+def test_concurrent_cross_member_receipt_claim_has_one_owner(client, provider):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from app.models.account import Member
+    from app.core.errors import ApiError
+    a, b = member(client, 'rc-race-owner-a'), member(client, 'rc-race-owner-b')
+    barrier = Barrier(2)
+    def claim(member_id):
+        with session_factory()() as db:
+            user = db.get(Member, member_id)
+            barrier.wait(timeout=10)
+            try:
+                result = revenuecat.sync(db, user)
+                db.commit()
+                return result['status']
+            except ApiError:
+                db.rollback()
+                return 'conflict'
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert sorted(pool.map(claim, [a.id, b.id])) == ['conflict', 'granted']
+    with session_factory()() as db:
+        assert db.scalar(select(func.count()).select_from(StorePurchase).where(StorePurchase.member_id.in_([a.id, b.id]))) == 1
+        assert db.scalar(select(func.count()).select_from(Subscription).where(Subscription.member_id.in_([a.id, b.id]))) == 1

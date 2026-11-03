@@ -612,3 +612,43 @@ def test_temporary_store_failure_is_reverified_on_restore(client, monkeypatch, a
     assert response.json()['status'] == 'granted'
     assert response.json()['entitlements']['paid']
     assert len(calls) == 2
+
+
+def test_previously_granted_direct_receipt_is_reverified_and_refund_persists(client, monkeypatch, apple):
+    a = member(client, 'store-grant-refund')
+    tx = uuid.uuid4().hex
+    body = {'store': 'app_store', 'product_id': 'pro_monthly', 'transaction_id': tx}
+    calls = []
+    def verify(*args):
+        calls.append(args)
+        if len(calls) > 1:
+            raise stores.ReceiptRefused('revoked', 'Refunded by store')
+        return stores.VerifiedReceipt('pro_monthly', tx, datetime.now(timezone.utc) + timedelta(days=30), 'production')
+    monkeypatch.setattr(stores, 'verify', verify)
+    assert a.post('/subscriptions/store-purchase', json=body).json()['status'] == 'granted'
+    response = a.post('/subscriptions/store-purchase', json=body)
+    assert response.json()['status'] == 'refused_revoked'
+    assert not response.json()['entitlements']['paid']
+    assert len(calls) == 2
+    assert not a.get('/subscriptions/current').json()['entitlements']['paid']
+
+
+def test_direct_restore_outage_never_extends_previously_verified_expiry(client, monkeypatch, apple):
+    from app.core.db import session_factory
+    from app.models.billing import Subscription
+    from sqlalchemy import select
+    a = member(client, 'store-grant-outage')
+    tx = uuid.uuid4().hex
+    expiry = datetime.now(timezone.utc) + timedelta(days=1)
+    body = {'store': 'app_store', 'product_id': 'pro_monthly', 'transaction_id': tx}
+    monkeypatch.setattr(stores, 'verify', lambda *args: stores.VerifiedReceipt('pro_monthly', tx, expiry, 'production'))
+    assert a.post('/subscriptions/store-purchase', json=body).status_code == 200
+    def unavailable(*args): raise stores.ReceiptUnavailable('offline')
+    monkeypatch.setattr(stores, 'verify', unavailable)
+    assert a.post('/subscriptions/store-purchase', json=body).status_code == 503
+    with session_factory()() as db:
+        sub = db.scalar(select(Subscription).where(Subscription.member_id == a.id))
+        assert sub.current_period_end == expiry
+        sub.current_period_end = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db.commit()
+    assert not a.get('/subscriptions/current').json()['entitlements']['paid']

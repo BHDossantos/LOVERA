@@ -84,10 +84,17 @@ async def revenuecat_webhook(request: Request, authorization: str = Header(defau
         raise ApiError("FORBIDDEN", "Invalid webhook authorization.")
     try:
         event = (await request.json())["event"]
-        identities = [event.get("app_user_id")] + event.get("transferred_from", []) + event.get("transferred_to", [])
+        # Provider IDs identify candidates only: never create aliases or link
+        # accounts from webhook data. Re-fetch each already-known account.
+        identities = [event.get('app_user_id'), event.get('original_app_user_id')]
+        for field in ('aliases', 'transferred_from', 'transferred_to'):
+            values = event.get(field, [])
+            if not isinstance(values, list) or len(values) > 200:
+                raise ValueError('invalid identity list')
+            identities.extend(values)
         identities = {value for value in identities if isinstance(value, str) and 0 < len(value) <= 36}
         if len(identities) > 20:
-            raise ValueError("too many identities")
+            raise ValueError('too many identities')
     except (ValueError, TypeError, KeyError, AttributeError):
         raise ApiError("VALIDATION_ERROR", "Invalid webhook event.") from None
     for identity in sorted(identities):

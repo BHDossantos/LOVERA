@@ -199,9 +199,13 @@ type Options = {
   ifMatch?: string | number;
   headers?: Record<string, string>;
   retry?: boolean;
+  expectedAccessToken?: string;
 };
 
 export async function api<T = unknown>(path: string, opts: Options = {}): Promise<T> {
+  if (opts.expectedAccessToken !== undefined && accessToken !== opts.expectedAccessToken) {
+    throw new ApiError(409, { code: "SESSION_CHANGED", message: "Account changed. Sign back into the purchasing account and restore; do not buy again." });
+  }
   const headers: Record<string, string> = { Accept: "application/json", ...(opts.headers ?? {}) };
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
@@ -217,7 +221,7 @@ export async function api<T = unknown>(path: string, opts: Options = {}): Promis
   } catch {
     throw new ApiError(0, { code: "OFFLINE", message: "You appear to be offline. Nothing was lost.", retryable: true });
   }
-  if (res.status === 401 && opts.retry !== false) {
+  if (res.status === 401 && opts.retry !== false && opts.expectedAccessToken === undefined) {
     const ok = await refreshSession();
     if (ok) return api<T>(path, { ...opts, retry: false });
   }

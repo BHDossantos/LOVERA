@@ -12,6 +12,7 @@ from urllib.parse import quote
 import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.catalog.plans import STORE_PRODUCTS
 from app.core.audit import audit
@@ -101,28 +102,34 @@ def sync(db: Session, member: Member) -> dict:
         db.flush()
         return {"status": "no_active_purchase", "entitlements": service.entitlements_for(db, member)}
 
-    # A store account can contain an old and an upgraded SKU. Select the strongest
-    # known active plan, then its latest expiry; never infer a tier from client data.
-    product, info, expiry, transaction = max(active, key=lambda row: (STORE_PRODUCTS[row[0]][0] == "concierge", row[2]))
-    plan, cadence = STORE_PRODUCTS[product]
-    receipt = db.scalar(select(StorePurchase).where(StorePurchase.store == info["store"], StorePurchase.transaction_id == transaction))
-    if receipt and (receipt.member_id != member.id or receipt.product_id != product):
-        raise ApiError("CONFLICT", "This purchase is associated with another membership. Contact support before transferring it.")
-    reference = f"rc:{member.id}:{product}"
-    sub = service.activate_subscription(db, member.id, plan, "revenuecat", reference, cadence=cadence, period_end=expiry)
+    # Reconcile every active provider product, not only the strongest tier.
+    # Entitlement selection is separate from retaining independently paid records.
+    current_ids = set()
+    for product, info, expiry, transaction in sorted(active, key=lambda row: row[0]):
+        plan, cadence = STORE_PRODUCTS[product]
+        receipt = db.scalar(select(StorePurchase).where(StorePurchase.store == info["store"], StorePurchase.transaction_id == transaction))
+        if receipt and (receipt.member_id != member.id or receipt.product_id != product):
+            raise ApiError("CONFLICT", "This purchase is associated with another membership. Contact support before transferring it.")
+        reference = f"rc:{member.id}:{info['store']}:{product}"
+        sub = service.activate_subscription(db, member.id, plan, "revenuecat", reference, cadence=cadence, period_end=expiry)
+        current_ids.add(sub.id)
+        sub.status = "active"
+        sub.current_period_end = expiry
+        sub.cancel_at_period_end = bool(info.get("unsubscribe_detected_at"))
+        sub.provider_customer_ref = member.id
+        if receipt is None:
+            receipt = StorePurchase(member_id=member.id, store=info["store"], product_id=product, transaction_id=transaction, plan=plan, cadence=cadence)
+            db.add(receipt)
+        receipt.status = "granted"
+        receipt.validated_by = "revenuecat"
+        receipt.subscription_id = sub.id
+        try:
+            db.flush()
+        except IntegrityError:
+            raise ApiError("CONFLICT", "Purchase ownership changed concurrently. Retry reconciliation.") from None
+        audit(db, actor_type="vendor", actor_id=None, action="billing.store_reconciled", resource_type="subscription", resource_id=sub.id, metadata={"store": info["store"], "product_id": product})
     for old in managed:
-        if old.id != sub.id:
+        if old.id not in current_ids:
             old.status = "expired"
-    sub.status = "active"
-    sub.current_period_end = expiry
-    sub.cancel_at_period_end = bool(info.get("unsubscribe_detected_at"))
-    sub.provider_customer_ref = member.id
-    if receipt is None:
-        receipt = StorePurchase(member_id=member.id, store=info["store"], product_id=product, transaction_id=transaction, plan=plan, cadence=cadence)
-        db.add(receipt)
-    receipt.status = "granted"
-    receipt.validated_by = "revenuecat"
-    receipt.subscription_id = sub.id
     db.flush()
-    audit(db, actor_type="vendor", actor_id=None, action="billing.store_reconciled", resource_type="subscription", resource_id=sub.id, metadata={"store": info["store"], "product_id": product})
     return {"status": "granted", "entitlements": service.entitlements_for(db, member)}
