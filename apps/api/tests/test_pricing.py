@@ -293,8 +293,7 @@ def test_a_receipt_replayed_by_a_different_member_grants_them_nothing(client, mo
     body = {"store": "app_store", "product_id": "concierge_monthly", "transaction_id": tx}
     assert a.post("/subscriptions/store-purchase", json=body).status_code == 200
     r = b.post("/subscriptions/store-purchase", json=body)
-    assert r.status_code == 200, r.text
-    assert r.json()["duplicate"] is True
+    assert r.status_code == 409, r.text
     assert b.get("/subscriptions/current").json()["entitlements"]["paid"] is False
 
 

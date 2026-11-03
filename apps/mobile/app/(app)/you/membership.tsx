@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Text, View } from "react-native";
-import { ApiError, get, post } from "@/api/client";
+import { Linking, Text, View } from "react-native";
+import { ApiError, get, post, getAccessToken } from "@/api/client";
 import { useAuth, useRequireMember } from "@/lib/auth";
 import { availability, configure, products, purchase, restore, type StoreProduct, type StoreStatus } from "@/lib/purchases";
 import { euro, formatDate } from "@/lib/format";
@@ -9,28 +9,9 @@ import { Button, Card, ChoiceCard, Divider, ErrorState, Loading, PageTitle, Scre
 import type { Capabilities } from "@/api/types";
 import { color, space, type as typo } from "@/theme";
 
-/**
- * Y06 Membership and credits.
- *
- * Four endpoints the phone reached none of — `GET /plans`, `GET /subscriptions/current`,
- * `POST /subscriptions/cancel`, `POST /subscriptions/checkout` — so a member who subscribed on the
- * web could not see their plan, what it includes, their protected credits or their renewal date
- * from the app, and could not cancel there either. The You tab did not even link to it.
- *
- * **This screen deliberately does not sell anything, and that is not an omission.** Apple
- * guideline 3.1.1 requires in-app purchase for a digital subscription, and there is no StoreKit or
- * Play Billing in this repo. The two ways to fill that gap are both worse than leaving it:
- *
- *   - a checkout button would have to use IAP, which does not exist yet;
- *   - a link out to the web checkout is the specific thing 3.1.1 prohibits, and shipping one is a
- *     rejection rather than a risk.
- *
- * So the free plan is shown as what it is, with the paid plan described honestly and no way to buy
- * it from the phone. A member on the free plan is not nagged; a member who already pays gets
- * everything they need — including cancelling, which is allowed and which they should never have to
- * leave the app or contact support to do.
- *
- * Nothing here is a placeholder: every number comes from the API, and `cancel` really cancels.
+/** Membership status, native store purchases, and verified restore.
+ * Store-managed subscriptions are cancelled in their store; a local flag cannot
+ * stop Apple or Google charging a member.
  */
 type Price = { cents: number; monthly_equivalent_cents: number; period_days: number };
 type Plan = {
@@ -93,6 +74,8 @@ export default function Membership() {
   const qc = useQueryClient();
   const plans = useQuery({ queryKey: ["plans"], queryFn: () => get<PlansOut>("/plans"), enabled: !!me });
   const current = useQuery({ queryKey: ["subscription"], queryFn: () => get<Current>("/subscriptions/current"), enabled: !!me });
+  const generation = useRef(0);
+  useEffect(() => { generation.current += 1; setBusy(false); return () => { generation.current += 1; }; }, [me?.id]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -105,17 +88,17 @@ export default function Membership() {
   // place that knows all four. See src/lib/purchases.ts — a button that leads to an error is
   // worse than no button, and on iOS it is a guideline 2.1 rejection on its own.
   const store = availability(plans.data?.store);
-  const canBuy = store.available;
+  const canBuy = store.available && !!current.data && !current.data.entitlements.paid;
 
   // The store's own price strings, which are the only prices allowed on a purchase button: the
   // member is charged in their storefront's currency, after their store's tax, and our catalog
   // knows none of that.
   useEffect(() => {
     if (!canBuy || !me?.id || !plans.data) return;
-    if (!configure(me.id)) return;
+
     const ids = plans.data.plans.flatMap((p) => Object.values(p.store_product_ids).filter((i): i is string => !!i));
     let alive = true;
-    void products(ids).then((found: StoreProduct[]) => {
+    void configure(me.id).then(ok => ok ? products(ids) : []).then((found: StoreProduct[]) => {
       if (!alive) return;
       setStorePrices(Object.fromEntries(found.map((f) => [f.productId, f.priceLabel])));
     });
@@ -130,25 +113,49 @@ export default function Membership() {
   };
 
   const buy = async (productId: string) => {
+    const started = generation.current;
+    const startingToken = getAccessToken();
     setBusy(true);
     setError(null);
     setStoreNote(null);
-    const out = await purchase(productId);
-    if (out.ok) await afterPurchase();
-    else if (!out.cancelled) setStoreNote(out.message);
-    setBusy(false);
+    try {
+      if (!me?.id || !await configure(me.id)) throw new Error("Could not prepare your store account. Sign in again and retry.");
+      const latest = await get<Current>("/subscriptions/current");
+      if (started !== generation.current) return;
+      if (latest.entitlements.paid) {
+        setStoreNote("You already have an active subscription. Manage it where you subscribed before buying another.");
+        await afterPurchase();
+        return;
+      }
+      const out = await purchase(productId, plans.data?.store?.validation, me.id, startingToken);
+      if (started !== generation.current) return;
+      if (out.ok) await afterPurchase();
+      else if (!out.cancelled) setStoreNote(out.message);
+    } catch {
+      if (started !== generation.current) return;
+      setStoreNote("We could not finish updating your membership. Try Restore purchases; do not buy again.");
+    } finally { if (started === generation.current) setBusy(false); }
   };
 
   const restorePurchases = async () => {
+    const started = generation.current;
+    const startingToken = getAccessToken();
     setBusy(true);
     setError(null);
     setStoreNote(null);
-    const out = await restore();
-    if (out.ok) {
-      await afterPurchase();
-      setStoreNote("Your purchases have been restored.");
-    } else if (!out.cancelled) setStoreNote(out.message);
-    setBusy(false);
+    try {
+      if (!me?.id || !await configure(me.id)) throw new Error("Store account unavailable");
+      const out = await restore(plans.data?.store?.validation, me.id, startingToken);
+      if (started !== generation.current) return;
+      if (out.ok || !out.cancelled) await afterPurchase();
+      if (started !== generation.current) return;
+      if (out.ok) {
+        if (started === generation.current) setStoreNote("Your purchases have been restored.");
+      } else if (!out.cancelled) setStoreNote(out.message);
+    } catch {
+      if (started !== generation.current) return;
+      setStoreNote("We could not finish restoring your membership. Please try again.");
+    } finally { if (started === generation.current) setBusy(false); }
   };
 
   const cancel = async () => {
@@ -209,6 +216,13 @@ export default function Membership() {
                 </View>
               ))}
             </View>
+            {(ent.subscriptions?.length ?? 0) > 1 && <View>
+              <Text>You have multiple independently billed subscriptions. The plan above shows your highest paid access, not your total charges. Manage each subscription where you subscribed.</Text>
+              {ent.subscriptions?.map(sub => <View key={sub.id}>
+                <Text>{sub.provider}: {sub.plan}</Text>
+                {sub.management_url && <Button variant="ghost" onPress={() => { void Linking.openURL(sub.management_url!).catch(() => setStoreNote("Open subscriptions in your store account to manage this subscription.")); }}>{`Manage ${sub.provider} subscription`}</Button>}
+              </View>)}
+            </View>}
             {ent.status === "past_due" && (
               <StatusBanner
                 tone="caution"
@@ -294,7 +308,7 @@ export default function Membership() {
                 <>
                   <Text style={{ ...typo.small, color: color.inkSecondary }}>
                     Payment is handled by the App Store or Google Play, and your subscription is managed there — we
-                    never see your card. Cancel any time from this screen or from your store account.
+                    never see your card. Manage cancellation in the store where you subscribed.
                   </Text>
                   <View style={{ marginTop: space.md }}>
                     <Button variant="ghost" loading={busy} disabled={busy} onPress={restorePurchases}>
@@ -388,7 +402,12 @@ export default function Membership() {
             <Bullets items={plans.data.principles} glyph="·" muted />
           </Card>
 
-          {ent.paid && !ent.cancel_at_period_end && !confirming && (
+          {ent.paid && ent.management_url && (
+            <Button variant="secondary" onPress={() => { void Linking.openURL(ent.management_url!).catch(() => setStoreNote("Could not open the store. Open subscriptions in your store account to cancel.")); }}>
+              Manage store subscription
+            </Button>
+          )}
+          {ent.paid && !ent.management_url && !ent.cancel_at_period_end && !confirming && (
             <Button variant="danger" onPress={() => setConfirming(true)}>
               Cancel my membership
             </Button>

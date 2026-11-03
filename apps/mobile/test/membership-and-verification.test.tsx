@@ -1,3 +1,5 @@
+import { QueryClientProvider } from "@tanstack/react-query";
+import { act } from "react-test-renderer";
 import { renderScreen } from "./render";
 
 /**
@@ -15,9 +17,12 @@ import { renderScreen } from "./render";
  * week. The You tab showed the status as a badge with nothing beside it to press, which is the same
  * dead end this app has already been fixed for twice.
  */
+let mockMemberId = "mem_me";
+const mockRefresh = jest.fn();
 const mockGet = jest.fn();
 const mockPost = jest.fn();
 jest.mock("@/api/client", () => ({
+  getAccessToken: () => "token-test",
   get: (p: string) => mockGet(p),
   post: (p: string, b: unknown) => mockPost(p, b),
   patch: jest.fn(),
@@ -25,8 +30,8 @@ jest.mock("@/api/client", () => ({
   ApiError: class extends Error {},
 }));
 jest.mock("@/lib/auth", () => ({
-  useRequireMember: () => ({ me: { id: "mem_me" } }),
-  useAuth: () => ({ me: { id: "mem_me" }, refresh: jest.fn(), signOut: jest.fn() }),
+  useRequireMember: () => ({ me: { id: mockMemberId } }),
+  useAuth: () => ({ me: { id: mockMemberId }, refresh: mockRefresh, signOut: jest.fn() }),
 }));
 jest.mock("expo-router", () => ({
   useRouter: () => ({ push: jest.fn(), replace: jest.fn(), back: jest.fn() }),
@@ -47,7 +52,7 @@ let mockStoreAvailable: { available: boolean; reason?: string } = { available: f
 let mockStoreProducts: { productId: string; priceLabel: string }[] = [];
 jest.mock("@/lib/purchases", () => ({
   availability: () => mockStoreAvailable,
-  configure: () => true,
+  configure: async () => true,
   products: () => Promise.resolve(mockStoreProducts),
   purchase: (id: string) => mockPurchase(id),
   restore: () => mockRestore(),
@@ -115,6 +120,8 @@ const status = (over: Record<string, unknown> = {}) => ({
 });
 
 beforeEach(() => {
+  mockMemberId = "mem_me";
+  mockRefresh.mockReset();
   mockGet.mockReset();
   mockPost.mockReset();
   mockPurchase.mockReset();
@@ -310,4 +317,29 @@ describe("Verification centre", () => {
     expect(s.hasText("A person will look at your verification")).toBe(true);
     expect(s.texts().join(" ")).not.toContain("Ask our team to verify you");
   });
+});
+
+
+it("does not refresh or show a previous account's pending purchase result after switching", async () => {
+  billing(entitlements());
+  mockStoreAvailable = { available: true };
+  mockStoreProducts = [{ productId: "pro_monthly", priceLabel: "£34.99" }];
+  let finish!: (result: unknown) => void;
+  mockPurchase.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+  const s = await renderScreen(<Membership />);
+  await s.press("£34.99 a month");
+  expect(mockPurchase).toHaveBeenCalled();
+  mockMemberId = "member-b";
+  await act(async () => { s.tree.update(<QueryClientProvider client={s.client}><Membership /></QueryClientProvider>); });
+  await act(async () => { finish({ ok: true, entitlementsChanged: true }); });
+  expect(mockRefresh).not.toHaveBeenCalled();
+});
+
+it("does not offer another native purchase to an already paid member", async () => {
+  billing(entitlements({ paid: true, plan: "pro", plan_name: "Matchmaker Pro" }));
+  mockStoreAvailable = { available: true };
+  mockStoreProducts = [{ productId: "concierge_monthly", priceLabel: "£99.99" }];
+  const s = await renderScreen(<Membership />);
+  expect(s.joined()).not.toContain("£99.99 a month");
+  expect(mockPurchase).not.toHaveBeenCalled();
 });
