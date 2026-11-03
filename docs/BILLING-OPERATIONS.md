@@ -36,3 +36,10 @@ This tool does not import transaction/order IDs as if they were receipts. Revenu
 No command with `--apply` was run against a live service or production database. Tests use local PostgreSQL and mocked providers. Credentials, store settings, scheduler deployment and sandbox proof remain owner-controlled gates.
 
 Validation: 226 full API tests passed; 4 final worker tests passed, including no-write/no-network preview, refund without mobile restore, durable outage retry, migrated-receipt isolation and concurrent polling. CLI dry run was exercised only against an isolated test database and reported `provider_calls: 0`, `writes: 0`.
+
+Concurrent pollers claim disjoint jobs with SKIP LOCKED and acquire all member
+locks in ascending immutable ID order before verifying any receipt. Opposite
+receipt orders therefore cannot create a member-lock cycle. Ownership is
+refreshed after locks; changed ownership is retried without mutating its grant.
+Provider calls remain inside the bounded batch transaction; use small batches to
+limit lock duration. No worker has been deployed or scheduled here.

@@ -25,6 +25,10 @@ def inventory(db: Session) -> dict:
             'migration_prerequisite': 'Historical receipts must already exist in the configured RevenueCat project. Transaction IDs are not raw Apple receipts or Google purchase tokens.'}
 
 
+def _claim_jobs(db, now, limit):
+    return db.scalars(select(StoreReconciliation).where(StoreReconciliation.next_check_at <= now).order_by(StoreReconciliation.next_check_at, StoreReconciliation.receipt_id).limit(limit).with_for_update(skip_locked=True)).all()
+
+
 def poll(db: Session, *, apply: bool = False, limit: int = 100) -> dict:
     if not apply:
         return inventory(db)
@@ -43,16 +47,26 @@ def poll(db: Session, *, apply: bool = False, limit: int = 100) -> dict:
     for receipt in unseen:
         db.execute(insert(StoreReconciliation).values(receipt_id=receipt.id, next_check_at=now, attempts=0, outcome='pending').on_conflict_do_nothing(index_elements=['receipt_id']))
     db.flush()
-    jobs = db.scalars(select(StoreReconciliation).where(StoreReconciliation.next_check_at <= now).order_by(StoreReconciliation.next_check_at, StoreReconciliation.receipt_id).limit(limit).with_for_update(skip_locked=True)).all()
+    jobs = _claim_jobs(db, now, limit)
+    # Workers may claim interleaved receipt batches. Acquire every member lock
+    # in immutable member-ID order BEFORE processing any receipt, regardless of
+    # receipt order, so batches A→B and B→A cannot deadlock each other.
+    owners = dict(db.execute(select(StorePurchase.id, StorePurchase.member_id).where(StorePurchase.id.in_([job.receipt_id for job in jobs]))).all())
+    member_ids = sorted(set(owners.values()))
+    if member_ids:
+        db.execute(select(Member.id).where(Member.id.in_(member_ids)).order_by(Member.id).with_for_update()).all()
     counts = {'checked': 0, 'active': 0, 'refused': 0, 'retry': 0, 'skipped': 0}
     for job in jobs:
         receipt = db.get(StorePurchase, job.receipt_id)
         if receipt is None:
             continue
-        db.execute(select(Member.id).where(Member.id == receipt.member_id).with_for_update()).scalar_one_or_none()
         # A concurrent RevenueCat migration may have moved the receipt while we
         # waited for its member lock. Never mutate that integration's grant.
         db.refresh(receipt)
+        if receipt.member_id != owners.get(receipt.id):
+            job.outcome, job.next_check_at = 'ownership_changed', now + timedelta(minutes=5)
+            counts['retry'] += 1
+            continue
         sub = db.get(Subscription, receipt.subscription_id) if receipt.subscription_id else None
         if receipt.validated_by == 'revenuecat' or sub is None or sub.member_id != receipt.member_id or sub.provider != 'app_store' or sub.provider_subscription_ref != 'app_store:' + receipt.transaction_id:
             job.outcome, job.next_check_at = 'migrated_or_unlinked', None

@@ -99,3 +99,54 @@ def test_parallel_pollers_do_not_verify_same_receipt_twice(client, monkeypatch):
     with ThreadPoolExecutor(max_workers=2) as pool:
         list(pool.map(run, range(2)))
     assert calls.count(tx) == 1
+
+
+def test_interleaved_multi_member_batches_lock_in_consistent_order(client, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier, BrokenBarrierError
+    from sqlalchemy import text
+    from app.models.billing import StorePurchase
+    a, b = member(client, 'lock-order-a'), member(client, 'lock-order-b')
+    transactions = [legacy_receipt(owner) for owner in (a, b, b, a)]
+    with session_factory()() as db:
+        for receipt in db.scalars(select(StorePurchase)):
+            job = db.get(StoreReconciliation, receipt.id)
+            if job is None:
+                job = StoreReconciliation(receipt_id=receipt.id)
+                db.add(job)
+            job.next_check_at = utcnow() + timedelta(days=1)
+            if receipt.transaction_id in transactions:
+                job.next_check_at = utcnow() - timedelta(days=1) + timedelta(minutes=transactions.index(receipt.transaction_id))
+        db.commit()
+    claimed = Barrier(2)
+    claim = reconciliation._claim_jobs
+    def synchronized_claim(db, now, limit):
+        jobs = claim(db, now, limit)
+        assert len(jobs) == 2
+        claimed.wait(timeout=10)
+        return jobs
+    monkeypatch.setattr(reconciliation, '_claim_jobs', synchronized_claim)
+    monkeypatch.setattr(stores, 'missing_configuration', lambda mode: None)
+    calls = []
+    first_verifications = Barrier(2)
+    def verify(store, product, transaction):
+        calls.append(transaction)
+        if transaction in (transactions[0], transactions[2]):
+            # Old per-receipt locks let both workers reach opposite members;
+            # correct bulk ordering serializes here, so timeout is expected.
+            try:
+                first_verifications.wait(timeout=1)
+            except BrokenBarrierError:
+                pass
+        return stores.VerifiedReceipt(product, transaction, utcnow() + timedelta(days=10), 'production')
+    monkeypatch.setattr(stores, 'verify', verify)
+    def run():
+        with session_factory()() as db:
+            db.execute(text("SET LOCAL lock_timeout = '3s'"))
+            result = reconciliation.poll(db, apply=True, limit=2)
+            db.commit()
+            return result
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(run) for _ in range(2)]
+        assert sum(f.result(timeout=15)['checked'] for f in futures) == 4
+    assert sorted(calls) == sorted(transactions)
