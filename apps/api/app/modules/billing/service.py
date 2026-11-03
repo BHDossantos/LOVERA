@@ -160,10 +160,7 @@ def store_status() -> dict[str, Any]:
     elif mode == "sandbox" and settings.is_production:
         reason = "Sandbox receipt validation is never accepted in production."
     elif mode in ("app_store", "play_store"):
-        # Choosing the mode is not the same as being able to use it. A missing key would otherwise
-        # surface as a member tapping Subscribe, being charged by the store, and then being told we
-        # cannot verify it — so the absence is reported here, before anything is drawn.
-        reason = stores.missing_configuration(mode)
+        reason = "Direct store billing is disabled until automated lifecycle verification is available. Configure RevenueCat before offering purchases."
     elif mode == "revenuecat":
         from app.modules.billing.revenuecat import missing_configuration
         reason = missing_configuration()
@@ -273,6 +270,13 @@ def record_store_purchase(db: Session, member: Member, store: str, product_id: s
     plan_id, cadence = mapped
 
     status = store_status()
+    # Disabled direct modes may revalidate historical receipts for recovery only.
+    # They cannot accept a new transaction or expose a new purchase offer.
+    if existing and existing.subscription_id and settings.store_validation in ("app_store", "play_store"):
+        missing = stores.missing_configuration(settings.store_validation)
+        status = {"enabled": missing is None, "reason": missing}
+    if not status["enabled"] and settings.store_validation in ("app_store", "play_store"):
+        raise ApiError("DEPENDENCY_UNAVAILABLE", status["reason"])
     if not status["enabled"]:
         _refuse(db, member, store, product_id, transaction_id, plan_id, cadence, "refused_unverified")
         raise ApiError(

@@ -71,6 +71,7 @@ def sync(db: Session, member: Member) -> dict:
     subscriptions = fetch_subscriptions(member.id)
     settings = get_settings()
     active = []
+    observed = []
     try:
         for product, info in subscriptions.items():
             if product not in STORE_PRODUCTS:
@@ -84,14 +85,35 @@ def sync(db: Session, member: Member) -> dict:
             expiry = _date(info.get("expires_date"))
             if info.get("grace_period_expires_date"):
                 expiry = max(expiry, _date(info["grace_period_expires_date"]))
+            transaction = info.get("store_transaction_id")
+            valid_transaction = isinstance(transaction, (str, int)) and bool(str(transaction)) and len(str(transaction)) <= 128
+            if valid_transaction:
+                observed.append((product, info["store"], str(transaction)))
             if info.get("refunded_at") or expiry <= utcnow():
                 continue
-            transaction = info.get("store_transaction_id")
-            if not isinstance(transaction, (str, int)) or not str(transaction) or len(str(transaction)) > 128:
+            if not valid_transaction:
                 raise ValueError("missing store transaction")
             active.append((product, info, expiry, str(transaction)))
     except (ValueError, TypeError, OverflowError):
         raise ApiError("DEPENDENCY_UNAVAILABLE", "The store returned incomplete subscription information. Try again later.", retryable=True) from None
+
+    # The same store transaction may have been granted by the direct verifier
+    # before RevenueCat was enabled. It is one payment, not two subscriptions.
+    # Retire only that exact direct reference, in this transaction, including
+    # when the first provider snapshot already reports its refund/expiry.
+    for product, store, transaction in observed:
+        receipt = db.scalar(select(StorePurchase).where(StorePurchase.store == store, StorePurchase.transaction_id == transaction))
+        if receipt is None:
+            continue
+        if receipt.member_id != member.id or receipt.product_id != product:
+            raise ApiError("CONFLICT", "This purchase is associated with another membership.")
+        direct = db.scalar(select(Subscription).where(Subscription.provider_subscription_ref == f"{store}:{transaction}"))
+        if direct is None:
+            continue
+        if direct.member_id != member.id or direct.provider != store or direct.plan != STORE_PRODUCTS[product][0]:
+            raise ApiError("CONFLICT", "The original subscription does not match this purchase.")
+        direct.status = "expired"
+        audit(db, actor_type="vendor", actor_id=None, action="billing.direct_grant_reconciled", resource_type="subscription", resource_id=direct.id, metadata={"store": store, "product_id": product})
 
     # Expire only subscriptions managed by this integration. An unavailable or
     # malformed provider response above never revokes cached access prematurely.

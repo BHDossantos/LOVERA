@@ -476,15 +476,15 @@ def test_a_mode_with_no_credentials_reports_the_store_as_off(monkeypatch):
 
     status = service.store_status()
     assert status["enabled"] is False
-    assert "MM_APP_STORE_ISSUER_ID" in status["reason"]
+    assert "disabled" in status["reason"]
 
 
-def test_a_fully_configured_mode_reports_the_store_as_on(apple):
+def test_a_fully_configured_direct_mode_remains_disabled_without_lifecycle(apple):
     from app.modules.billing import service
 
     status = service.store_status()
-    assert status["enabled"] is True
-    assert status["reason"] is None
+    assert status["enabled"] is False
+    assert "automated lifecycle" in status["reason"]
 
 
 def test_an_unreadable_play_key_is_reported_rather_than_raised(monkeypatch):
@@ -504,7 +504,7 @@ def test_a_verified_purchase_activates_the_plan_the_store_confirmed(client, monk
 
     r = a.post(
         "/subscriptions/store-purchase",
-        json={"store": "app_store", "product_id": "pro_monthly", "transaction_id": uuid.uuid4().hex},
+        json={"store": "app_store", "product_id": "pro_monthly", "transaction_id": legacy_receipt(a)},
     )
 
     assert r.status_code == 200, r.text
@@ -521,10 +521,10 @@ def test_a_refused_receipt_grants_nothing_and_is_written_down(client, monkeypatc
 
     r = a.post(
         "/subscriptions/store-purchase",
-        json={"store": "app_store", "product_id": "pro_monthly", "transaction_id": uuid.uuid4().hex},
+        json={"store": "app_store", "product_id": "pro_monthly", "transaction_id": legacy_receipt(a)},
     )
 
-    assert r.status_code == 422, r.text
+    assert r.status_code == 200, r.text
     assert a.get("/subscriptions/current").json()["entitlements"]["plan"] == "free"
 
 
@@ -535,13 +535,13 @@ def test_an_outage_tells_the_member_their_money_is_safe(client, monkeypatch, app
 
     r = a.post(
         "/subscriptions/store-purchase",
-        json={"store": "app_store", "product_id": "pro_monthly", "transaction_id": uuid.uuid4().hex},
+        json={"store": "app_store", "product_id": "pro_monthly", "transaction_id": legacy_receipt(a)},
     )
 
     # 503, not 422: "we could not check" is a different answer from "that is not valid", and the
     # member's next move differs too.
     assert r.status_code == 503, r.text
-    assert a.get("/subscriptions/current").json()["entitlements"]["plan"] == "free"
+    assert a.get("/subscriptions/current").json()["entitlements"]["plan"] == "pro"
 
 
 def test_a_receipt_from_the_other_store_is_refused(client, monkeypatch, apple):
@@ -554,7 +554,7 @@ def test_a_receipt_from_the_other_store_is_refused(client, monkeypatch, apple):
         json={"store": "play_store", "product_id": "pro_monthly", "transaction_id": uuid.uuid4().hex},
     )
 
-    assert r.status_code == 422, r.text
+    assert r.status_code == 503, r.text
     assert a.get("/subscriptions/current").json()["entitlements"]["plan"] == "free"
 
 
@@ -574,7 +574,7 @@ def test_a_sandbox_receipt_is_refused_in_production(client, monkeypatch, apple):
         json={"store": "app_store", "product_id": "pro_monthly", "transaction_id": uuid.uuid4().hex},
     )
 
-    assert r.status_code == 422, r.text
+    assert r.status_code == 503, r.text
     assert a.get("/subscriptions/current").json()["entitlements"]["plan"] == "free"
 
 
@@ -585,9 +585,9 @@ def test_a_refused_receipt_replayed_is_still_refused(client, monkeypatch, apple)
         lambda r: httpx.Response(200, json={"signedTransactionInfo": signed_transaction(expiresDate=1_600_000_000_000)}),
     )
     a = member(client, "store-replay")
-    body = {"store": "app_store", "product_id": "pro_monthly", "transaction_id": uuid.uuid4().hex}
+    body = {"store": "app_store", "product_id": "pro_monthly", "transaction_id": legacy_receipt(a)}
 
-    assert a.post("/subscriptions/store-purchase", json=body).status_code == 422
+    assert a.post("/subscriptions/store-purchase", json=body).status_code == 200
     second = a.post("/subscriptions/store-purchase", json=body)
     assert second.status_code == 200
     assert second.json()["duplicate"] is True
@@ -597,7 +597,7 @@ def test_a_refused_receipt_replayed_is_still_refused(client, monkeypatch, apple)
 
 def test_temporary_store_failure_is_reverified_on_restore(client, monkeypatch, apple):
     a = member(client, 'store-transient-retry')
-    tx = uuid.uuid4().hex
+    tx = legacy_receipt(a)
     body = {'store': 'app_store', 'product_id': 'pro_monthly', 'transaction_id': tx}
     calls = []
     def verify(*args):
@@ -616,7 +616,7 @@ def test_temporary_store_failure_is_reverified_on_restore(client, monkeypatch, a
 
 def test_previously_granted_direct_receipt_is_reverified_and_refund_persists(client, monkeypatch, apple):
     a = member(client, 'store-grant-refund')
-    tx = uuid.uuid4().hex
+    tx = legacy_receipt(a)
     body = {'store': 'app_store', 'product_id': 'pro_monthly', 'transaction_id': tx}
     calls = []
     def verify(*args):
@@ -638,7 +638,7 @@ def test_direct_restore_outage_never_extends_previously_verified_expiry(client, 
     from app.models.billing import Subscription
     from sqlalchemy import select
     a = member(client, 'store-grant-outage')
-    tx = uuid.uuid4().hex
+    tx = legacy_receipt(a)
     expiry = datetime.now(timezone.utc) + timedelta(days=1)
     body = {'store': 'app_store', 'product_id': 'pro_monthly', 'transaction_id': tx}
     monkeypatch.setattr(stores, 'verify', lambda *args: stores.VerifiedReceipt('pro_monthly', tx, expiry, 'production'))
@@ -652,3 +652,32 @@ def test_direct_restore_outage_never_extends_previously_verified_expiry(client, 
         sub.current_period_end = datetime.now(timezone.utc) - timedelta(seconds=1)
         db.commit()
     assert not a.get('/subscriptions/current').json()['entitlements']['paid']
+
+
+def legacy_receipt(actor, store='app_store', transaction_id=None):
+    """Seed a pre-existing direct grant, not a newly allowed direct purchase."""
+    from app.core.db import session_factory
+    from app.models.billing import StorePurchase
+    from app.modules.billing import service
+    tx = transaction_id or uuid.uuid4().hex
+    with session_factory()() as db:
+        sub = service.activate_subscription(db, actor.id, 'pro', store, store + ':' + tx, period_end=datetime.now(timezone.utc) + timedelta(days=30))
+        db.add(StorePurchase(member_id=actor.id, store=store, product_id='pro_monthly', transaction_id=tx, plan='pro', cadence='monthly', status='granted', validated_by=store, subscription_id=sub.id))
+        db.commit()
+    return tx
+
+
+def test_new_direct_purchase_is_rejected_even_when_retried_with_valid_credentials(client, apple):
+    from sqlalchemy import select, func
+    from app.core.db import session_factory
+    from app.models.billing import Subscription, StorePurchase
+    a = member(client, 'disabled-new-direct')
+    body = {'store': 'app_store', 'product_id': 'pro_monthly', 'transaction_id': uuid.uuid4().hex}
+    for _ in range(2):
+        response = a.post('/subscriptions/store-purchase', json=body)
+        assert response.status_code == 503
+        assert 'disabled' in response.json()['error']['message']
+    assert not a.get('/plans').json()['store']['enabled']
+    with session_factory()() as db:
+        assert db.scalar(select(func.count()).select_from(Subscription).where(Subscription.member_id == a.id)) == 0
+        assert db.scalar(select(func.count()).select_from(StorePurchase).where(StorePurchase.member_id == a.id)) == 0

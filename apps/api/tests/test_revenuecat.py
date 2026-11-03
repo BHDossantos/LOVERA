@@ -277,3 +277,80 @@ def test_concurrent_cross_member_receipt_claim_has_one_owner(client, provider):
     with session_factory()() as db:
         assert db.scalar(select(func.count()).select_from(StorePurchase).where(StorePurchase.member_id.in_([a.id, b.id]))) == 1
         assert db.scalar(select(func.count()).select_from(Subscription).where(Subscription.member_id.in_([a.id, b.id]))) == 1
+
+@pytest.mark.parametrize('independent_provider', [None, 'payments', 'app_store'])
+def test_direct_receipt_migrates_once_and_refund_cannot_leave_duplicate_access(client, provider, monkeypatch, independent_provider):
+    from app.modules.billing import service, stores
+    data, _ = provider
+    a = member(client, 'rc-migrate-' + uuid.uuid4().hex)
+    tx = 'apple-migration-' + a.id
+    data['pro_monthly']['store'] = 'app_store'
+    data['pro_monthly']['store_transaction_id'] = tx
+    monkeypatch.setattr(get_settings(), 'store_validation', 'app_store')
+    monkeypatch.setattr(stores, 'missing_configuration', lambda mode: None)
+    monkeypatch.setattr(stores, 'verify', lambda *args: stores.VerifiedReceipt('pro_monthly', tx, utcnow() + timedelta(days=30), 'production'))
+    from tests.test_store_receipts import legacy_receipt
+    legacy_receipt(a, transaction_id=tx)
+    body = {'store': 'app_store', 'product_id': 'pro_monthly', 'transaction_id': tx}
+    assert a.post('/subscriptions/store-purchase', json=body).json()['entitlements']['paid']
+    independent_id = None
+    with session_factory()() as db:
+        direct = db.scalar(select(Subscription).where(Subscription.member_id == a.id))
+        direct_id = direct.id
+        if independent_provider:
+            independent = service.activate_subscription(db, a.id, 'concierge', independent_provider, 'separate-' + a.id, period_end=utcnow() + timedelta(days=60))
+            independent_id = independent.id
+        db.commit()
+    monkeypatch.setattr(get_settings(), 'store_validation', 'revenuecat')
+    assert a.post('/subscriptions/store-sync').status_code == 200
+    # Replay migration must neither grant twice nor resurrect the direct grant.
+    assert a.post('/subscriptions/store-sync').status_code == 200
+    with session_factory()() as db:
+        receipt = db.scalar(select(StorePurchase).where(StorePurchase.store == 'app_store', StorePurchase.transaction_id == tx))
+        assert receipt.subscription_id != direct_id
+        assert db.get(Subscription, direct_id).status == 'expired'
+        assert db.get(Subscription, receipt.subscription_id).provider == 'revenuecat'
+        assert db.scalar(select(func.count()).select_from(StorePurchase).where(StorePurchase.member_id == a.id)) == 1
+    data['pro_monthly']['refunded_at'] = utcnow().isoformat()
+    result = a.post('/subscriptions/store-sync').json()['entitlements']
+    assert result['paid'] is bool(independent_provider)
+    assert result['plan'] == ('concierge' if independent_provider else 'free')
+    with session_factory()() as db:
+        assert db.get(Subscription, direct_id).status == 'expired'
+        if independent_id:
+            assert db.get(Subscription, independent_id).status == 'active'
+
+
+def test_first_revenuecat_snapshot_already_refunded_retires_only_matched_direct_grant(client, provider):
+    from app.modules.billing import service
+    data, _ = provider
+    a = member(client, 'rc-first-refund')
+    tx = data['pro_monthly']['store_transaction_id']
+    with session_factory()() as db:
+        direct = service.activate_subscription(db, a.id, 'pro', 'play_store', 'play_store:' + tx, period_end=utcnow() + timedelta(days=30))
+        db.add(StorePurchase(member_id=a.id, store='play_store', product_id='pro_monthly', transaction_id=tx, plan='pro', cadence='monthly', status='granted', validated_by='play_store', subscription_id=direct.id))
+        db.commit()
+    data['pro_monthly']['refunded_at'] = utcnow().isoformat()
+    result = a.post('/subscriptions/store-sync')
+    assert result.status_code == 200, result.text
+    assert not result.json()['entitlements']['paid']
+
+
+def test_failed_migration_rolls_back_retirement_of_the_direct_grant(client, provider):
+    from tests.test_store_receipts import legacy_receipt
+    data, _ = provider
+    a, b = member(client, 'rc-atomic-a'), member(client, 'rc-atomic-b')
+    tx = legacy_receipt(a, store='play_store')
+    data['pro_monthly']['store_transaction_id'] = tx
+    data['pro_annual'] = {**data['pro_monthly'], 'store_transaction_id': 'foreign-' + b.id}
+    with session_factory()() as db:
+        original = db.scalar(select(StorePurchase).where(StorePurchase.transaction_id == tx))
+        original_sub = original.subscription_id
+        db.add(StorePurchase(member_id=b.id, store='play_store', product_id='pro_annual', transaction_id='foreign-' + b.id, plan='pro', cadence='annual', status='granted', validated_by='play_store'))
+        db.commit()
+    assert a.post('/subscriptions/store-sync').status_code == 409
+    with session_factory()() as db:
+        assert db.get(Subscription, original_sub).status == 'active'
+        receipt = db.scalar(select(StorePurchase).where(StorePurchase.transaction_id == tx))
+        assert receipt.subscription_id == original_sub
+        assert receipt.validated_by == 'play_store'
