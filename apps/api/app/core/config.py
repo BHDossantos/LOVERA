@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -9,7 +10,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="MM_", env_file=".env", extra="ignore")
 
-    env: str = "local"  # local | development | staging | production
+    env: Literal["local", "development", "test", "staging", "production"] = "local"
     database_url: str = "postgresql+psycopg://postgres@/matchmaker?host=/tmp&port=5433"
     redis_url: str | None = None
     secret_key: str = "local-dev-secret-change-me-before-any-deployment"
