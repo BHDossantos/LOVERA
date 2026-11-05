@@ -21,7 +21,7 @@ Mobile remaining roots: decode-uri-component <=0.5.0, zod3, glob9–14.0.1/minim
 
 24 focused API startup/configuration tests pass. A broader selection passed 24 tests but four database-backed identity tests could not initialize: local PostgreSQL socket `/tmp/.s.PGSQL.5433` is absent. No live database was used. Python environment installs current unpinned dependencies; this does not establish deployment reproducibility.
 
-Mobile TypeScript and 191 tests across 23 suites pass after the node-forge update. Lint fails because the repository has no ESLint config and Expo's automatic configuration download is blocked by the network proxy; lint is not claimed passed. No web implementation changed, so web build was not rerun. No signed native binary, installed-device test, purchase, webhook delivery, or release was verified.
+Clean `npm ci --ignore-scripts` and mobile TypeScript pass with the final lockfile. Jest reports all 191 assertions across 23 suites passing, but exits 1 because Expo logs after test teardown (`ExpoModulesCoreJSLogger` during lazy fetch initialization). The mobile test command is therefore NOT green; this harness issue remains unresolved. Lint fails because the repository has no ESLint config and Expo's automatic configuration download is blocked by the network proxy; lint is not claimed passed. No web implementation changed, so web build was not rerun. No signed native binary, installed-device test, purchase, webhook delivery, or release was verified.
 
 ## Release gates
 
