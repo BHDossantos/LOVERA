@@ -8,6 +8,18 @@
  */
 module.exports = {
   preset: "jest-expo",
+  // Resolve the native core from Expo's dependency tree. npm may nest it under
+  // expo, while jest-expo's mock imports it from its own sibling directory.
+  moduleNameMapper: {
+    "^expo-modules-core/(.*)$": require("path").join(
+      require("path").dirname(require.resolve("expo-modules-core/package.json", {
+        paths: [require.resolve("expo/package.json")],
+      })), "$1"
+    ),
+    "^expo-modules-core$": require.resolve("expo-modules-core", {
+      paths: [require.resolve("expo/package.json")],
+    }),
+  },
   setupFilesAfterEnv: ["<rootDir>/test/setup.ts"],
   testMatch: ["<rootDir>/test/**/*.test.tsx", "<rootDir>/test/**/*.test.ts"],
   collectCoverageFrom: ["app/**/*.tsx", "src/**/*.{ts,tsx}"],
