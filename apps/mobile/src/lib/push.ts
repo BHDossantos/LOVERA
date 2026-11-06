@@ -1,7 +1,14 @@
 import { Platform } from "react-native";
 import Constants from "expo-constants";
 import * as Device from "expo-device";
-import * as Notifications from "expo-notifications";
+import {
+  AndroidImportance,
+  getExpoPushTokenAsync,
+  getPermissionsAsync,
+  requestPermissionsAsync,
+  setNotificationChannelAsync,
+  setNotificationHandler,
+} from "expo-notifications";
 import { api } from "@/api/client";
 
 /**
@@ -16,7 +23,7 @@ import { api } from "@/api/client";
  * effectively permanent — the prompt never returns — so spending it on a cold start,
  * before the member has any reason to want to hear from us, is spending it badly.
  */
-Notifications.setNotificationHandler({
+setNotificationHandler({
   handleNotification: async () => ({
     // shouldShowAlert is deprecated in SDK 57; banner and list are the current pair.
     shouldShowBanner: true,
@@ -35,19 +42,19 @@ export async function ensureAndroidChannels() {
   if (Platform.OS !== "android") return;
   // Separate channels so a member can silence date logistics without silencing a
   // safety message, which Android lets them do per channel.
-  await Notifications.setNotificationChannelAsync("introductions", {
+  await setNotificationChannelAsync("introductions", {
     name: "Introductions",
-    importance: Notifications.AndroidImportance.DEFAULT,
+    importance: AndroidImportance.DEFAULT,
     lightColor: "#b42d55",
   });
-  await Notifications.setNotificationChannelAsync("messages", {
+  await setNotificationChannelAsync("messages", {
     name: "Messages",
-    importance: Notifications.AndroidImportance.HIGH,
+    importance: AndroidImportance.HIGH,
     lightColor: "#b42d55",
   });
-  await Notifications.setNotificationChannelAsync("safety", {
+  await setNotificationChannelAsync("safety", {
     name: "Safety",
-    importance: Notifications.AndroidImportance.MAX,
+    importance: AndroidImportance.MAX,
     lightColor: "#b3301c",
   });
 }
@@ -60,10 +67,10 @@ export async function registerForPush(deviceId?: string): Promise<PushOutcome> {
   if (!Device.isDevice) return "unsupported";
   try {
     await ensureAndroidChannels();
-    const existing = await Notifications.getPermissionsAsync();
+    const existing = await getPermissionsAsync();
     let status = existing.status;
     if (status !== "granted") {
-      const asked = await Notifications.requestPermissionsAsync();
+      const asked = await requestPermissionsAsync();
       status = asked.status;
     }
     if (status !== "granted") return "denied";
@@ -80,7 +87,7 @@ export async function registerForPush(deviceId?: string): Promise<PushOutcome> {
       );
       return "misconfigured";
     }
-    const token = await Notifications.getExpoPushTokenAsync(id ? { projectId: id } : undefined);
+    const token = await getExpoPushTokenAsync(id ? { projectId: id } : undefined);
     await api("/notifications/devices", {
       method: "PUT",
       body: {
