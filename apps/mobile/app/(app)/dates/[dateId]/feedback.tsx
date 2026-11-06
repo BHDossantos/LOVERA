@@ -146,7 +146,7 @@ export default function DateFeedback() {
           <Card>
             <Text style={s.h2}>Would you like a second date?</Text>
             <Text style={s.meta}>
-              {d?.other_display_name} sees nothing unless you both say yes. "Unsure" is a fine answer.
+              {d?.other_display_name} sees nothing unless you both say yes. &quot;Unsure&quot; is a fine answer.
             </Text>
             <Options
               value={second ?? ""}

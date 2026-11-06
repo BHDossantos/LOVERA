@@ -114,7 +114,7 @@ export default function DateDetail() {
               </Text>
             ) : (
               <Text style={s.meta}>
-                You can set a check-in: if you don't confirm you're fine, we alert a contact you choose. We never
+                You can set a check-in: if you don&apos;t confirm you&apos;re fine, we alert a contact you choose. We never
                 share your live location with your date.
               </Text>
             )}

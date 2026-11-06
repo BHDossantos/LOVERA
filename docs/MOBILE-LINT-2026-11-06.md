@@ -1,6 +1,6 @@
 # Mobile lint setup — 2026-11-06
 
-Follow-up to candidate `df40c78f9381bc134418443325d9c2b657a06c78` on the same local branch. Added exact dev dependencies eslint9.39.5 and eslint-config-expo57.0.2 using Expo install and `/workspace/scratch/lovera-npm-cache`, without changing HOME. Uses the stock Expo flat config with no disabled rules, suppressions, extra excludes, automatic fixes or application-source changes. Guidance: https://docs.expo.dev/guides/using-eslint/ . SDK57 requests ESLint9; npm marks this version unsupported upstream. A future supported tooling migration remains necessary.
+Follow-up to candidate `df40c78f9381bc134418443325d9c2b657a06c78` on the same local branch. Added exact dev dependencies eslint9.39.5 and eslint-config-expo57.0.2 using Expo install and `/workspace/scratch/lovera-npm-cache`, without changing HOME. Uses the stock Expo flat config with no disabled rules, suppressions, extra excludes, automatic fixes in the setup commit. A subsequent mechanical fix escapes JSX text entities without changing displayed content. Guidance: https://docs.expo.dev/guides/using-eslint/ . SDK57 requests ESLint9; npm marks this version unsupported upstream. A future supported tooling migration remains necessary.
 
 ## Results
 
@@ -55,3 +55,29 @@ Hook findings require reviewed behavioral fixes, especially introduction reporti
 | `src/lib/query.ts` | 1 | 0 |
 
 Full findings with line numbers and messages: `/workspace/scratch/lovera-lint-findings.json`. Human-readable run: `/workspace/scratch/lovera-lint-configured.log`. Audit: `/workspace/scratch/lovera-lint-audit.json`. Test/typecheck logs: `/workspace/scratch/lovera-lint-tests.log` and `/workspace/scratch/lovera-lint-typecheck.log`.
+
+## Final mechanical follow-up
+
+Escaped 17 apostrophe/quotation occurrences in JSX text across 11 files, with targeted inspected edits. No hook behavior or lint rules changed. Final lint exits1 with **17 errors and10 warnings**; TypeScript exits0 and all191 tests/23 suites pass with exit0. Dependency audit remains22 entries (3 high,11 moderate,8 low); the mechanical source edits do not change its lockfile. Original inventory above records initial findings; final inventory is `/workspace/scratch/lovera-lint-remaining.json`.
+
+Remaining error locations requiring semantic review:
+
+- `app/(app)/dates/new.tsx:41` — `react-hooks/set-state-in-effect`
+- `app/(app)/dates/new.tsx:74` — `react-hooks/set-state-in-effect`
+- `app/(app)/introductions/[id]/index.tsx:142` — `react-hooks/immutability`
+- `app/(app)/introductions/[id]/index.tsx:174` — `react-hooks/refs`
+- `app/(app)/introductions/[id]/index.tsx:174` — `react-hooks/refs`
+- `app/(app)/introductions/[id]/index.tsx:174` — `react-hooks/refs`
+- `app/(app)/introductions/[id]/index.tsx:175` — `react-hooks/refs`
+- `app/(app)/introductions/[id]/index.tsx:175` — `react-hooks/refs`
+- `app/(app)/introductions/[id]/index.tsx:175` — `react-hooks/refs`
+- `app/(app)/you/membership.tsx:78` — `react-hooks/immutability`
+- `app/(app)/you/verification.tsx:73` — `react-hooks/purity`
+- `app/_layout.tsx:12` — `react-hooks/refs`
+- `app/onboarding/blueprint/interview.tsx:79` — `react-hooks/set-state-in-effect`
+- `src/components/AvailabilityEditor.tsx:47` — `react-hooks/set-state-in-effect`
+- `src/components/ProfileEditor.tsx:38` — `react-hooks/set-state-in-effect`
+- `src/components/ui.tsx:101` — `react-hooks/set-state-in-effect`
+- `src/lib/query.ts:94` — `react-hooks/refs`
+
+Final logs: `/workspace/scratch/lovera-lint-mechanical.log`, `/workspace/scratch/lovera-lint-mechanical-typecheck.log`, `/workspace/scratch/lovera-lint-mechanical-tests.log`. Some ref findings are on event-handler factories and need human review of the static analyzer's inference; no suppressions were added to treat them as proven harmless.

@@ -114,7 +114,7 @@ export default function DateCheckIn() {
               )
             }
           >
-            I'm fine
+            I&apos;m fine
           </Button>
           <Divider />
           <Text style={s.meta}>
@@ -156,7 +156,7 @@ export default function DateCheckIn() {
           </Field>
           <Text style={s.h2}>What they see</Text>
           <Options value={scope} options={SCOPES} onChange={setScope} />
-          <Text style={s.h2}>If you don't check in</Text>
+          <Text style={s.h2}>If you don&apos;t check in</Text>
           <Options
             value={escalation}
             options={[

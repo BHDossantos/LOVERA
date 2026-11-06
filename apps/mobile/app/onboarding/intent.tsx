@@ -106,7 +106,7 @@ export default function Intent() {
       />
       <ErrorState error={error} />
       <Card>
-        <Text style={s.h2}>What I'm here for</Text>
+        <Text style={s.h2}>What I&apos;m here for</Text>
         <Options
           value={intent}
           onChange={setIntent}
@@ -115,7 +115,7 @@ export default function Intent() {
             { value: "life_partner", label: "A life partner", body: "Marriage-minded or equivalent commitment." },
           ]}
         />
-        <Text style={s.note}>Casual-only intent is outside the pilot's promise.</Text>
+        <Text style={s.note}>Casual-only intent is outside the pilot&apos;s promise.</Text>
       </Card>
       <Card>
         <Text style={s.h2}>About you (matching only)</Text>
@@ -125,7 +125,7 @@ export default function Intent() {
         <Field label="I'd like to meet">
           <ChipGroup values={seeking} onChange={setSeeking} options={GENDERS} />
         </Field>
-        <Text style={s.note}>Introductions are only made where both people's answers match each other.</Text>
+        <Text style={s.note}>Introductions are only made where both people&apos;s answers match each other.</Text>
       </Card>
       <Card>
         <Text style={s.h2}>Home city and zone</Text>

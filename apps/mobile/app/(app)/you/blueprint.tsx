@@ -143,7 +143,7 @@ export default function YouBlueprint() {
                       setError(null);
                     }}
                   >
-                    That's not right
+                    That&apos;s not right
                   </Button>
                 )
               )}
