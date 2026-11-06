@@ -235,14 +235,13 @@ def test_production_refuses_to_start_with_no_mail_host(monkeypatch):
         main.check_mail_transport()
 
 
-def test_production_starts_but_shouts_when_console_is_deliberate(monkeypatch, caplog):
+def test_production_refuses_console_even_when_deliberate(monkeypatch):
     from app import main
 
     monkeypatch.setattr(main, "get_settings", lambda: Settings(env="production", mail_transport="console"))
     monkeypatch.setattr(main, "get_sender", ConsoleSender)
-    with caplog.at_level(logging.CRITICAL, logger="app"):
+    with pytest.raises(RuntimeError, match="Console sign-in delivery is forbidden in production"):
         main.check_mail_transport()
-    assert "delivered to nobody" in caplog.text
 
 
 def test_a_non_production_env_starts_with_no_mail_at_all(monkeypatch):
