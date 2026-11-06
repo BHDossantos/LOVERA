@@ -151,3 +151,28 @@ describe("Conversations list", () => {
     expect(mockMediaDataUrl).not.toHaveBeenCalled();
   });
 });
+
+
+it("hides the previous photo on URL change and ignores its late response", async () => {
+  const { MediaImage } = require("@/components/ui");
+  const { QueryClientProvider } = require("@tanstack/react-query");
+  const { Image } = require("react-native");
+  let resolveOld!: (value: string) => void;
+  let resolveNew!: (value: string) => void;
+  mockMediaDataUrl.mockImplementation((url: string) => new Promise<string>((resolve) => {
+    if (url === "/old") resolveOld = resolve;
+    else resolveNew = resolve;
+  }));
+  const s = await renderScreen(<MediaImage url="/old" alt="Member photo" />);
+  await s.run(() => s.tree.update(
+    <QueryClientProvider client={s.client}><MediaImage url="/new" alt="Member photo" /></QueryClientProvider>
+  ));
+  await s.run(() => resolveOld("data:image/jpeg;base64,OLD"));
+  expect(s.tree.root.findAllByType(Image)).toHaveLength(0);
+  await s.run(() => resolveNew("data:image/jpeg;base64,NEW"));
+  expect(s.tree.root.findByType(Image).props.source.uri).toBe("data:image/jpeg;base64,NEW");
+  await s.run(() => s.tree.update(
+    <QueryClientProvider client={s.client}><MediaImage url={null} alt="Member photo" /></QueryClientProvider>
+  ));
+  expect(s.tree.root.findAllByType(Image)).toHaveLength(0);
+});

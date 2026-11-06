@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Text, View } from "react-native";
 import * as WebBrowser from "expo-web-browser";
@@ -65,12 +65,18 @@ export default function VerificationCentre() {
   const [error, setError] = useState<ApiError | null>(null);
   const [note, setNote] = useState("");
 
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+
   const s = q.data;
   const st = s?.status ?? "not_started";
   const manual = s?.mode === MANUAL;
   // A member who only learns about an expiry on the day it happens has already lost a week of
   // introductions. Thirty days is enough warning to act without it being nagging.
-  const expiringSoon = st === "verified" && !!s?.expires_at && new Date(s.expires_at).getTime() - Date.now() < THIRTY_DAYS;
+  const expiringSoon = st === "verified" && !!s?.expires_at && new Date(s.expires_at).getTime() - now < THIRTY_DAYS;
 
   const start = async () => {
     setBusy("start");

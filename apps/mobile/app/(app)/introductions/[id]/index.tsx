@@ -118,7 +118,7 @@ export default function IntroductionDetail() {
    * layout event nothing would ever ask again, so friction and unknown were omitted for good.
    */
   const send = useCallback(
-    (sections: string[]) => {
+    function sendSections(sections: string[]) {
       if (!intro || !sections.length) return;
       if (sections.every((name) => reported.current.includes(name))) return;
       if (inflight.current) {
@@ -139,7 +139,7 @@ export default function IntroductionDetail() {
           inflight.current = false;
           const held = pending.current;
           pending.current = null;
-          if (held) send(held);
+          if (held) sendSections(held);
         });
     },
     [intro],
@@ -170,7 +170,7 @@ export default function IntroductionDetail() {
   };
 
   /** `y` here is relative to the card, so it is added to the card's own offset. */
-  const onSectionLayout = (name: string) => (e: LayoutChangeEvent) => {
+  const onSectionLayout = (name: string, e: LayoutChangeEvent) => {
     sectionTops.current = { ...sectionTops.current, [name]: e.nativeEvent.layout.y };
     considerReporting();
   };
@@ -283,7 +283,7 @@ export default function IntroductionDetail() {
               <Text style={s.h2}>Why the matchmaker chose this</Text>
               {/* Each section measures itself, so "viewed" can mean this section rather than
                   the card that happens to contain it. */}
-              <View onLayout={onSectionLayout("reasons")}>
+              <View onLayout={(e) => onSectionLayout("reasons", e)}>
                 {ex.reasons.map((r) => (
                   <View key={r.label} style={{ marginBottom: space.md }}>
                     <View style={s.row}>
@@ -295,11 +295,11 @@ export default function IntroductionDetail() {
                 ))}
               </View>
               <Divider />
-              <View onLayout={onSectionLayout("friction")}>
+              <View onLayout={(e) => onSectionLayout("friction", e)}>
                 <Text style={s.h3}>One honest friction</Text>
                 <Text style={s.reasonText}>{ex.friction.text}</Text>
               </View>
-              <View onLayout={onSectionLayout("unknown")}>
+              <View onLayout={(e) => onSectionLayout("unknown", e)}>
                 <Text style={s.h3}>What only a date can tell you</Text>
                 <Text style={s.reasonText}>{ex.unknown.text}</Text>
               </View>

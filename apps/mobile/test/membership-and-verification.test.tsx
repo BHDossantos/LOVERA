@@ -343,3 +343,16 @@ it("does not offer another native purchase to an already paid member", async () 
   expect(s.joined()).not.toContain("£99.99 a month");
   expect(mockPurchase).not.toHaveBeenCalled();
 });
+
+
+it("updates the expiry warning when an open screen crosses the threshold", async () => {
+  jest.useFakeTimers();
+  const boundary = Date.now() + 30 * 86_400_000 + 30_000;
+  mockGet.mockResolvedValue(status({ expires_at: new Date(boundary).toISOString() }));
+  const s = await renderScreen(<VerificationCentre />);
+  expect(s.hasText("Your verification expires soon")).toBe(false);
+  await s.run(() => jest.advanceTimersByTime(60_000));
+  expect(s.hasText("Your verification expires soon")).toBe(true);
+  await s.run(() => s.tree.unmount());
+  jest.useRealTimers();
+});
