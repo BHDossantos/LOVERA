@@ -128,3 +128,13 @@ class WebhookReceipt(Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     received_at: Mapped[datetime] = created_at_column()
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class StoreReconciliation(Base):
+    """Durable polling state for historical direct App Store receipts."""
+    __tablename__ = "store_reconciliations"
+    receipt_id: Mapped[str] = mapped_column(ForeignKey("store_purchases.id", ondelete="CASCADE"), primary_key=True)
+    next_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    outcome: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)

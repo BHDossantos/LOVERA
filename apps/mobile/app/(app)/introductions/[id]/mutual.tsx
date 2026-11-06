@@ -71,7 +71,7 @@ export default function Mutual() {
           <Card>
             <Text style={s.h2}>Start the conversation</Text>
             <Text style={s.note}>
-              Say hello in your own words. If you'd like a hand, the assistant offers drafts you can edit; nothing is
+              Say hello in your own words. If you&apos;d like a hand, the assistant offers drafts you can edit; nothing is
               sent until you send it.
             </Text>
             {!!intro.conversation_id && (

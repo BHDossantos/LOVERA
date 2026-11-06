@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { useFocusEffect } from "expo-router";
 
@@ -91,7 +91,9 @@ export function useAwaitingServer(q: { dataUpdatedAt: number; refetch: () => unk
   // Held in a ref so the callbacks can stay identity-stable: react-query's `refetch` is bound
   // per observer, and a dependency on it would re-run the effects rather than only re-run on arrival.
   const refetch = useRef(q.refetch);
-  refetch.current = q.refetch;
+  useLayoutEffect(() => {
+    refetch.current = q.refetch;
+  }, [q.refetch]);
   const reopen = useCallback(() => {
     setOpenedAt(Date.now());
     void refetch.current();

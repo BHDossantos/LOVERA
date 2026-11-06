@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 
 from fastapi import APIRouter, Depends, Header, Request
 from pydantic import BaseModel
@@ -62,7 +63,45 @@ def checkout_detail(provider_ref: str, principal: Principal = Depends(current_pr
 
 @router.get("/subscriptions/current")
 def current(principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
+    if get_settings().store_validation == "revenuecat":
+        from app.modules.billing.revenuecat import sync
+        sync(db, principal.member)
     return {"entitlements": service.entitlements_for(db, principal.member), "ledger": service.ledger(db, principal.id)}
+
+
+@router.post("/subscriptions/store-sync")
+def store_sync(principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
+    from app.modules.billing.revenuecat import sync
+    return sync(db, principal.member)
+
+
+@router.post("/webhooks/revenuecat")
+async def revenuecat_webhook(request: Request, authorization: str = Header(default=""), db: Session = Depends(get_db, scope="function")) -> dict:
+    from app.models.account import Member
+    from app.modules.billing.revenuecat import sync
+    secret = get_settings().revenuecat_webhook_authorization
+    if not secret or not secrets.compare_digest(authorization, secret):
+        raise ApiError("FORBIDDEN", "Invalid webhook authorization.")
+    try:
+        event = (await request.json())["event"]
+        # Provider IDs identify candidates only: never create aliases or link
+        # accounts from webhook data. Re-fetch each already-known account.
+        identities = [event.get('app_user_id'), event.get('original_app_user_id')]
+        for field in ('aliases', 'transferred_from', 'transferred_to'):
+            values = event.get(field, [])
+            if not isinstance(values, list) or len(values) > 200:
+                raise ValueError('invalid identity list')
+            identities.extend(values)
+        identities = {value for value in identities if isinstance(value, str) and 0 < len(value) <= 36}
+        if len(identities) > 20:
+            raise ValueError('too many identities')
+    except (ValueError, TypeError, KeyError, AttributeError):
+        raise ApiError("VALIDATION_ERROR", "Invalid webhook event.") from None
+    for identity in sorted(identities):
+        member = db.get(Member, identity)
+        if member is not None:
+            sync(db, member)  # Re-read authoritative status; never grant from event body.
+    return {"received": True}
 
 
 @router.post("/subscriptions/store-purchase")
