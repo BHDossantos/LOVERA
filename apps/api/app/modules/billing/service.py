@@ -38,6 +38,10 @@ from app.models.introductions import Introduction
 
 log = logging.getLogger(__name__)
 
+# Providers that bill through a store. Their subscriptions are changed and cancelled in the
+# store, never here: nothing we write to our own row stops Apple or Google charging somebody.
+STORE_PROVIDERS = ("app_store", "play_store", "revenuecat")
+
 
 def current_subscription(db: Session, member_id: str) -> Subscription | None:
     rows = db.scalars(select(Subscription).where(Subscription.member_id == member_id, Subscription.status.in_(("trialing", "active", "past_due")))).all()
@@ -193,10 +197,30 @@ def create_checkout(db: Session, member: Member, plan_id: str, idempotency_key: 
         existing = db.execute(select(CheckoutSession).where(CheckoutSession.member_id == member.id, CheckoutSession.idempotency_key == idempotency_key)).scalar_one_or_none()
         if existing:
             return checkout_payload(db, existing)
-    db.execute(select(Member.id).where(Member.id == member.id).with_for_update()).scalar_one()
-    if current_subscription(db, member.id):
-        raise ApiError("CONFLICT", "An active subscription already exists. Manage it with its provider before buying another.")
     settings = get_settings()
+    db.execute(select(Member.id).where(Member.id == member.id).with_for_update()).scalar_one()
+    # Reading the current subscription first lets it expire anything stale, so the guard below
+    # judges what is really active rather than what a lapsed row still claims.
+    current_subscription(db, member.id)
+    for active in db.scalars(
+        select(Subscription).where(
+            Subscription.member_id == member.id,
+            Subscription.status.in_(("trialing", "active", "past_due")),
+        )
+    ).all():
+        if active.provider in STORE_PROVIDERS:
+            # Buying here as well would run two subscriptions at once, and we cannot stop the
+            # store's. Changing tier within a store is the store's own job.
+            raise ApiError(
+                "CONFLICT",
+                "You subscribe through the App Store or Google Play. Change or cancel it there — "
+                "buying again here would charge you twice.",
+            )
+        if active.provider != settings.payments_provider:
+            continue
+        term = term_for(db, "subscription", active.id)
+        if active.plan == plan_id and (term.cadence if term else "monthly") == cadence:
+            raise ApiError("CONFLICT", "You are already on this plan.")
     session = CheckoutSession(member_id=member.id, plan=plan_id, provider=settings.payments_provider, provider_ref=f"cs_{secrets.token_urlsafe(10)}", idempotency_key=idempotency_key)
     db.add(session)
     db.flush()
@@ -391,8 +415,23 @@ def activate_subscription(db: Session, member_id: str, plan_id: str, provider: s
         if existing.member_id != member_id or existing.provider != provider or existing.plan != plan_id:
             raise ApiError("CONFLICT", "Subscription ownership or product does not match.")
         return existing
-    # Creation is not evidence that another independently billed subscription
-    # was cancelled. Only that provider's authoritative reconciliation may expire it.
+    # Creation is not evidence that another *independently billed* subscription was cancelled:
+    # a store subscription keeps charging whatever we write here, so only that provider's own
+    # reconciliation may expire it. Within our own checkout the opposite is true — the member
+    # bought a replacement, and leaving the old one running bills them twice for one membership.
+    # So we supersede same-provider rows only, which is exactly what pressing Cancel would do:
+    # the old plan runs to the end of the period they already paid for, then lapses.
+    if provider not in STORE_PROVIDERS:
+        for superseded in db.scalars(
+            select(Subscription).where(
+                Subscription.member_id == member_id,
+                Subscription.provider == provider,
+                Subscription.status.in_(("trialing", "active", "past_due")),
+            )
+        ).all():
+            superseded.cancel_at_period_end = True
+            superseded.cancelled_at = utcnow()
+            superseded.cancel_reason = "superseded"
     cents = price_cents(plan_id, cadence)
     sub = Subscription(member_id=member_id, provider=provider, provider_subscription_ref=provider_subscription_ref, plan=plan_id, status="active", price_cents=cents, currency=PLANS[plan_id]["currency"], current_period_end=period_end or utcnow() + timedelta(days=PERIOD_DAYS[cadence]))
     db.add(sub)
