@@ -1,6 +1,6 @@
 import Constants from "expo-constants";
 import { Platform } from "react-native";
-import { post } from "@/api/client";
+import { post, getAccessToken } from "@/api/client";
 
 /**
  * In-app purchase, through RevenueCat, with every way it can be absent handled as "not available"
@@ -71,6 +71,8 @@ function publicKey(): string | null {
  */
 export function availability(store: StoreStatus | undefined): Availability {
   if (!store?.enabled) return { available: false, reason: store?.reason ?? "Memberships cannot be bought in the app yet." };
+  if (Platform.OS !== "ios" && Platform.OS !== "android") return { available: false, reason: "Store purchases require an iOS or Android device." };
+  if (Platform.OS === "android" && store.validation !== "revenuecat") return { available: false, reason: "Google Play server verification is not configured." };
   if (!publicKey()) return { available: false, reason: "In-app purchase is not configured in this build." };
   if (!nativeModule()) return { available: false, reason: "This build does not include in-app purchase. It arrives in the next release." };
   return { available: true };
@@ -84,18 +86,52 @@ export function availability(store: StoreStatus | undefined): Availability {
  * work once per member and returns false when purchases are unavailable, so callers can treat it
  * as "did this work".
  */
-export function configure(memberId: string): boolean {
+let operations: Promise<unknown> = Promise.resolve();
+function exclusive<T>(work: () => Promise<T>): Promise<T> {
+  const result = operations.then(work, work);
+  operations = result.then(() => undefined, () => undefined);
+  return result;
+}
+let initialized = false;
+async function configureNow(memberId: string): Promise<boolean> {
   const mod = nativeModule();
   const key = publicKey();
-  if (!mod || !key) return false;
+  if (!mod || !key || !memberId) return false;
   if (configuredFor === memberId) return true;
+  configuredFor = null;
   try {
-    mod.configure({ apiKey: key, appUserID: memberId });
+    if (!initialized) { mod.configure({ apiKey: key, appUserID: memberId }); initialized = true; }
+    else { await mod.logIn(memberId); }
     configuredFor = memberId;
     return true;
-  } catch {
-    return false;
+  } catch { return false; }
+}
+export function configure(memberId: string): Promise<boolean> {
+  return exclusive(() => configureNow(memberId));
+}
+let operationToken: string | undefined;
+function sessionOptions() {
+  if (!operationToken || getAccessToken() !== operationToken) throw new Error("Account changed. Sign back into the purchasing account and restore; do not buy again.");
+  return { expectedAccessToken: operationToken, retry: false };
+}
+function runForAccount(work: () => Promise<PurchaseResult>, expectedMemberId?: string, expectedToken?: string | null): Promise<PurchaseResult> {
+  const token = expectedToken === undefined ? getAccessToken() : expectedToken;
+  const member = expectedMemberId ?? configuredFor;
+  return exclusive(async () => {
+    if (!token || token !== getAccessToken() || !member || !await configureNow(member)) return { ok: false, cancelled: false, message: "Sign into the purchasing account and restore; do not buy again." };
+    if (token !== getAccessToken()) return { ok: false, cancelled: false, message: "Account changed. Sign into the purchasing account and restore; do not buy again." };
+    operationToken = token;
+    try { return await work(); }
+    finally { operationToken = undefined; }
+  });
+}
+
+async function reconcile(): Promise<PurchaseResult> {
+  const result = await post<{ status: string; entitlements?: { paid?: boolean } }>("/subscriptions/store-sync", undefined, sessionOptions());
+  if (result.status !== "granted" || result.entitlements?.paid !== true) {
+    return { ok: false, cancelled: false, message: "No active verified membership was found. If you just paid, try Restore purchases again shortly." };
   }
+  return { ok: true, entitlementsChanged: true };
 }
 
 export type StoreProduct = { productId: string; priceLabel: string };
@@ -112,6 +148,16 @@ export async function products(productIds: string[]): Promise<StoreProduct[]> {
   }
 }
 
+/** A 200 response can be an idempotent replay of a refused receipt. */
+async function recordReceipt(store: string, productId: string, transactionId: string): Promise<void> {
+  const result = await post<{ status: string; entitlements?: { paid?: boolean } }>("/subscriptions/store-purchase", {
+    store, product_id: productId, transaction_id: transactionId,
+  }, sessionOptions());
+  if (result.status !== "granted" || result.entitlements?.paid !== true) {
+    throw new Error("The server could not grant this purchase to your membership. Please contact support.");
+  }
+}
+
 export type PurchaseResult =
   | { ok: true; entitlementsChanged: true }
   | { ok: false; cancelled: true }
@@ -124,12 +170,22 @@ export type PurchaseResult =
  * to a plan and a cadence. A client that decided its own entitlements would be a free upgrade to
  * the most expensive tier for anybody willing to edit a JSON body.
  */
-export async function purchase(productId: string): Promise<PurchaseResult> {
+export function purchase(productId: string, validation = "app_store", expectedMemberId?: string, expectedToken?: string | null): Promise<PurchaseResult> {
+  return runForAccount(() => purchaseNow(productId, validation), expectedMemberId, expectedToken);
+}
+async function purchaseNow(productId: string, validation: string): Promise<PurchaseResult> {
+  if (Platform.OS !== "ios" && validation !== "revenuecat") return { ok: false, cancelled: false, message: "Google Play purchases are unavailable until purchase-token verification is connected." };
   const mod = nativeModule();
   if (!mod) return { ok: false, cancelled: false, message: "In-app purchase is not available in this build." };
+  if (validation === "revenuecat" && !configuredFor) return { ok: false, cancelled: false, message: "Sign in again before purchasing." };
   let transactionId: string | undefined;
   try {
     const result = await mod.purchaseProduct(productId);
+    if (validation === "revenuecat") {
+      try { return await reconcile(); } catch {
+        return { ok: false, cancelled: false, message: "Your store purchase completed, but verification is temporarily unavailable. Try Restore purchases; do not buy again." };
+      }
+    }
     transactionId = result.transaction?.transactionIdentifier;
   } catch (err) {
     // RevenueCat reports a user cancelling as an error with a flag. Cancelling is not a failure
@@ -141,11 +197,7 @@ export async function purchase(productId: string): Promise<PurchaseResult> {
     return { ok: false, cancelled: false, message: "The store did not return a receipt. If you were charged, restore purchases to finish." };
   }
   try {
-    await post("/subscriptions/store-purchase", {
-      store: Platform.OS === "ios" ? "app_store" : "play_store",
-      product_id: productId,
-      transaction_id: transactionId,
-    });
+    await recordReceipt("app_store", productId, transactionId);
     return { ok: true, entitlementsChanged: true };
   } catch (err) {
     // The store has taken the money and we could not record it. Restoring replays the same
@@ -166,32 +218,60 @@ export async function purchase(productId: string): Promise<PurchaseResult> {
  * recovery route when a purchase succeeded at the store and failed to reach us. Every transaction
  * it finds is replayed to the server, which is idempotent on the transaction id.
  */
-export async function restore(): Promise<PurchaseResult> {
+export function restore(validation = "app_store", expectedMemberId?: string, expectedToken?: string | null): Promise<PurchaseResult> {
+  return runForAccount(() => restoreNow(validation), expectedMemberId, expectedToken);
+}
+async function restoreNow(validation: string): Promise<PurchaseResult> {
   const mod = nativeModule();
   if (!mod) return { ok: false, cancelled: false, message: "In-app purchase is not available in this build." };
+  if (validation === "revenuecat") {
+    if (!configuredFor) return { ok: false, cancelled: false, message: "Sign in again before restoring." };
+    try {
+      await mod.restorePurchases();
+      return await reconcile();
+    } catch {
+      return { ok: false, cancelled: false, message: "We could not verify your purchases. Try Restore purchases again; no new purchase is needed." };
+    }
+  }
+  if (Platform.OS !== "ios") return { ok: false, cancelled: false, message: "Google Play server verification is not configured." };
   try {
     const info = (await mod.restorePurchases()) as {
       nonSubscriptionTransactions?: { transactionIdentifier: string; productIdentifier: string }[];
       allPurchasedProductIdentifiers?: string[];
+      activeSubscriptions?: string[];
+      subscriptionsByProductIdentifier?: Record<string, { productIdentifier: string; storeTransactionId: string | null; store: string; isActive: boolean }>;
       latestExpirationDate?: string | null;
       originalPurchaseDate?: string | null;
     };
     const store = Platform.OS === "ios" ? "app_store" : "play_store";
     const seen = new Set<string>();
+    let verificationFailed = false;
     for (const t of info.nonSubscriptionTransactions ?? []) {
       if (seen.has(t.transactionIdentifier)) continue;
       seen.add(t.transactionIdentifier);
-      await post("/subscriptions/store-purchase", { store, product_id: t.productIdentifier, transaction_id: t.transactionIdentifier });
+      try { await recordReceipt(store, t.productIdentifier, t.transactionIdentifier); }
+      catch { verificationFailed = true; }
     }
-    // A subscription has no transaction list on every platform, so fall back to the product ids
-    // the store says this account owns. The transaction id is derived from the product and the
-    // app user id, which keeps the server's idempotency key stable across restores.
-    for (const productId of info.allPurchasedProductIdentifiers ?? []) {
-      const key = `${productId}:${configuredFor ?? "unknown"}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      await post("/subscriptions/store-purchase", { store, product_id: productId, transaction_id: key });
+    // Revalidate inactive receipts too: a refund must reach the server even
+    // when the SDK has already removed its local entitlement.
+    // RevenueCat 10 exposes real App Store subscription transaction IDs.
+    // Google order IDs are not purchase tokens; Android is guarded above.
+    const restoredProducts = new Set((info.nonSubscriptionTransactions ?? []).map(t => t.productIdentifier));
+    for (const subscription of Object.values(info.subscriptionsByProductIdentifier ?? {})) {
+      if (subscription.store !== "APP_STORE" || !subscription.storeTransactionId) continue;
+      if (!seen.has(subscription.storeTransactionId)) {
+        try { await recordReceipt(store, subscription.productIdentifier, subscription.storeTransactionId); }
+        catch { verificationFailed = true; }
+        seen.add(subscription.storeTransactionId);
+      }
+      restoredProducts.add(subscription.productIdentifier);
     }
+    // A product ID alone is never a receipt. Do not claim a partial restore
+    // succeeded when an active subscription has no verifiable transaction.
+    if ((info.activeSubscriptions ?? info.allPurchasedProductIdentifiers ?? []).some(id => !restoredProducts.has(id))) {
+      return { ok: false, cancelled: false, message: "The store found purchases, but did not return their subscription receipts. Please try restoring again or contact support to recover your membership." };
+    }
+    if (verificationFailed) return { ok: false, cancelled: false, message: "Some receipts could not be granted. Your verified purchases are preserved. Check your membership or contact support; do not buy again." };
     if (seen.size === 0) return { ok: false, cancelled: false, message: "No previous purchase was found for this store account." };
     return { ok: true, entitlementsChanged: true };
   } catch (err) {

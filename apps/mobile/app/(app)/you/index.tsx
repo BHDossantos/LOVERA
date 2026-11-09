@@ -121,7 +121,7 @@ export default function YouScreen() {
       <Card>
         <Text style={s.h2}>Your profile and matching</Text>
         <Text style={s.note}>
-          Photos, prompts and the things you will and won't compromise on. Changing a preference shows you what it
+          Photos, prompts and the things you will and won&apos;t compromise on. Changing a preference shows you what it
           costs before you save.
         </Text>
         <Button variant="secondary" onPress={() => router.push("/you/profile" as never)}>
@@ -162,7 +162,7 @@ export default function YouScreen() {
       <Card>
         <Text style={s.h2}>Your data</Text>
         <Text style={s.note}>
-          What you've agreed to, and a copy of everything we hold. Every consent is yours to withdraw.
+          What you&apos;ve agreed to, and a copy of everything we hold. Every consent is yours to withdraw.
         </Text>
         <Button variant="secondary" onPress={() => router.push("/you/privacy" as never)}>
           Consents and data

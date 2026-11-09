@@ -82,24 +82,24 @@ export function Wash({ height, children, style }: { height: number; children?: R
  * square in it is still a usable card, and a banner about a failed image across a screen that is
  * otherwise fine is worse than the missing photo.
  */
-export function MediaImage({
-  url,
-  alt,
-  style,
-  radius: r = radius.lg,
-}: {
+type MediaImageProps = {
   url: string | null | undefined;
   alt: string;
-  /** `ImageStyle` rather than `ViewStyle`: the placeholder is a View, but the loaded photo is not. */
   style?: ImageStyle;
   radius?: number;
-}) {
+};
+
+export function MediaImage(props: MediaImageProps) {
+  // A new URL owns fresh loading state before commit, so the previous member's
+  // photo cannot be painted while the replacement is loading.
+  return <MediaImageForUrl key={props.url ?? ""} {...props} />;
+}
+
+function MediaImageForUrl({ url, alt, style, radius: r = radius.lg }: MediaImageProps) {
   const [uri, setUri] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     let alive = true;
-    setUri(null);
-    setFailed(false);
     if (!url) return;
     void mediaDataUrl(url).then((d) => {
       if (!alive) return;

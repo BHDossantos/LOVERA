@@ -80,7 +80,7 @@ export default function MessagesScreen() {
                     {c.last_message.text}
                   </Text>
                 )}
-                {!c.last_message && <Text style={s.preview}>Say hello when you're ready.</Text>}
+                {!c.last_message && <Text style={s.preview}>Say hello when you&apos;re ready.</Text>}
               </View>
               {c.unread > 0 ? <Badge label={`${c.unread} new`} tone="context" /> : c.your_turn ? <Badge label="Your turn" tone="success" /> : null}
             </View>

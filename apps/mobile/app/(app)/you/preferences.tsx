@@ -255,7 +255,7 @@ export default function YouPreferences() {
 
         {!!editing.options && (
           <Card>
-            <Text style={s.h2}>What you'll accept</Text>
+            <Text style={s.h2}>What you&apos;ll accept</Text>
             <ChipGroup
               values={list}
               options={editing.options}

@@ -104,7 +104,7 @@ export default function IntroductionsScreen() {
           ) : (
             !!data.waiting && (
               <Card>
-                <Text style={s.sectionInline}>Why it's quiet</Text>
+                <Text style={s.sectionInline}>Why it&apos;s quiet</Text>
                 <Text style={s.meta}>
                   {data.waiting.eligible_after_must} of {data.waiting.verified_pool} verified members clear your
                   Musts right now. Next batch {data.waiting.next_batch}.

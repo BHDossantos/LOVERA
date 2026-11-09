@@ -75,3 +75,9 @@ def test_console_on_purpose_boots_and_complains(monkeypatch, caplog):
     with caplog.at_level("CRITICAL"):
         check_mail_transport()
     assert any("delivered to nobody" in r.getMessage() for r in caplog.records)
+
+
+def test_production_explicit_console_refuses(monkeypatch):
+    settings_for(monkeypatch, env="production", mail_transport="console")
+    with pytest.raises(RuntimeError, match="forbidden in production"):
+        check_mail_transport()

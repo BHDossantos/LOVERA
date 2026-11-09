@@ -38,13 +38,22 @@ from app.models.introductions import Introduction
 
 log = logging.getLogger(__name__)
 
+# Providers that bill through a store. Their subscriptions are changed and cancelled in the
+# store, never here: nothing we write to our own row stops Apple or Google charging somebody.
+STORE_PROVIDERS = ("app_store", "play_store", "revenuecat")
+
 
 def current_subscription(db: Session, member_id: str) -> Subscription | None:
-    sub = db.execute(select(Subscription).where(Subscription.member_id == member_id, Subscription.status.in_(("trialing", "active", "past_due"))).order_by(Subscription.started_at.desc())).scalars().first()
-    if sub and sub.current_period_end and sub.current_period_end <= utcnow() and sub.cancel_at_period_end:
-        sub.status = "expired"
-        return None
-    return sub
+    rows = db.scalars(select(Subscription).where(Subscription.member_id == member_id, Subscription.status.in_(("trialing", "active", "past_due")))).all()
+    eligible = []
+    for sub in rows:
+        if sub.current_period_end and sub.current_period_end <= utcnow() and (sub.cancel_at_period_end or sub.provider in ("app_store", "play_store", "revenuecat")):
+            sub.status = "expired"
+        else:
+            eligible.append(sub)
+    # Independently paid subscriptions coexist. A newer/lower tier or an expired
+    # native receipt must never hide a still-paid higher tier from another provider.
+    return max(eligible, key=lambda sub: (sub.plan == "concierge", sub.started_at, sub.id), default=None)
 
 
 def credit_balance(db: Session, member_id: str) -> int:
@@ -99,6 +108,19 @@ def entitlements_for(db: Session, member: Member) -> dict[str, Any]:
     # by one as `paid`, which meant Concierge granted exactly what Pro did at more than twice the
     # price while its bullets promised two things it never delivered.
     out: dict[str, Any] = {FEATURE: grants(plan_id, FEATURE) for FEATURE in FEATURES}
+    store = sub.provider if sub else None
+    if sub and sub.provider == "revenuecat":
+        store = db.scalar(select(StorePurchase.store).where(StorePurchase.subscription_id == sub.id).order_by(StorePurchase.created_at.desc()).limit(1))
+    management_url = "https://apps.apple.com/account/subscriptions" if store == "app_store" else "https://play.google.com/store/account/subscriptions" if store == "play_store" else None
+    subscriptions = []
+    for paid_sub in db.scalars(select(Subscription).where(Subscription.member_id == member.id, Subscription.status.in_(("trialing", "active", "past_due")))).all():
+        if paid_sub.status not in ("trialing", "active", "past_due"):
+            continue  # current_subscription may have expired it in this transaction
+        paid_store = paid_sub.provider
+        if paid_store == "revenuecat":
+            paid_store = db.scalar(select(StorePurchase.store).where(StorePurchase.subscription_id == paid_sub.id).limit(1))
+        url = "https://apps.apple.com/account/subscriptions" if paid_store == "app_store" else "https://play.google.com/store/account/subscriptions" if paid_store == "play_store" else None
+        subscriptions.append({"id": paid_sub.id, "provider": paid_store or paid_sub.provider, "plan": paid_sub.plan, "management_url": url, "renews_at": iso(paid_sub.current_period_end)})
     out.update(
         {
             "plan": plan_id,
@@ -119,6 +141,8 @@ def entitlements_for(db: Session, member: Member) -> dict[str, Any]:
             "price_cents": term.price_cents if term else price_cents(plan_id, "monthly"),
             "currency": term.currency if term else PLANS[plan_id]["currency"],
             "renews_at": iso(sub.current_period_end) if sub else None,
+            "management_url": management_url,
+            "subscriptions": subscriptions,
             "cancel_at_period_end": bool(sub.cancel_at_period_end) if sub else False,
             "status": sub.status if sub else "none",
         }
@@ -140,10 +164,10 @@ def store_status() -> dict[str, Any]:
     elif mode == "sandbox" and settings.is_production:
         reason = "Sandbox receipt validation is never accepted in production."
     elif mode in ("app_store", "play_store"):
-        # Choosing the mode is not the same as being able to use it. A missing key would otherwise
-        # surface as a member tapping Subscribe, being charged by the store, and then being told we
-        # cannot verify it — so the absence is reported here, before anything is drawn.
-        reason = stores.missing_configuration(mode)
+        reason = "Direct store billing is disabled until automated lifecycle verification is available. Configure RevenueCat before offering purchases."
+    elif mode == "revenuecat":
+        from app.modules.billing.revenuecat import missing_configuration
+        reason = missing_configuration()
     elif mode != "sandbox":
         reason = f"Unknown MM_STORE_VALIDATION value {mode!r}."
     return {"enabled": reason is None, "validation": mode, "reason": reason, "products": dict(STORE_PRODUCTS)}
@@ -174,6 +198,29 @@ def create_checkout(db: Session, member: Member, plan_id: str, idempotency_key: 
         if existing:
             return checkout_payload(db, existing)
     settings = get_settings()
+    db.execute(select(Member.id).where(Member.id == member.id).with_for_update()).scalar_one()
+    # Reading the current subscription first lets it expire anything stale, so the guard below
+    # judges what is really active rather than what a lapsed row still claims.
+    current_subscription(db, member.id)
+    for active in db.scalars(
+        select(Subscription).where(
+            Subscription.member_id == member.id,
+            Subscription.status.in_(("trialing", "active", "past_due")),
+        )
+    ).all():
+        if active.provider in STORE_PROVIDERS:
+            # Buying here as well would run two subscriptions at once, and we cannot stop the
+            # store's. Changing tier within a store is the store's own job.
+            raise ApiError(
+                "CONFLICT",
+                "You subscribe through the App Store or Google Play. Change or cancel it there — "
+                "buying again here would charge you twice.",
+            )
+        if active.provider != settings.payments_provider:
+            continue
+        term = term_for(db, "subscription", active.id)
+        if active.plan == plan_id and (term.cadence if term else "monthly") == cadence:
+            raise ApiError("CONFLICT", "You are already on this plan.")
     session = CheckoutSession(member_id=member.id, plan=plan_id, provider=settings.payments_provider, provider_ref=f"cs_{secrets.token_urlsafe(10)}", idempotency_key=idempotency_key)
     db.add(session)
     db.flush()
@@ -227,13 +274,18 @@ def record_store_purchase(db: Session, member: Member, store: str, product_id: s
     if store not in ("app_store", "play_store"):
         raise ApiError("VALIDATION_ERROR", "Unknown store.", field_errors={"store": "invalid"})
 
+    db.execute(select(Member.id).where(Member.id == member.id).with_for_update()).scalar_one()
     existing = db.execute(
         select(StorePurchase).where(StorePurchase.store == store, StorePurchase.transaction_id == transaction_id)
     ).scalar_one_or_none()
     if existing:
-        # A replay — a retry, a restore-purchases, or somebody trying it on. Same answer either
-        # way, and no second subscription.
-        return {"status": existing.status, "duplicate": True, "entitlements": entitlements_for(db, member)}
+        if existing.member_id != member.id or existing.product_id != product_id:
+            raise ApiError("CONFLICT", "This receipt is associated with a different purchase or membership.")
+        if existing.status not in {"granted", "refused_unavailable", "refused_unverified", "refused_wrong_store"}:
+            return {"status": existing.status, "duplicate": True, "entitlements": entitlements_for(db, member)}
+        # A transient outage or missing configuration is not a permanent receipt
+        # verdict. Reverify and reuse the row; retain the original audit entry.
+
 
     mapped = STORE_PRODUCTS.get(product_id)
     if mapped is None:
@@ -242,12 +294,22 @@ def record_store_purchase(db: Session, member: Member, store: str, product_id: s
     plan_id, cadence = mapped
 
     status = store_status()
+    # Disabled direct modes may revalidate historical receipts for recovery only.
+    # They cannot accept a new transaction or expose a new purchase offer.
+    if existing and existing.subscription_id and settings.store_validation in ("app_store", "play_store"):
+        missing = stores.missing_configuration(settings.store_validation)
+        status = {"enabled": missing is None, "reason": missing}
+    if not status["enabled"] and settings.store_validation in ("app_store", "play_store"):
+        raise ApiError("DEPENDENCY_UNAVAILABLE", status["reason"])
     if not status["enabled"]:
         _refuse(db, member, store, product_id, transaction_id, plan_id, cadence, "refused_unverified")
         raise ApiError(
             "DEPENDENCY_UNAVAILABLE",
             status["reason"] or "Purchases cannot be verified right now. You have not been charged by us, and anything the store charged will be refunded by the store.",
         )
+
+    if settings.store_validation == "revenuecat":
+        raise ApiError("VALIDATION_ERROR", "Use store-sync for RevenueCat verification.")
 
     period_end: datetime | None = None
     if settings.store_validation in ("app_store", "play_store"):
@@ -262,6 +324,13 @@ def record_store_purchase(db: Session, member: Member, store: str, product_id: s
             # The store answered and said no. The member is told plainly, and the reason is kept:
             # "a receipt arrived and we would not honour it" is exactly what you want in the log
             # when somebody says they paid and have nothing.
+            if existing and existing.status == "granted":
+                existing.status = f"refused_{exc.reason}"
+                linked = db.get(Subscription, existing.subscription_id) if existing.subscription_id else None
+                if linked and linked.member_id == member.id and linked.provider == store:
+                    linked.status = "expired"
+                db.flush()
+                return {"status": existing.status, "duplicate": True, "entitlements": entitlements_for(db, member)}
             _refuse(db, member, store, product_id, transaction_id, plan_id, cadence, f"refused_{exc.reason}")
             raise ApiError("VALIDATION_ERROR", exc.message, field_errors={"transaction_id": exc.reason}) from exc
         except stores.ReceiptUnavailable as exc:
@@ -284,10 +353,18 @@ def record_store_purchase(db: Session, member: Member, store: str, product_id: s
         period_end = receipt.expires_at
 
     sub = activate_subscription(db, member.id, plan_id, store, f"{store}:{transaction_id}", cadence=cadence, period_end=period_end)
-    db.add(StorePurchase(member_id=member.id, store=store, product_id=product_id, transaction_id=transaction_id, plan=plan_id, cadence=cadence, status="granted", validated_by=settings.store_validation, subscription_id=sub.id))
+    if period_end is not None:
+        sub.current_period_end = period_end
+        sub.status = "active"
+    if existing:
+        existing.plan, existing.cadence = plan_id, cadence
+        existing.status, existing.validated_by = "granted", settings.store_validation
+        existing.subscription_id = sub.id
+    else:
+        db.add(StorePurchase(member_id=member.id, store=store, product_id=product_id, transaction_id=transaction_id, plan=plan_id, cadence=cadence, status="granted", validated_by=settings.store_validation, subscription_id=sub.id))
     db.flush()
     audit(db, actor_type="member", actor_id=member.id, action="billing.store_purchase_granted", resource_type="subscription", resource_id=sub.id, metadata={"product_id": product_id, "store": store})
-    return {"status": "granted", "duplicate": False, "entitlements": entitlements_for(db, member)}
+    return {"status": "granted", "duplicate": existing is not None, "entitlements": entitlements_for(db, member)}
 
 
 def _refuse(db: Session, member: Member, store: str, product_id: str, transaction_id: str, plan_id: str, cadence: str, status: str) -> None:
@@ -332,16 +409,36 @@ def activate_subscription(db: Session, member_id: str, plan_id: str, provider: s
     bought through an introductory offer, or renewed mid-period, and our own addition would then
     disagree with Apple's or Google's by days.
     """
+    db.execute(select(Member.id).where(Member.id == member_id).with_for_update()).scalar_one()
     existing = db.execute(select(Subscription).where(Subscription.provider_subscription_ref == provider_subscription_ref)).scalar_one_or_none()
     if existing:
+        if existing.member_id != member_id or existing.provider != provider or existing.plan != plan_id:
+            raise ApiError("CONFLICT", "Subscription ownership or product does not match.")
         return existing
-    for old in db.execute(select(Subscription).where(Subscription.member_id == member_id, Subscription.status.in_(("active", "trialing", "past_due")))).scalars():
-        old.status = "cancelled"
-        old.cancelled_at = utcnow()
+    # Creation is not evidence that another *independently billed* subscription was cancelled:
+    # a store subscription keeps charging whatever we write here, so only that provider's own
+    # reconciliation may expire it. Within our own checkout the opposite is true — the member
+    # bought a replacement, and leaving the old one running bills them twice for one membership.
+    # So we supersede same-provider rows only, which is exactly what pressing Cancel would do:
+    # the old plan runs to the end of the period they already paid for, then lapses.
+    if provider not in STORE_PROVIDERS:
+        for superseded in db.scalars(
+            select(Subscription).where(
+                Subscription.member_id == member_id,
+                Subscription.provider == provider,
+                Subscription.status.in_(("trialing", "active", "past_due")),
+            )
+        ).all():
+            superseded.cancel_at_period_end = True
+            superseded.cancelled_at = utcnow()
+            superseded.cancel_reason = "superseded"
     cents = price_cents(plan_id, cadence)
     sub = Subscription(member_id=member_id, provider=provider, provider_subscription_ref=provider_subscription_ref, plan=plan_id, status="active", price_cents=cents, currency=PLANS[plan_id]["currency"], current_period_end=period_end or utcnow() + timedelta(days=PERIOD_DAYS[cadence]))
     db.add(sub)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError:
+        raise ApiError("CONFLICT", "Subscription reference was claimed concurrently. Retry reconciliation.") from None
     record_term(db, "subscription", sub.id, plan_id, cadence)
     track(db, "subscription_started", member_id, plan=plan_id, price=cents, currency=PLANS[plan_id]["currency"], channel=provider, cadence=cadence)
     audit(db, actor_type="vendor", actor_id=None, action="billing.subscription_activated", resource_type="subscription", resource_id=sub.id, metadata={"plan": plan_id, "cadence": cadence})
@@ -352,6 +449,8 @@ def cancel(db: Session, member: Member, reason: str | None) -> dict[str, Any]:
     sub = current_subscription(db, member.id)
     if sub is None:
         raise ApiError("CONFLICT", "You do not have an active subscription.")
+    if sub.provider in ("app_store", "play_store", "revenuecat"):
+        raise ApiError("CONFLICT", "Manage cancellation in the store where you subscribed. No cancellation has been made here.")
     sub.cancel_at_period_end = True
     sub.cancelled_at = utcnow()
     sub.cancel_reason = (reason or "")[:48] or None
@@ -405,11 +504,11 @@ def handle_payment_webhook(db: Session, body: bytes, timestamp: str, signature: 
                 cadence=bought.cadence if bought else "monthly",
             )
     elif event_type == "invoice.payment_failed":
-        sub = db.execute(select(Subscription).where(Subscription.provider_subscription_ref == data.get("subscription_ref"))).scalar_one_or_none()
+        sub = db.execute(select(Subscription).where(Subscription.provider_subscription_ref == data.get("subscription_ref"), Subscription.provider == settings.payments_provider)).scalar_one_or_none()
         if sub:
             sub.status = "past_due"
     elif event_type == "customer.subscription.deleted":
-        sub = db.execute(select(Subscription).where(Subscription.provider_subscription_ref == data.get("subscription_ref"))).scalar_one_or_none()
+        sub = db.execute(select(Subscription).where(Subscription.provider_subscription_ref == data.get("subscription_ref"), Subscription.provider == settings.payments_provider)).scalar_one_or_none()
         if sub:
             sub.status = "cancelled"
             sub.cancelled_at = utcnow()

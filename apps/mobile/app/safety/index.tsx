@@ -65,7 +65,7 @@ export default function SafetyCentre() {
       <CaseList />
 
       <Divider />
-      <Text style={s.section}>People you've blocked</Text>
+      <Text style={s.section}>People you&apos;ve blocked</Text>
       <BlockList onChanged={() => centre.refetch()} />
     </Screen>
   );

@@ -44,6 +44,20 @@ def create_schema() -> None:
         Base.metadata.create_all(bind=conn)
 
 
+def check_production_secrets() -> None:
+    """Reject publicly known signing keys before accepting production traffic."""
+    settings = get_settings()
+    if not settings.is_production:
+        return
+    # Both webhook endpoints remain mounted even with manual identity review or
+    # disabled checkout, so their keys must also be private.
+    for field in ("secret_key", "identity_webhook_secret", "payments_webhook_secret"):
+        value = getattr(settings, field)
+        default = type(settings).model_fields[field].default
+        if value == default or len(value.strip()) < 32:
+            raise RuntimeError(f"MM_{field.upper()} must be a private signing secret of at least 32 characters in production.")
+
+
 def check_mail_transport() -> None:
     """Refuse to start an API that gives a member no way to receive a sign-in code.
 
@@ -61,9 +75,11 @@ def check_mail_transport() -> None:
     guard exists to close: no mail, no code in the response, and a clean boot.
 
     An operator who really wants to run without mail can say so with MM_MAIL_TRANSPORT=console,
-    which boots and complains instead.
+    which boots and complains outside production only.
     """
     settings = get_settings()
+    if settings.is_production and settings.resolved_mail_transport == "console":
+        raise RuntimeError("Console sign-in delivery is forbidden in production; configure MM_SMTP_HOST and MM_MAIL_TRANSPORT=smtp.")
     # The two ways a code can reach somebody. Either is enough; neither is a dead end.
     mailed = settings.resolved_mail_transport != "console"
     in_response = settings.expose_dev_otp and not settings.is_production
@@ -149,6 +165,7 @@ def check_store_validation() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    check_production_secrets()
     check_mail_transport()
     check_identity_provider()
     check_store_validation()
