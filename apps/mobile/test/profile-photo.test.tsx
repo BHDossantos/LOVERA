@@ -13,12 +13,13 @@ import { renderScreen } from "./render";
  * "Some fields need attention." The member with the newest phone was the one who could not add a
  * photo, and nothing told them why.
  */
+const mockPatch = jest.fn();
 const mockPost = jest.fn();
 const mockGet = jest.fn();
 jest.mock("@/api/client", () => ({
   get: (p: string) => mockGet(p),
   post: (p: string, b: unknown) => mockPost(p, b),
-  patch: jest.fn(),
+  patch: (p: string, b: unknown) => mockPatch(p, b),
   del: jest.fn(),
   ApiError: class extends Error {
     status: number;
@@ -60,7 +61,7 @@ const PROFILE = {
   pronouns: "she/her",
   occupation: "Architect",
   bio: "Slow mornings and long lunches.",
-  languages: ["English"],
+  languages: ["en"],
   prompts: [{ key: "second_date", answer: "Somewhere with good coffee." }],
   available_prompts: [{ key: "second_date", label: "A good second date" }],
   media: [],
@@ -73,6 +74,7 @@ const PROFILE = {
 const b64 = (bytes: number) => "A".repeat(Math.ceil((bytes * 4) / 3));
 
 beforeEach(() => {
+  mockPatch.mockReset();
   mockResize.mockReset();
   mockSave.mockReset();
   mockPost.mockReset();
@@ -148,4 +150,16 @@ test("a version-zero profile initializes once and preserves edits on refresh", a
   await act(async () => { s.client.setQueryData(["profile"], { ...PROFILE, version: 1 }); });
   const input = s.tree.root.findAll((n) => n.props.accessibilityLabel === "Display name" && typeof n.props.onChangeText === "function")[0];
   expect(input.props.value).toBe("Edited Nadia");
+});
+
+test("repeated saves advance the version and language choices use API codes", async () => {
+  mockPatch.mockResolvedValueOnce({ ...PROFILE, version: 4, languages: ["en", "it"] })
+    .mockResolvedValueOnce({ ...PROFILE, version: 5, languages: ["en", "it"] });
+  const s = await renderScreen(<ProfileEditor />);
+  await s.press("Italian");
+  await s.press("Save my profile");
+  expect(mockPatch.mock.calls[0][1]).toMatchObject({ version: 3, languages: ["en", "it"] });
+  await s.type("Another edit");
+  await s.press("Saved");
+  expect(mockPatch.mock.calls[1][1]).toMatchObject({ version: 4, display_name: "Another edit", languages: ["en", "it"] });
 });

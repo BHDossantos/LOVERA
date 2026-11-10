@@ -22,7 +22,10 @@ type Profile = {
   visibility_map: Record<string, string>;
 };
 
-const LANGUAGES = ["English", "Italian", "Spanish", "French", "German", "Portuguese"];
+const LANGUAGES = [
+  ["en", "English"], ["it", "Italian"], ["es", "Spanish"], ["fr", "French"],
+  ["de", "German"], ["pt", "Portuguese"], ["ca", "Catalan"], ["other", "Other"],
+] as const;
 
 export function ProfileEditor({ onSaved }: { onSaved?: () => void }) {
   const qc = useQueryClient();
@@ -62,6 +65,8 @@ export function ProfileEditor({ onSaved }: { onSaved?: () => void }) {
         prompts: (form.prompts ?? []).filter((p) => p.answer.trim()),
       });
       qc.setQueryData(["profile"], next);
+      // Retain edits made while saving, but advance the optimistic concurrency token.
+      setForm((current) => ({ ...current, version: next.version }));
       setSaved(true);
       onSaved?.();
     } catch (err) {
@@ -242,24 +247,24 @@ export function ProfileEditor({ onSaved }: { onSaved?: () => void }) {
         </Field>
         <Field label="Languages you speak">
           <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
-            {LANGUAGES.map((l) => {
-              const on = (form.languages ?? []).includes(l);
+            {LANGUAGES.map(([code, label]) => {
+              const on = (form.languages ?? []).includes(code);
               return (
                 <Pressable
-                  key={l}
+                  key={code}
                   onPress={() =>
                     setForm({
                       ...form,
                       languages: on
-                        ? (form.languages ?? []).filter((x) => x !== l)
-                        : [...(form.languages ?? []), l],
+                        ? (form.languages ?? []).filter((x) => x !== code)
+                        : [...(form.languages ?? []), code],
                     })
                   }
                   accessibilityRole="checkbox"
                   accessibilityState={{ checked: on }}
                   style={[s.chip, on && { borderColor: color.action, backgroundColor: color.actionSoft }]}
                 >
-                  <Text style={[s.chipLabel, on && { color: color.action }]}>{l}</Text>
+                  <Text style={[s.chipLabel, on && { color: color.action }]}>{label}</Text>
                 </Pressable>
               );
             })}
