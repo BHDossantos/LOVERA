@@ -91,7 +91,7 @@ export default function MembershipPage() {
     setBusy("cancel");
     setError(null);
     try {
-      await post("/subscriptions/cancel", { reason });
+      await post("/subscriptions/cancel", { reason, ...(current.data?.entitlements.cancellation_target ? { subscription_id: current.data.entitlements.cancellation_target.id } : {}) });
       await qc.invalidateQueries({ queryKey: ["subscription"] });
       await refresh();
       setCancelOpen(false);
@@ -207,14 +207,14 @@ export default function MembershipPage() {
               ))}
             </ul>
           </Card>
-          {ent.paid && !ent.cancel_at_period_end && (
+          {ent.paid && (ent.cancellation_target || (ent.cancellation_target === undefined && !ent.cancel_at_period_end)) && (
             <Button variant="danger" fullWidth onClick={() => setCancelOpen(true)}>
               Cancel my membership
             </Button>
           )}
           <Modal open={cancelOpen} title="Cancel membership?" onClose={() => setCancelOpen(false)}>
             <p className="mb-3 text-sm text-ink-secondary">
-              Your access continues until {ent.renews_at ? formatDate(ent.renews_at) : "the end of the paid period"}. After that you keep your profile, conversations, safety tools and one trial introduction on the free plan. No support contact needed; you can rejoin any time.
+              This stops renewal of your {ent.cancellation_target?.plan ?? ent.plan} web subscription. Already-paid access continues through its paid period. Any separately billed store subscription must be managed in that store. Your profile, conversations and safety tools remain available.
             </p>
             <label htmlFor="creason" className="mb-1 block text-sm font-semibold">
               Why (optional, helps us improve)

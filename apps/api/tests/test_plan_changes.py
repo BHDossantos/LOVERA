@@ -177,3 +177,32 @@ def test_our_own_checkout_never_touches_a_store_subscription(client):
     assert rows[store_id].status == "active"
     assert rows[store_id].cancel_at_period_end is False
     assert rows[store_id].cancelled_at is None
+
+
+def test_cancel_after_downgrade_stops_new_renewal_and_is_repeatable(client):
+    a = billing_member(client, "cancel-downgrade")
+    subscribe(a, plan="concierge")
+    subscribe(a, plan="pro")
+    ent = a.get("/subscriptions/current").json()["entitlements"]
+    assert ent["plan"] == "concierge"
+    target = ent["cancellation_target"]
+    assert target["plan"] == "pro"
+    for _ in range(2):
+        response = a.post("/subscriptions/cancel", json={"subscription_id": target["id"], "reason": "taking_a_break"})
+        assert response.status_code == 200, response.text
+        assert response.json()["entitlements"]["cancellation_target"] is None
+    assert all(s.cancel_at_period_end for s in subscriptions_of(a.id))
+
+
+def test_expired_store_receipt_does_not_block_web_checkout(client):
+    from datetime import timedelta
+    from app.core.db import session_factory
+    from app.core.timeutil import utcnow
+    from app.modules.billing import service
+    a = billing_member(client, "expired-store-checkout")
+    with session_factory()() as db:
+        service.activate_subscription(db, a.id, "pro", "app_store", str(uuid.uuid4()), period_end=utcnow()-timedelta(days=1))
+        db.commit()
+    response = checkout(a, "concierge")
+    assert response.status_code == 200, response.text
+    assert subscriptions_of(a.id)[0].status == "expired"

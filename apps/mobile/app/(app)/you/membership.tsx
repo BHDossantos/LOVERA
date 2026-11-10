@@ -75,8 +75,8 @@ export default function Membership() {
   const plans = useQuery({ queryKey: ["plans"], queryFn: () => get<PlansOut>("/plans"), enabled: !!me });
   const current = useQuery({ queryKey: ["subscription"], queryFn: () => get<Current>("/subscriptions/current"), enabled: !!me });
   const generation = useRef(0);
-  useEffect(() => { generation.current += 1; setBusy(false); return () => { generation.current += 1; }; }, [me?.id]);
   const [busy, setBusy] = useState(false);
+  useEffect(() => { generation.current += 1; setBusy(false); return () => { generation.current += 1; }; }, [me?.id]);
   const [error, setError] = useState<ApiError | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [reason, setReason] = useState("taking_a_break");
@@ -162,7 +162,7 @@ export default function Membership() {
     setBusy(true);
     setError(null);
     try {
-      await post("/subscriptions/cancel", { reason });
+      await post("/subscriptions/cancel", { reason, ...(current.data?.entitlements.cancellation_target ? { subscription_id: current.data.entitlements.cancellation_target.id } : {}) });
       await qc.invalidateQueries({ queryKey: ["subscription"] });
       // The plan a member is on decides what Today, the introductions list and the conversation
       // screen are allowed to offer, so the capability snapshot has to be refetched with it. That
@@ -182,7 +182,6 @@ export default function Membership() {
   const all = plans.data?.plans ?? [];
   const paidPlans = all.filter((p) => p.price_cents > 0);
   const mine = all.find((p) => p.id === ent?.plan);
-  const endsLabel = ent?.renews_at ? formatDate(ent.renews_at) : "the end of the paid period";
 
   return (
     <Screen>
@@ -407,7 +406,7 @@ export default function Membership() {
               Manage store subscription
             </Button>
           )}
-          {ent.paid && !ent.management_url && !ent.cancel_at_period_end && !confirming && (
+          {ent.paid && (ent.cancellation_target || (ent.cancellation_target === undefined && !ent.management_url && !ent.cancel_at_period_end)) && !confirming && (
             <Button variant="danger" onPress={() => setConfirming(true)}>
               Cancel my membership
             </Button>
@@ -417,9 +416,9 @@ export default function Membership() {
             <Card>
               <Text style={{ ...typo.heading, color: color.ink }}>Cancel your membership?</Text>
               <Text style={{ ...typo.small, color: color.inkSecondary, marginTop: 4 }}>
-                Your access continues until {endsLabel}. After that you keep your profile, your conversations, every
-                safety tool and one trial introduction on the free plan. Nobody needs to be contacted, and you can
-                rejoin whenever you like.
+                This stops renewal of your {ent.cancellation_target?.plan ?? ent.plan} web subscription. Already-paid access
+                continues through its paid period. Any separately billed store subscription must be managed in that
+                store. Your profile, conversations and safety tools remain available.
               </Text>
               <Divider />
               <Text style={{ ...typo.small, color: color.inkSecondary, fontWeight: "600", marginBottom: space.sm }}>
