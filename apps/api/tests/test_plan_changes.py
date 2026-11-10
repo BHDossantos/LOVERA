@@ -182,7 +182,14 @@ def test_our_own_checkout_never_touches_a_store_subscription(client):
 def test_cancel_after_downgrade_stops_new_renewal_and_is_repeatable(client):
     a = billing_member(client, "cancel-downgrade")
     subscribe(a, plan="concierge")
-    subscribe(a, plan="pro")
+    # A downgrade changes the renewal target, not the already-paid entitlement.
+    response = checkout(a, "pro")
+    assert response.status_code == 200, response.text
+    paid = a.post("/subscriptions/sandbox/pay", json={
+        "checkout_ref": response.json()["provider_ref"], "outcome": "paid",
+    })
+    assert paid.status_code == 200, paid.text
+    assert paid.json()["entitlements"]["plan"] == "concierge"
     ent = a.get("/subscriptions/current").json()["entitlements"]
     assert ent["plan"] == "concierge"
     target = ent["cancellation_target"]

@@ -1,3 +1,4 @@
+import { act } from "react-test-renderer";
 import * as ImagePicker from "expo-image-picker";
 import { renderScreen } from "./render";
 
@@ -137,4 +138,14 @@ test("a photo that will not fit at any size says so, and creates nothing", async
 
   expect(mockPost).not.toHaveBeenCalled();
   expect(s.texts().join(" ")).toContain("too large to upload");
+});
+
+// Zero is a valid version, not an instruction to reinitialize on every render.
+test("a version-zero profile initializes once and preserves edits on refresh", async () => {
+  mockGet.mockResolvedValue({ ...PROFILE, version: 0 });
+  const s = await renderScreen(<ProfileEditor />);
+  await s.type("Edited Nadia");
+  await act(async () => { s.client.setQueryData(["profile"], { ...PROFILE, version: 1 }); });
+  const input = s.tree.root.findAll((n) => n.props.accessibilityLabel === "Display name" && typeof n.props.onChangeText === "function")[0];
+  expect(input.props.value).toBe("Edited Nadia");
 });

@@ -70,17 +70,21 @@ function Bullets({ items, muted, glyph }: { items: string[]; muted?: boolean; gl
 
 export default function Membership() {
   const { me } = useRequireMember();
+  return <MembershipSession key={me?.id ?? "signed-out"} />;
+}
+
+function MembershipSession() {
+  const { me } = useRequireMember();
   const { refresh } = useAuth();
   const qc = useQueryClient();
   const plans = useQuery({ queryKey: ["plans"], queryFn: () => get<PlansOut>("/plans"), enabled: !!me });
   const current = useQuery({ queryKey: ["subscription"], queryFn: () => get<Current>("/subscriptions/current"), enabled: !!me });
   const generation = useRef(0);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { generation.current += 1; setBusy(false); return () => { generation.current += 1; }; }, [me?.id]);
+  useEffect(() => { generation.current += 1; return () => { generation.current += 1; }; }, [me?.id]);
   const [error, setError] = useState<ApiError | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [reason, setReason] = useState("taking_a_break");
-  const [cadence, setCadence] = useState<"monthly" | "annual">("monthly");
   const [storeNote, setStoreNote] = useState<string | null>(null);
   const [storePrices, setStorePrices] = useState<Record<string, string>>({});
 

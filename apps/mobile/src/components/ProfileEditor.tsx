@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Alert, Image, Pressable, Text, View } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as ImagePicker from "expo-image-picker";
@@ -33,8 +33,9 @@ export function ProfileEditor({ onSaved }: { onSaved?: () => void }) {
   const [error, setError] = useState<ApiError | null>(null);
   const [saved, setSaved] = useState(false);
 
-  useEffect(() => {
-    if (profile.data && !form.version) {
+  const [initialized, setInitialized] = useState(false);
+  if (profile.data && !initialized) {
+      setInitialized(true);
       setForm({
         display_name: profile.data.display_name ?? "",
         pronouns: profile.data.pronouns ?? "",
@@ -49,8 +50,7 @@ export function ProfileEditor({ onSaved }: { onSaved?: () => void }) {
             ],
         version: profile.data.version,
       });
-    }
-  }, [profile.data, form.version]);
+  }
 
   const save = async () => {
     setBusy(true);
