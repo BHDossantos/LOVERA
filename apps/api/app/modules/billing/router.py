@@ -25,6 +25,7 @@ class CheckoutIn(BaseModel):
 
 
 class CancelIn(BaseModel):
+    subscription_id: str | None = None
     reason: str | None = None
 
 
@@ -116,7 +117,7 @@ def store_purchase(data: StorePurchaseIn, principal: Principal = Depends(current
 
 @router.post("/subscriptions/cancel")
 def cancel(data: CancelIn, principal: Principal = Depends(current_principal), db: Session = Depends(get_db, scope="function")) -> dict:
-    return {"entitlements": service.cancel(db, principal.member, data.reason)}
+    return {"entitlements": service.cancel(db, principal.member, data.reason, data.subscription_id)}
 
 
 @router.post("/subscriptions/sandbox/pay")

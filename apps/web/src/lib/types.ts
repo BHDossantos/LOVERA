@@ -28,6 +28,7 @@ export type Capabilities = {
     price_cents: number;
     currency: string;
     renews_at: string | null;
+    cancellation_target?: { id: string; plan: string; renews_at: string | null } | null;
     cancel_at_period_end: boolean;
     status: string;
   };

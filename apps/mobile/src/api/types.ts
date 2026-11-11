@@ -30,6 +30,7 @@ export type Capabilities = {
     renews_at: string | null;
     management_url?: string | null;
     subscriptions?: { id: string; provider: string; plan: string; management_url: string | null; renews_at: string | null }[];
+    cancellation_target?: { id: string; plan: string; renews_at: string | null } | null;
     cancel_at_period_end: boolean;
     status: string;
   };

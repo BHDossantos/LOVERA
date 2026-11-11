@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Text, View } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, get, put } from "@/api/client";
@@ -41,8 +41,7 @@ export function AvailabilityEditor({ onSaved, cta = "Save availability" }: { onS
   // had deliberately removed, every visit, on the next save of anything else. date_styles gates and
   // scores nothing — it is only carried in the feature snapshot — so an empty list is a choice to
   // respect, not a gap to fill.
-  useEffect(() => {
-    if (q.data && !loaded) {
+  if (q.data && !loaded) {
       const first = q.data.updated_at === null;
       setWindows(
         first
@@ -55,8 +54,7 @@ export function AvailabilityEditor({ onSaved, cta = "Save availability" }: { onS
       setStyles(first ? ["coffee"] : q.data.date_styles);
       setReady(q.data.date_ready);
       setLoaded(true);
-    }
-  }, [q.data, loaded]);
+  }
 
   const save = async () => {
     setBusy(true);

@@ -51,6 +51,8 @@ def current_subscription(db: Session, member_id: str) -> Subscription | None:
             sub.status = "expired"
         else:
             eligible.append(sub)
+    # Sessions disable autoflush. Persist expirations before later queries select active rows.
+    db.flush()
     # Independently paid subscriptions coexist. A newer/lower tier or an expired
     # native receipt must never hide a still-paid higher tier from another provider.
     return max(eligible, key=lambda sub: (sub.plan == "concierge", sub.started_at, sub.id), default=None)
@@ -120,7 +122,11 @@ def entitlements_for(db: Session, member: Member) -> dict[str, Any]:
         if paid_store == "revenuecat":
             paid_store = db.scalar(select(StorePurchase.store).where(StorePurchase.subscription_id == paid_sub.id).limit(1))
         url = "https://apps.apple.com/account/subscriptions" if paid_store == "app_store" else "https://play.google.com/store/account/subscriptions" if paid_store == "play_store" else None
-        subscriptions.append({"id": paid_sub.id, "provider": paid_store or paid_sub.provider, "plan": paid_sub.plan, "management_url": url, "renews_at": iso(paid_sub.current_period_end)})
+        subscriptions.append({"id": paid_sub.id, "provider": paid_store or paid_sub.provider, "plan": paid_sub.plan, "management_url": url, "renews_at": iso(paid_sub.current_period_end), "cancel_at_period_end": paid_sub.cancel_at_period_end})
+    renewing_web = [row for row in subscriptions if row["provider"] == settings.payments_provider
+                    and row["provider"] not in STORE_PROVIDERS and not row["cancel_at_period_end"]]
+    # Separate the entitlement being enjoyed from the subscription still billing the member.
+    cancellation_target = renewing_web[0] if len(renewing_web) == 1 else None
     out.update(
         {
             "plan": plan_id,
@@ -143,6 +149,7 @@ def entitlements_for(db: Session, member: Member) -> dict[str, Any]:
             "renews_at": iso(sub.current_period_end) if sub else None,
             "management_url": management_url,
             "subscriptions": subscriptions,
+            "cancellation_target": cancellation_target,
             "cancel_at_period_end": bool(sub.cancel_at_period_end) if sub else False,
             "status": sub.status if sub else "none",
         }
@@ -445,16 +452,36 @@ def activate_subscription(db: Session, member_id: str, plan_id: str, provider: s
     return sub
 
 
-def cancel(db: Session, member: Member, reason: str | None) -> dict[str, Any]:
-    sub = current_subscription(db, member.id)
+def cancel(db: Session, member: Member, reason: str | None, subscription_id: str | None = None) -> dict[str, Any]:
+    db.execute(select(Member.id).where(Member.id == member.id).with_for_update()).scalar_one()
+    current = current_subscription(db, member.id)
+    rows = db.scalars(select(Subscription).where(
+        Subscription.member_id == member.id,
+        Subscription.status.in_(("trialing", "active", "past_due")),
+    )).all()
+    if subscription_id:
+        sub = next((row for row in rows if row.id == subscription_id), None)
+        if sub is None:
+            raise ApiError("CONFLICT", "This subscription is no longer active. Refresh membership and try again.")
+    else:
+        # Older clients send no id. Never pick an already superseded entitlement over a renewer.
+        renewing = [row for row in rows if row.provider == get_settings().payments_provider
+                    and row.provider not in STORE_PROVIDERS and not row.cancel_at_period_end]
+        if len(renewing) > 1:
+            raise ApiError("CONFLICT", "Choose the subscription you want to cancel.")
+        sub = renewing[0] if renewing else current
     if sub is None:
         raise ApiError("CONFLICT", "You do not have an active subscription.")
-    if sub.provider in ("app_store", "play_store", "revenuecat"):
+    if sub.provider in STORE_PROVIDERS:
         raise ApiError("CONFLICT", "Manage cancellation in the store where you subscribed. No cancellation has been made here.")
-    sub.cancel_at_period_end = True
-    sub.cancelled_at = utcnow()
-    sub.cancel_reason = (reason or "")[:48] or None
-    audit(db, actor_type="member", actor_id=member.id, action="billing.cancelled", resource_type="subscription", resource_id=sub.id, metadata={"reason": sub.cancel_reason})
+    if sub.provider != get_settings().payments_provider:
+        raise ApiError("CONFLICT", "Manage cancellation with the provider where you subscribed. No cancellation has been made here.")
+    if not sub.cancel_at_period_end:
+        sub.cancel_at_period_end = True
+        sub.cancelled_at = utcnow()
+        sub.cancel_reason = (reason or "")[:48] or None
+        audit(db, actor_type="member", actor_id=member.id, action="billing.cancelled", resource_type="subscription", resource_id=sub.id, metadata={"reason": sub.cancel_reason})
+    db.flush()
     return entitlements_for(db, member)
 
 

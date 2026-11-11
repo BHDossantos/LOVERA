@@ -75,13 +75,17 @@ export default function Interview() {
   const q = state?.next_question ?? null;
   const qKey = q?.key;
   const qPreference = q?.preference_key;
-  useEffect(() => {
+  const [previousQuestion, setPreviousQuestion] = useState<string | null>(null);
+  const questionIdentity = JSON.stringify([qKey, qPreference]);
+  // Reset before rendering a new question, not after showing the previous answer.
+  if (previousQuestion !== questionIdentity) {
+    setPreviousQuestion(questionIdentity);
     setChoice(null);
     setText("");
     setMode("choice");
     setPartner([]);
     if (qPreference) setTier(qKey === "children" || qKey === "relationship_structure" ? "must" : "prefer");
-  }, [qKey, qPreference]);
+  }
 
   const submit = async (skip = false) => {
     if (!state || !q) return;

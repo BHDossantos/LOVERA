@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Alert, Image, Pressable, Text, View } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as ImagePicker from "expo-image-picker";
@@ -22,7 +22,10 @@ type Profile = {
   visibility_map: Record<string, string>;
 };
 
-const LANGUAGES = ["English", "Italian", "Spanish", "French", "German", "Portuguese"];
+const LANGUAGES = [
+  ["en", "English"], ["it", "Italian"], ["es", "Spanish"], ["fr", "French"],
+  ["de", "German"], ["pt", "Portuguese"], ["ca", "Catalan"], ["other", "Other"],
+] as const;
 
 export function ProfileEditor({ onSaved }: { onSaved?: () => void }) {
   const qc = useQueryClient();
@@ -33,8 +36,9 @@ export function ProfileEditor({ onSaved }: { onSaved?: () => void }) {
   const [error, setError] = useState<ApiError | null>(null);
   const [saved, setSaved] = useState(false);
 
-  useEffect(() => {
-    if (profile.data && !form.version) {
+  const [initialized, setInitialized] = useState(false);
+  if (profile.data && !initialized) {
+      setInitialized(true);
       setForm({
         display_name: profile.data.display_name ?? "",
         pronouns: profile.data.pronouns ?? "",
@@ -49,8 +53,7 @@ export function ProfileEditor({ onSaved }: { onSaved?: () => void }) {
             ],
         version: profile.data.version,
       });
-    }
-  }, [profile.data, form.version]);
+  }
 
   const save = async () => {
     setBusy(true);
@@ -62,6 +65,8 @@ export function ProfileEditor({ onSaved }: { onSaved?: () => void }) {
         prompts: (form.prompts ?? []).filter((p) => p.answer.trim()),
       });
       qc.setQueryData(["profile"], next);
+      // Retain edits made while saving, but advance the optimistic concurrency token.
+      setForm((current) => ({ ...current, version: next.version }));
       setSaved(true);
       onSaved?.();
     } catch (err) {
@@ -242,24 +247,24 @@ export function ProfileEditor({ onSaved }: { onSaved?: () => void }) {
         </Field>
         <Field label="Languages you speak">
           <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
-            {LANGUAGES.map((l) => {
-              const on = (form.languages ?? []).includes(l);
+            {LANGUAGES.map(([code, label]) => {
+              const on = (form.languages ?? []).includes(code);
               return (
                 <Pressable
-                  key={l}
+                  key={code}
                   onPress={() =>
                     setForm({
                       ...form,
                       languages: on
-                        ? (form.languages ?? []).filter((x) => x !== l)
-                        : [...(form.languages ?? []), l],
+                        ? (form.languages ?? []).filter((x) => x !== code)
+                        : [...(form.languages ?? []), code],
                     })
                   }
                   accessibilityRole="checkbox"
                   accessibilityState={{ checked: on }}
                   style={[s.chip, on && { borderColor: color.action, backgroundColor: color.actionSoft }]}
                 >
-                  <Text style={[s.chipLabel, on && { color: color.action }]}>{l}</Text>
+                  <Text style={[s.chipLabel, on && { color: color.action }]}>{label}</Text>
                 </Pressable>
               );
             })}

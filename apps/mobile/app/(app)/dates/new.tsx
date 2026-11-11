@@ -23,22 +23,25 @@ type OverlapsOut = { items: Overlap[]; concierge: boolean; note: string };
 
 export default function DatePlanner() {
   const { me } = useRequireMember();
+  const { conversation, plan: planParam } = useLocalSearchParams<{ conversation?: string; plan?: string }>();
+  return <DatePlannerSession key={JSON.stringify([me?.id, conversation, planParam])} memberId={me?.id} conversation={conversation} planParam={planParam} />;
+}
+
+function DatePlannerSession({ memberId, conversation, planParam }: { memberId?: string; conversation?: string; planParam?: string }) {
   const router = useRouter();
   const qc = useQueryClient();
-  const { conversation, plan: planParam } = useLocalSearchParams<{ conversation?: string; plan?: string }>();
 
   const [plan, setPlan] = useState<DatePlan | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [chosen, setChosen] = useState<Overlap | null>(null);
-  const [startAt, setStartAt] = useState("");
+  const [selectedStart, setStartAt] = useState("");
   const [consent, setConsent] = useState(false);
 
   // Get-or-create the plan for this conversation — the API is idempotent per conversation —
   // or load one we were handed.
   useEffect(() => {
-    if (!me?.id) return;
+    if (!memberId) return;
     let alive = true;
-    setError(null);
     const load = planParam
       ? get<DatePlan>(`/date-plans/${planParam}`)
       : conversation
@@ -54,7 +57,7 @@ export default function DatePlanner() {
     return () => {
       alive = false;
     };
-  }, [me?.id, conversation, planParam, qc]);
+  }, [memberId, conversation, planParam, qc]);
 
   const overlaps = useQuery({
     queryKey: ["date-plan", plan?.id, "overlaps"],
@@ -71,7 +74,7 @@ export default function DatePlanner() {
     for (let t = start; t + 60 * 60_000 <= end; t += 30 * 60_000) out.push(new Date(t).toISOString());
     return out;
   }, [chosen]);
-  useEffect(() => setStartAt(slots[0] ?? ""), [slots]);
+  const startAt = slots.includes(selectedStart) ? selectedStart : slots[0] ?? "";
 
   const closed = !!plan && ["cancelled", "completed", "no_show", "disputed"].includes(plan.status);
 
@@ -120,7 +123,7 @@ export default function DatePlanner() {
                 title={`${w.weekday} ${w.date}`}
                 body={`${w.start}–${w.end} (${plan.timezone})`}
                 selected={chosen?.starts_at === w.starts_at}
-                onSelect={() => setChosen(w)}
+                onSelect={() => { setChosen(w); setStartAt(""); setConsent(false); }}
               />
             ))}
             {overlaps.data?.items.length === 0 && (

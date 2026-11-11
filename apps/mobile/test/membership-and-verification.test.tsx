@@ -260,6 +260,24 @@ describe("Membership", () => {
     expect(mockPost).toHaveBeenCalledWith("/subscriptions/cancel", { reason: "taking_a_break" });
   });
 
+  it("offers the renewing web subscription after a downgrade, even while old access is cancelled", async () => {
+    billing(entitlements({ plan: "concierge", paid: true, cancel_at_period_end: true,
+      cancellation_target: { id: "renewing-pro", plan: "pro", renews_at: "2027-01-01T10:00:00Z" } }));
+    mockPost.mockResolvedValue({});
+    const s = await renderScreen(<Membership />);
+    await s.press("Cancel my membership");
+    await s.press("Cancel at the end of the period");
+    expect(mockPost).toHaveBeenCalledWith("/subscriptions/cancel", { reason: "taking_a_break", subscription_id: "renewing-pro" });
+  });
+
+  it("does not offer web cancellation when the server says there is no web target", async () => {
+    billing(entitlements({ plan: "pro", paid: true, cancel_at_period_end: false, cancellation_target: null,
+      management_url: "https://apps.apple.com/account/subscriptions" }));
+    const s = await renderScreen(<Membership />);
+    expect(s.hasText("Cancel my membership")).toBe(false);
+    expect(s.hasText("Manage store subscription")).toBe(true);
+  });
+
   it("does not offer cancelling twice to somebody who already cancelled", async () => {
     billing(entitlements({ plan: "pro", plan_name: "Matchmaker Pro", paid: true, status: "active", cancel_at_period_end: true, renews_at: "2026-11-01T10:00:00Z" }));
     const s = await renderScreen(<Membership />);
