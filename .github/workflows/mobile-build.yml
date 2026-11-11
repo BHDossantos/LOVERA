@@ -12,12 +12,13 @@
 #   3. npx eas-cli build:configure                (generates the signing credentials)
 #   4. Create a token at expo.dev → Account settings → Access tokens, and store it as the
 #      repository secret EXPO_TOKEN.
-#   5. Set EXPO_PUBLIC_API_ORIGIN as an EAS environment variable for each profile you
+#   5. Set EXPO_PUBLIC_API_ORIGIN and EXPO_PUBLIC_EAS_PROJECT_ID as non-secret EAS
+#      environment variables for each profile you
 #      build. eas.json no longer carries `env` blocks — app.config.ts refuses a shipping
 #      build without a real https origin, which is the point of that guard.
 #
 # Shipping a fix without a store review:
-#   npx eas-cli update --branch <branch> --message "what changed"
+#   npx eas-cli update --branch <branch> --environment <environment> --message "what changed"
 # That reaches builds on the matching channel (`preview` / `production` in eas.json) whose
 # runtime version matches. The runtime version is the native project's fingerprint, so a
 # JS-only fix reaches existing binaries and anything touching native code does not — see
@@ -78,29 +79,23 @@ jobs:
       - run: npm ci
       - run: npx tsc --noEmit
 
-      # Fail here, in seconds, rather than twenty minutes into a remote build. The API
-      # origin and the EAS project id are inlined into the bundle, and a placeholder
-      # produces a binary that installs and then reaches nothing, or never receives a push.
-      #
-      # This reads the values out of eas.json rather than this runner's environment,
-      # because the runner's environment is not what the build sees: `eas build` uploads
-      # the project and runs on EAS's machines, where the profile's `env` block is what
-      # gets applied. Checking the runner would prove nothing about the build.
-      - name: Confirm this profile is configured, the way the EAS builder will see it
+      # eas.json selects an EAS environment; it intentionally has no inline env blocks.
+      # Bootstrap project resolution with its existing repository variable, then resolve
+      # the shipping config inside that same EAS environment. Do not set a shipping
+      # profile on env:exec itself: config is evaluated before it fetches the variables.
+      - name: Confirm the selected EAS environment resolves a shipping config
         run: |
           set -euo pipefail
-          eval "$(python3 - "${{ inputs.profile }}" <<'EOF'
-          import json, shlex, sys
-          profile = sys.argv[1]
-          env = json.load(open("eas.json"))["build"][profile].get("env", {})
-          for key in ("EXPO_PUBLIC_API_ORIGIN", "EXPO_PUBLIC_EAS_PROJECT_ID"):
-              print(f"export {key}={shlex.quote(env.get(key, ''))}")
-          EOF
-          )"
-          echo "eas.json ${{ inputs.profile }} → origin=${EXPO_PUBLIC_API_ORIGIN:-<unset>} project=${EXPO_PUBLIC_EAS_PROJECT_ID:-<unset>}"
-          npx expo config --type public --json > /dev/null
+          if [ -z "$EXPO_PUBLIC_EAS_PROJECT_ID" ]; then
+            echo "::error::Set the existing EAS project's ID in the EXPO_PUBLIC_EAS_PROJECT_ID repository variable."
+            exit 1
+          fi
+          environment=$(node -e 'const p = require("./eas.json").build[process.argv[1]]; if (!p?.environment) process.exit(1); process.stdout.write(p.environment)' "${{ inputs.profile }}")
+          npx --yes eas-cli@latest env:exec --environment "$environment" \
+            "EAS_BUILD_PROFILE=${{ inputs.profile }} npx expo config --type public --json > /dev/null"
         env:
-          EAS_BUILD_PROFILE: ${{ inputs.profile }}
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_PUBLIC_EAS_PROJECT_ID: ${{ vars.EXPO_PUBLIC_EAS_PROJECT_ID }}
           EXPO_NO_TELEMETRY: "1"
 
       - name: Build
@@ -111,9 +106,10 @@ jobs:
             --non-interactive \
             --wait
         env:
-          # The build's own EXPO_PUBLIC_* values come from eas.json, applied on EAS's
-          # builders; nothing set here would reach them.
+          # Public API/config values come from the profile's EAS environment.
+          # The project ID also lets the CLI resolve the project before fetching it.
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_PUBLIC_EAS_PROJECT_ID: ${{ vars.EXPO_PUBLIC_EAS_PROJECT_ID }}
           EXPO_NO_TELEMETRY: "1"
 
       # Submission is opt-in and production-only. Submitting a preview APK to a store
@@ -128,4 +124,5 @@ jobs:
             --non-interactive
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_PUBLIC_EAS_PROJECT_ID: ${{ vars.EXPO_PUBLIC_EAS_PROJECT_ID }}
           EXPO_NO_TELEMETRY: "1"
