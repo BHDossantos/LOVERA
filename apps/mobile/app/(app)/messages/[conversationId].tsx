@@ -374,7 +374,7 @@ export default function Conversation() {
                 </Pressable>
               ))}
             </View>
-          ) : null
+          ) : undefined
         }
         ListFooterComponent={
           <View>

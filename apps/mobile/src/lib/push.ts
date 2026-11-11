@@ -2,6 +2,7 @@ import { Platform } from "react-native";
 import Constants from "expo-constants";
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
+import { AndroidImportance } from "expo-notifications";
 import { api } from "@/api/client";
 
 /**
@@ -37,17 +38,17 @@ export async function ensureAndroidChannels() {
   // safety message, which Android lets them do per channel.
   await Notifications.setNotificationChannelAsync("introductions", {
     name: "Introductions",
-    importance: Notifications.AndroidImportance.DEFAULT,
+    importance: AndroidImportance.DEFAULT,
     lightColor: "#b42d55",
   });
   await Notifications.setNotificationChannelAsync("messages", {
     name: "Messages",
-    importance: Notifications.AndroidImportance.HIGH,
+    importance: AndroidImportance.HIGH,
     lightColor: "#b42d55",
   });
   await Notifications.setNotificationChannelAsync("safety", {
     name: "Safety",
-    importance: Notifications.AndroidImportance.MAX,
+    importance: AndroidImportance.MAX,
     lightColor: "#b3301c",
   });
 }
