@@ -86,7 +86,7 @@ test("renders the payload the API really sends, where counts are counts", async 
 });
 
 test("the emergency button dials a usable tel: URI, not the emergency object", async () => {
-  const openURL = jest.spyOn(Linking, "openURL").mockResolvedValue(true);
+  const openURL = jest.spyOn(Linking, "openURL").mockResolvedValue(undefined);
   const s = await renderScreen(<SafetyCentre />);
   await s.press("Call 112");
   expect(openURL).toHaveBeenCalledWith("tel:112");

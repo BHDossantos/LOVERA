@@ -339,6 +339,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   plugins: [
     "expo-router",
+    "expo-status-bar",
+    "expo-web-browser",
     // Without this, `userInterfaceStyle` above is silently ignored on Android.
     "expo-system-ui",
     [
