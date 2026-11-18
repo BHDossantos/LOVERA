@@ -30,7 +30,7 @@ def auth_start(data: schemas.AuthStartIn, db: Session = Depends(get_db, scope="f
 
 @router.post("/auth/verify", response_model=schemas.TokenOut)
 def auth_verify(data: schemas.AuthVerifyIn, request: Request, db: Session = Depends(get_db, scope="function")) -> dict:
-    member, session, access, refresh = service.verify_challenge(db, data.challenge_id, data.code, data.device_id)
+    member, session, access, refresh = service.verify_challenge(db, data.challenge_id, data.code, data.device_id, campaign_code=data.campaign_code)
     return {"access_token": access, "refresh_token": refresh, "expires_in": get_settings().access_token_ttl_seconds}
 
 

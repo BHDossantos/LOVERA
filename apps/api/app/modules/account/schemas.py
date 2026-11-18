@@ -24,6 +24,7 @@ class AuthVerifyIn(BaseModel):
     challenge_id: str
     code: str = Field(min_length=6, max_length=6)
     device_id: str | None = None
+    campaign_code: str | None = Field(default=None, max_length=64)
 
 
 class TokenOut(BaseModel):

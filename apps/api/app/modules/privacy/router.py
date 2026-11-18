@@ -8,7 +8,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.core.analytics import track
+from app.catalog.campaigns import resolve_campaign
+from app.core.analytics import anon_key, track
 from app.core.audit import audit
 from app.core.db import get_db
 from app.core.deps import Principal, current_principal
@@ -20,7 +21,7 @@ from app.models.blueprint import BlueprintSignal, BlueprintVersion, Preference
 from app.models.conversations import Conversation, Message
 from app.models.dates import DatePlan, PostDateFeedback
 from app.models.introductions import IntroDecision, Introduction
-from app.models.privacy import PrivacyRequest
+from app.models.privacy import AnalyticsEvent, PrivacyRequest
 from app.models.profile import Profile
 from app.modules.profile.service import VISIBILITY
 
@@ -41,6 +42,14 @@ def build_export(db: Session, member_id: str) -> dict[str, Any]:
     messages = [{"conversation_id": m.conversation_id, "text": m.body, "sent_at": iso(m.sent_at)} for m in db.execute(select(Message).where(Message.sender_id == member_id)).scalars()]
     feedback = [{"date_plan_id": f.date_plan_id, "attendance": f.attendance, "second_date_answer": f.second_date_answer, "submitted_at": iso(f.submitted_at)} for f in db.execute(select(PostDateFeedback).where(PostDateFeedback.member_id == member_id)).scalars()]
     availability = db.execute(select(AvailabilityVersion).where(AvailabilityVersion.member_id == member_id).order_by(AvailabilityVersion.created_at.desc())).scalars().first()
+    signup = db.execute(select(AnalyticsEvent).where(AnalyticsEvent.event == "account_created", AnalyticsEvent.anon_member_key == anon_key(member_id)).order_by(AnalyticsEvent.occurred_at, AnalyticsEvent.id).limit(1)).scalar_one_or_none()
+    campaign = resolve_campaign(signup.properties.get("campaign_code")) if signup else None
+    acquisition = {
+        "recorded_at": iso(signup.occurred_at),
+        "channel": "invite" if signup.properties.get("acquisition_channel") == "invite" else "direct",
+        "campaign_code": campaign.code if campaign else None,
+        "source": campaign.source if campaign else None,
+    } if signup else None
     return {
         "generated_at": iso(utcnow()),
         "profile": {"display_name": profile.display_name, "bio": profile.bio, "languages": profile.languages, "prompts": profile.prompts} if profile else None,
@@ -52,6 +61,7 @@ def build_export(db: Session, member_id: str) -> dict[str, Any]:
         "your_decisions": decisions,
         "your_messages": messages,
         "your_feedback": feedback,
+        "acquisition": acquisition,
         "note": "Other members' decisions, messages they wrote, reports and internal scores are not part of your export.",
     }
 

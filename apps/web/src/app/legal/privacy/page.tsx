@@ -11,7 +11,7 @@ export const metadata = { title: "Privacy Notice · Lovera" };
 export default function Privacy() {
   return (
     <>
-      <DocHeader title="Privacy Notice" version="2026-09" updated="23 September 2026" />
+      <DocHeader title="Privacy Notice" version="2026-09" updated="18 November 2026" />
 
       <P>
         This notice describes what Lovera collects, what it deliberately does not,
@@ -50,7 +50,25 @@ export default function Privacy() {
         ]}
       />
 
-      <H2>We do not track you, and we do not sell anything</H2>
+      <H2>First-party onboarding analytics</H2>
+      <P>
+        We record account creation and onboarding milestones in our own database to
+        understand where people get stuck. If you create an account through one of
+        our approved campaign links, we also record that campaign&apos;s code and source,
+        such as our Rome community campaign. The code identifies a campaign placement,
+        not the person who referred you. We do not collect free-text campaign tags,
+        referring URLs or browsing history for this report.
+      </P>
+      <P>
+        These records use a pseudonymous account key and remain linked to your account;
+        they are not anonymous. The acquisition report is restricted to administrators,
+        shows aggregate onboarding counts and withholds small groups. It does not include
+        profile answers, messages or private dating decisions. Your recorded acquisition
+        source is included in your data export, and your linked analytics records are
+        removed when account erasure completes after the deletion grace period.
+      </P>
+
+      <H2>No cross-site tracking or sale of personal data</H2>
       <P>
         We do not track you across other companies&apos; apps or websites, we do not sell
         personal data, and we do not share it with data brokers. There is no advertising

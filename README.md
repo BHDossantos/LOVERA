@@ -33,6 +33,10 @@ sandboxed by default (the one-time code is shown in the sign-in form outside pro
 `MM_ANTHROPIC_API_KEY` to use Claude for Blueprint extraction, AI Wingman drafts and translation;
 without it a deterministic provider keeps every path working.
 
+Administrators can use **Console → Acquisition** to copy approved campaign links and compare
+aggregate onboarding milestones for new signups. See [Acquisition insights](docs/ACQUISITION.md)
+for the available placements, reporting definitions and rollout checks.
+
 ## Product principles enforced in code
 
 - **Humans remain authors.** Drafts and translations are previews; the only send path is the

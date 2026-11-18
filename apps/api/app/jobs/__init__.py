@@ -83,10 +83,14 @@ def retention_sweep(db: Session) -> dict[str, int]:
 
 def erase_member(db: Session, member) -> None:
     """Dependency ordered erasure with a tombstone. Safety records under legal hold are preserved by design."""
+    from sqlalchemy import delete
+
+    from app.core.analytics import anon_key
     from app.models.availability import AvailabilityVersion
     from app.models.blueprint import BlueprintSession, BlueprintVersion, Preference
     from app.models.conversations import Message
     from app.models.notifications import Notification
+    from app.models.privacy import AnalyticsEvent
     from app.models.profile import Profile, ProfileMedia
     from app.models.account import Session as MemberSession
 
@@ -105,6 +109,9 @@ def erase_member(db: Session, member) -> None:
         db.delete(v)
     for s in db.execute(select(MemberSession).where(MemberSession.member_id == member.id)).scalars():
         s.revoked_at = utcnow()
+    # These keys are pseudonymous, not anonymous. Do not retain a deleted member's attribution
+    # or other linked analytics merely because the event row does not carry their plain UUID.
+    db.execute(delete(AnalyticsEvent).where(AnalyticsEvent.anon_member_key == anon_key(member.id)))
     member.email = f"deleted+{member.id}@tombstone.invalid"
     member.email_hash = f"deleted:{member.id}"
     member.status = "deleted"

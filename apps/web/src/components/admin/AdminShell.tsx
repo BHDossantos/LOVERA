@@ -11,6 +11,7 @@ export const STAFF_ROLES: StaffRole[] = ["concierge", "safety_reviewer", "suppor
 
 const NAV: { href: string; label: string; roles: StaffRole[] }[] = [
   { href: "/admin", label: "Overview", roles: STAFF_ROLES },
+  { href: "/admin/acquisition", label: "Acquisition", roles: ["admin"] },
   { href: "/admin/matching", label: "Matching", roles: ["concierge", "admin"] },
   { href: "/admin/verification", label: "Verification", roles: ["safety_reviewer", "admin"] },
   { href: "/admin/safety", label: "Safety cases", roles: ["safety_reviewer", "admin"] },
