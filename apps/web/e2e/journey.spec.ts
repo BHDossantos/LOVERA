@@ -79,9 +79,26 @@ test.describe.serial("member journey", () => {
     await page.getByRole("link", { name: /Start the conversation/ }).click();
     await expect(page).toHaveURL(/\/messages\//);
     conversationId = page.url().split("/messages/")[1].split(/[?#]/)[0];
+    // A failed first message must retain its original quote when retried after
+    // the composer has cleared the selected prompt.
+    await page.getByRole("button", { name: /Something outdoors with good coffee/ }).click();
+    const attempts: Record<string, unknown>[] = [];
+    await page.route(`**/api/conversations/${conversationId}/messages`, async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      attempts.push(route.request().postDataJSON());
+      if (attempts.length === 1) return route.abort("failed");
+      return route.continue();
+    });
     const composer = page.getByRole("textbox").first();
     await composer.fill("Hi Ana! The matchmaker says our Saturdays look alike.");
     await page.getByRole("button", { name: "Send message" }).click();
+    await expect(page.getByRole("button", { name: "Try again", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Try again", exact: true }).click();
+    await expect.poll(() => attempts.length).toBe(2);
+    expect(attempts[0].prompt_key).toBe("second_date");
+    expect(attempts[1]).toEqual(attempts[0]);
+    await expect(page.getByRole("button", { name: "Try again", exact: true })).toHaveCount(0);
+    await page.unroute(`**/api/conversations/${conversationId}/messages`);
     // Exactly one bubble once the pending state clears: the realtime echo must not duplicate the message.
     await expect(page.getByText("Hi Ana! The matchmaker says our Saturdays look alike.")).toHaveCount(1);
   });
