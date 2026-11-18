@@ -79,7 +79,7 @@ def check_mail_transport() -> None:
     """
     settings = get_settings()
     if settings.is_production and settings.resolved_mail_transport == "console":
-        raise RuntimeError("Console sign-in delivery is forbidden in production; configure MM_SMTP_HOST and MM_MAIL_TRANSPORT=smtp.")
+        raise RuntimeError("Console sign-in delivery is forbidden in production; configure MM_SMTP_HOST and MM_MAIL_TRANSPORT=smtp, or MM_MAIL_TRANSPORT=resend with MM_RESEND_API_KEY and MM_MAIL_FROM.")
     # The two ways a code can reach somebody. Either is enough; neither is a dead end.
     mailed = settings.resolved_mail_transport != "console"
     in_response = settings.expose_dev_otp and not settings.is_production
@@ -89,7 +89,8 @@ def check_mail_transport() -> None:
             raise RuntimeError(
                 "No mail host is configured and the sign-in code is not returned in the response "
                 f"({where}), so no member could receive one. Set MM_SMTP_HOST (plus "
-                "MM_SMTP_USERNAME, MM_SMTP_PASSWORD and MM_MAIL_FROM), or set "
+                "MM_SMTP_USERNAME, MM_SMTP_PASSWORD and MM_MAIL_FROM), or use "
+                "MM_MAIL_TRANSPORT=resend with MM_RESEND_API_KEY and MM_MAIL_FROM. For local work only, set "
                 "MM_MAIL_TRANSPORT=console to start without mail on purpose."
             )
         log.critical("MM_MAIL_TRANSPORT=console %s: sign-in codes are written to this log and delivered to nobody.", where)
