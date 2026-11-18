@@ -91,7 +91,12 @@ jobs:
             exit 1
           fi
           environment=$(node -e 'const p = require("./eas.json").build[process.argv[1]]; if (!p?.environment) process.exit(1); process.stdout.write(p.environment)' "${{ inputs.profile }}")
-          npx --yes eas-cli@latest env:exec --environment "$environment" \
+          # The environment is a positional argument, not a flag. `--environment` was a flag on
+          # older eas-cli and moved; this workflow pins `@latest`, where it dies in the parser
+          # with "Nonexistent flag: --environment" before reaching auth or the project — so the
+          # preflight could never have run. `eas.json` pins `>= 16.0.0`, which does not protect
+          # against the newer signature.
+          npx --yes eas-cli@latest env:exec "$environment" --non-interactive \
             "EAS_BUILD_PROFILE=${{ inputs.profile }} npx expo config --type public --json > /dev/null"
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
