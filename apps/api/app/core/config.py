@@ -87,9 +87,10 @@ class Settings(BaseSettings):
     payments_webhook_secret: str = "sandbox-payments-secret"
     stripe_api_key: str | None = None
 
-    # Outbound email. Any provider that speaks SMTP works; none of this is vendor-specific.
-    # transport: auto picks smtp when a host is set and console when it is not. See core/mail.py.
-    mail_transport: str = "auto"  # auto | smtp | console
+    # Outbound email. SMTP or explicit Resend HTTPS for hosts that block SMTP.
+    # auto still picks smtp when a host is set and console when it is not. See core/mail.py.
+    mail_transport: str = "auto"  # auto | smtp | resend | console
+    resend_api_key: str | None = None
     mail_product_name: str = "Lovera"
     mail_from: str = "Lovera <no-reply@localhost>"
     mail_reply_to: str | None = None

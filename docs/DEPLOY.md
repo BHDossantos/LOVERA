@@ -1,5 +1,40 @@
 # Deploying Lovera
 
+## HTTPS email on Render
+
+Render free web services block outbound SMTP ports 25, 465 and 587
+([Render limitations](https://render.com/docs/free)). Configuring an SMTP host on
+that tier does not make emailed sign-in work. Lovera also supports the
+[Resend HTTPS email API](https://resend.com/docs/api-reference/emails/send-email).
+To use an owner-authorized Resend account and verified sending domain, configure
+these **server-side** settings on the API service:
+
+```text
+MM_MAIL_TRANSPORT=resend
+MM_RESEND_API_KEY=<existing authorized sending API key>
+MM_MAIL_FROM=Lovera <login@your-verified-domain>
+MM_EXPOSE_DEV_OTP=false
+```
+
+`MM_MAIL_REPLY_TO` is optional. `auto` retains the existing SMTP/console selection;
+it does not switch providers merely because a Resend key exists. The HTTPS URL is
+fixed, TLS verification stays enabled, redirects are refused and requests time out.
+Missing keys or invalid sender addresses stop startup. Rejections, timeouts and
+invalid acceptance responses produce the existing retryable sign-in failure,
+without logging provider response bodies, keys or OTPs. No console fallback occurs.
+
+Startup validates configuration only and sends no probe email. A successful send
+response means provider acceptance, not confirmed inbox delivery. Before launch,
+use an approved test inbox to check delivery and complete sign-in with its actual
+code. Account/domain setup, DNS verification, quotas, pricing and the provider's
+privacy/processing terms need owner review; adding this adapter provisions none
+of them and authorizes no spending. Database recovery remains a separate gate.
+
+Do not set console delivery or expose development OTPs to force the public API
+to start. Keep identity, payment and privacy safeguards enabled.
+
+---
+
 Target: **Fly.io, Frankfurt (`fra`)**. Why that choice is at the bottom; it is a
 small `.toml` either way, so moving off it later is a day, not a migration.
 

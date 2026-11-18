@@ -1,13 +1,13 @@
 """Outbound email.
 
-Deliberately vendor-neutral. Every mail provider worth using for a pilot — Resend,
-Postmark, SendGrid, Mailgun, SES, Fastmail — speaks SMTP with a username and a
-password, so SMTP *is* the integration. Swapping provider is five secrets, not a
-code change, and nothing in this module needs to know which one is behind the host.
+SMTP supports conventional deployments; Resend's HTTPS API supports hosts that
+block outbound SMTP ports. Selecting Resend is explicit, never an automatic
+fallback after a failed SMTP send.
 
-Two transports exist:
+Three transports exist:
 
   smtp     — the real one. Any provider, configured by MM_SMTP_*.
+  resend   — HTTPS delivery, configured by MM_RESEND_API_KEY and MM_MAIL_FROM.
   console  — logs the message, including the one-time code, and delivers nothing.
              Correct for local work and CI, where the API also returns the code in
              the response body. Never correct in production: it means every member
@@ -27,6 +27,9 @@ from email.message import EmailMessage
 from email.utils import formataddr, parseaddr
 from functools import lru_cache
 from typing import Protocol
+
+import httpx
+from email_validator import EmailNotValidError, validate_email
 
 from app.core.config import Settings, get_settings
 
@@ -66,6 +69,59 @@ class ConsoleSender:
 
     def preflight(self) -> str:
         return "console transport; no mail will be delivered"
+
+
+class ResendSender:
+    """Fixed HTTPS endpoint, bounded requests, and no secret-bearing error bodies."""
+
+    name = "resend"
+
+    def __init__(self, settings: Settings) -> None:
+        if not settings.resend_api_key or not settings.resend_api_key.strip():
+            raise MailError("MM_RESEND_API_KEY is required for the resend transport.")
+        self.api_key = settings.resend_api_key.strip()
+        self.mail_from = settings.mail_from
+        self.reply_to = settings.mail_reply_to
+        for field, value in (("MM_MAIL_FROM", self.mail_from), ("MM_MAIL_REPLY_TO", self.reply_to)):
+            if value is None:
+                continue
+            try:
+                if "\n" in value or "\r" in value:
+                    raise ValueError("header newline")
+                validate_email(parseaddr(value)[1], check_deliverability=False)
+            except (EmailNotValidError, ValueError):
+                raise MailError(f"{field} must be a valid email address for HTTPS mail delivery.") from None
+
+    def send(self, message: Message) -> None:
+        payload = {"from": self.mail_from, "to": [message.to], "subject": message.subject,
+                   "text": message.text, "headers": {"Auto-Submitted": "auto-generated"}}
+        if message.html:
+            payload["html"] = message.html
+        if self.reply_to:
+            payload["reply_to"] = self.reply_to
+        try:
+            response = httpx.post(
+                "https://api.resend.com/emails",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                json=payload, timeout=10.0, follow_redirects=False,
+            )
+        except httpx.HTTPError:
+            # Provider exceptions/bodies may contain the recipient, OTP or credentials.
+            raise MailError("HTTPS mail provider could not be reached.") from None
+        if not response.is_success:
+            raise MailError(f"HTTPS mail provider rejected the message (HTTP {response.status_code}).")
+        try:
+            result = response.json()
+        except ValueError:
+            result = None
+        if not isinstance(result, dict) or not isinstance(result.get("id"), str) or not result["id"].strip():
+            raise MailError("HTTPS mail provider returned no message acceptance identifier.")
+        # A code also appears in the subject; neither subject nor body belongs in logs.
+        log.info("message accepted by HTTPS mail provider")
+
+    def preflight(self) -> str:
+        # Sending a probe at startup would email somebody and can consume paid quota.
+        return "resend HTTPS transport configured; delivery has not been verified"
 
 
 class SmtpSender:
@@ -149,9 +205,11 @@ def build_sender(settings: Settings) -> Sender:
     transport = settings.resolved_mail_transport
     if transport == "smtp":
         return SmtpSender(settings)
+    if transport == "resend":
+        return ResendSender(settings)
     if transport == "console":
         return ConsoleSender()
-    raise MailError(f"MM_MAIL_TRANSPORT={transport!r} is not a transport; use auto, smtp or console.")
+    raise MailError(f"MM_MAIL_TRANSPORT={transport!r} is not a transport; use auto, smtp, resend or console.")
 
 
 @lru_cache
