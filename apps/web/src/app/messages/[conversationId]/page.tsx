@@ -126,11 +126,7 @@ function ConversationInner({ id }: { id: string }) {
   const send = useCallback(
     async (p: SendPayload) => {
       setSendError(null);
-      // The server validates the key against what they actually wrote and stores the answer with
-      // the message, so the quote can neither be forged nor change when they edit the prompt.
-      if (replyingTo) p = { ...p, prompt_key: replyingTo.key };
-      setReplyingTo(null);
-      setPending((prev) => [...prev.filter((x) => x.client_message_id !== p.client_message_id), { client_message_id: p.client_message_id, text: p.text, state: "sending", translation_id: p.translation_id, source_lang: p.source_lang }]);
+      setPending((prev) => [...prev.filter((x) => x.client_message_id !== p.client_message_id), { ...p, state: "sending" }]);
       try {
         const msg = await post<Message>(`/conversations/${id}/messages`, p);
         qc.setQueryData<History>(["messages", id], (old) => (old ? { ...old, items: mergeMessages(old.items, [msg]) } : { items: [msg], next_cursor: null, has_more: false }));
@@ -211,13 +207,19 @@ function ConversationInner({ id }: { id: string }) {
             <MessageBubble key={m.id} message={m} />
           ))}
           {pending.map((p) => (
-            <PendingBubble key={p.client_message_id} pending={p} onRetry={() => send({ client_message_id: p.client_message_id, text: p.text, translation_id: p.translation_id, source_lang: p.source_lang })} onDiscard={() => setPending((prev) => prev.filter((x) => x.client_message_id !== p.client_message_id))} />
+            <PendingBubble key={p.client_message_id} pending={p} onRetry={() => send({ client_message_id: p.client_message_id, text: p.text, translation_id: p.translation_id, source_lang: p.source_lang, draft_id: p.draft_id, prompt_key: p.prompt_key })} onDiscard={() => setPending((prev) => prev.filter((x) => x.client_message_id !== p.client_message_id))} />
           ))}
         </ul>
         <div ref={endRef} />
       </div>
 
-      <Composer disabled={ended} disabledReason={onHold ? "Messaging is paused during the safety review." : "This conversation has ended."} prefill={prefill} onSend={send} />
+      <Composer disabled={ended} disabledReason={onHold ? "Messaging is paused during the safety review." : "This conversation has ended."} prefill={prefill} onSend={(payload) => {
+        // Capture the selected prompt only for a new message. A retry must keep its
+        // original quote and draft provenance, even if another prompt is selected.
+        const message = replyingTo ? { ...payload, prompt_key: replyingTo.key } : payload;
+        setReplyingTo(null);
+        return send(message);
+      }} />
     </div>
   );
 }

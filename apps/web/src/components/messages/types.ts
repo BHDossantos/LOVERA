@@ -40,7 +40,7 @@ export type SendPayload = { client_message_id: string; text: string; translation
 export type Opener = { key: string; label: string; answer: string };
 
 /** A message the member composed that has not (yet) been confirmed by the server. */
-export type PendingMessage = { client_message_id: string; text: string; state: "sending" | "failed"; error?: string; translation_id?: string; source_lang?: string };
+export type PendingMessage = SendPayload & { state: "sending" | "failed"; error?: string };
 
 export type RealtimeEvent =
   | { type: "conversation.message.created"; conversation_id: string; message: Message; sequence: number; occurred_at?: string }
