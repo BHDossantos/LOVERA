@@ -1,5 +1,6 @@
 "use client";
 
+import { invalidAvailabilityWindows } from "@/lib/availability";
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, get, put } from "@/lib/api";
@@ -36,7 +37,9 @@ export function AvailabilityEditor({ onSaved, cta = "Save availability" }: { onS
     }
   }, [q.data, loaded]);
 
+  const invalid = invalidAvailabilityWindows(windows);
   const save = async () => {
+    if (invalid.length || busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -71,6 +74,7 @@ export function AvailabilityEditor({ onSaved, cta = "Save availability" }: { onS
       <Card className="mb-4">
         <h2 className="mb-1 font-bold">Windows when you could meet</h2>
         <p className="mb-3 text-sm text-ink-secondary">{q.data.policy}</p>
+        <p className="mb-3 text-sm text-ink-secondary">Time zone: {q.data.timezone || "Not set in your profile"}</p>
         <ul className="space-y-2">
           {windows.map((w, i) => (
             <li key={i} className="grid grid-cols-[1fr_1fr_1fr_auto] items-end gap-2">
@@ -91,7 +95,7 @@ export function AvailabilityEditor({ onSaved, cta = "Save availability" }: { onS
                 </Select>
               </Field>
               <Field label="To" htmlFor={`e${i}`}>
-                <Select id={`e${i}`} value={w.end} onChange={(e) => setWindows(windows.map((x, j) => (j === i ? { ...x, end: e.target.value } : x)))}>
+                <Select id={`e${i}`} aria-invalid={invalid.includes(i)} aria-describedby={invalid.includes(i) ? `window-error-${i}` : undefined} value={w.end} onChange={(e) => setWindows(windows.map((x, j) => (j === i ? { ...x, end: e.target.value } : x)))}>
                   {HOURS.map((h) => (
                     <option key={h}>{h}</option>
                   ))}
@@ -100,6 +104,7 @@ export function AvailabilityEditor({ onSaved, cta = "Save availability" }: { onS
               <Button type="button" variant="ghost" size="sm" className="mb-4" aria-label={`Remove window ${i + 1}`} onClick={() => setWindows(windows.filter((_, j) => j !== i))}>
                 ✕
               </Button>
+              {invalid.includes(i) && <p id={`window-error-${i}`} role="alert" className="col-span-4 text-sm text-red-700">Choose an end time after the start time on the same day.</p>}
             </li>
           ))}
         </ul>
@@ -127,7 +132,7 @@ export function AvailabilityEditor({ onSaved, cta = "Save availability" }: { onS
           two disagreeing is what let an empty list exist at all: saved on the web, then silently
           re-seeded with "coffee" on the next read. Nothing is pre-selected on the member's behalf
           now, so an empty stored list shows as empty and asks them to choose. */}
-      <Button fullWidth loading={busy} disabled={windows.length === 0 || styles.length === 0} onClick={save}>
+      <Button fullWidth loading={busy} disabled={!loaded || busy || windows.length === 0 || styles.length === 0 || invalid.length > 0} onClick={save}>
         {cta}
       </Button>
     </div>
