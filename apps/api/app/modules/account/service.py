@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.catalog.campaigns import resolve_campaign
 from app.core.analytics import track
 from app.core.audit import audit
 from app.core.config import get_settings
@@ -88,7 +89,7 @@ def deliver_login_code(email: str, code: str, locale: str = "en", *, required: b
     return settings.resolved_mail_transport != "console"
 
 
-def verify_challenge(db: Session, challenge_id: str, code: str, device_id: str | None, invite_code: str | None = None, locale: str = "en") -> tuple[Member, MemberSession, str, str]:
+def verify_challenge(db: Session, challenge_id: str, code: str, device_id: str | None, invite_code: str | None = None, locale: str = "en", campaign_code: str | None = None) -> tuple[Member, MemberSession, str, str]:
     challenge = db.get(AuthChallenge, challenge_id)
     if challenge is None or challenge.consumed_at is not None or challenge.expires_at <= utcnow():
         raise ApiError("AUTH_REQUIRED", "That code has expired. Request a new one.")
@@ -119,7 +120,9 @@ def verify_challenge(db: Session, challenge_id: str, code: str, device_id: str |
         db.flush()
         db.add(Profile(member_id=member.id))
         created = True
-        track(db, "account_created", member.id, locale=member.locale, market=member.market_id, acquisition_channel="invite" if invite_code else "direct")
+        campaign = resolve_campaign(campaign_code)
+        attribution = {"campaign_code": campaign.code, "campaign_source": campaign.source} if campaign else {}
+        track(db, "account_created", member.id, locale=member.locale, market=member.market_id, acquisition_channel="invite" if invite_code else "direct", **attribution)
     if member.status == "deleted":
         raise ApiError("AUTH_REQUIRED", "This account was deleted.")
     session, refresh = create_session(db, member, device_id)

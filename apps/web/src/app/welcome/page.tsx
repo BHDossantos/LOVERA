@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ApiError, post } from "@/lib/api";
+import { campaignCodeFromSearch } from "@/lib/acquisition";
 import { nextOnboardingPath, useAuth } from "@/lib/auth";
 import { Button, Card, ErrorState, Field, Hero, TextInput } from "@/components/ui";
 
@@ -41,7 +42,7 @@ export default function Welcome() {
     setBusy(true);
     setError(null);
     try {
-      const m = await signIn(challenge.challenge_id, code);
+      const m = await signIn(challenge.challenge_id, code, campaignCodeFromSearch(window.location.search));
       if (m) router.replace(nextOnboardingPath(m));
     } catch (err) {
       setError(err as ApiError);

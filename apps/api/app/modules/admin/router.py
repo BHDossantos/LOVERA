@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
@@ -24,6 +24,7 @@ from app.models.privacy import AnalyticsEvent, AuditEvent
 from app.models.profile import Profile
 from app.models.safety import Appeal, CaseNote, SafetyAction, SafetyEvidence, SafetyReport
 from app.models.verification import Verification
+from app.modules.admin import acquisition
 from app.modules.matching import service as matching
 from app.modules.notifications.service import notify
 
@@ -560,6 +561,14 @@ def decide_appeal(appeal_id: str, data: AppealDecisionIn, principal: Principal =
 
 
 # ---- Support and audit ----------------------------------------------------
+@router.get("/acquisition")
+def acquisition_report(response: Response, principal: Principal = Depends(require_roles("admin")), db: Session = Depends(get_db, scope="function"), days: int = Query(default=30)) -> dict:
+    result = acquisition.report(db, days)
+    response.headers["Cache-Control"] = "private, no-store"
+    audit(db, actor_type="staff", actor_id=principal.id, action="admin.acquisition_viewed", resource_type="analytics", purpose="acquisition_review", request_id=principal.request_id, metadata={"days": days})
+    return result
+
+
 @router.get("/members")
 def members(principal: Principal = Depends(require_roles("support", "concierge", "safety_reviewer", "admin")), db: Session = Depends(get_db, scope="function"), q: str | None = None) -> dict:
     query = select(Member).order_by(Member.created_at.desc()).limit(50)

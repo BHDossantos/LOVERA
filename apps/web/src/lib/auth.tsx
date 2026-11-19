@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { ApiError, clearSession, deviceId, get, hasStoredSession, onAuthChange, post, refreshSession, setTokens } from "./api";
+import { clearCampaignFromWelcomeUrl, validCampaignCode } from "./acquisition";
 import type { Me } from "./types";
 
 type AuthState = {
@@ -12,7 +13,7 @@ type AuthState = {
   error: ApiError | null;
   refresh: () => Promise<Me | null>;
   signOut: () => Promise<void>;
-  signIn: (challengeId: string, code: string) => Promise<Me | null>;
+  signIn: (challengeId: string, code: string, campaignCode?: string) => Promise<Me | null>;
 };
 
 const Ctx = createContext<AuthState | null>(null);
@@ -56,8 +57,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refresh]);
 
   const signIn = useCallback(
-    async (challengeId: string, code: string) => {
-      const data = await post<{ access_token: string; refresh_token: string }>("/auth/verify", { challenge_id: challengeId, code, device_id: deviceId() });
+    async (challengeId: string, code: string, campaignCode?: string) => {
+      const campaign = validCampaignCode(campaignCode);
+      const data = await post<{ access_token: string; refresh_token: string }>("/auth/verify", {
+        challenge_id: challengeId,
+        code,
+        device_id: deviceId(),
+        ...(campaign ? { campaign_code: campaign } : {}),
+      });
+      clearCampaignFromWelcomeUrl();
       setTokens(data.access_token, data.refresh_token);
       // And on the way in, for the same reason from the other side: a session can end without
       // signOut running, so whatever is cached at this point may belong to somebody else.

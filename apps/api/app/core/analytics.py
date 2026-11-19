@@ -10,7 +10,7 @@ from app.core.config import get_settings
 from app.models.privacy import AnalyticsEvent
 
 ALLOWED: dict[str, set[str]] = {
-    "account_created": {"locale", "market", "acquisition_channel"},
+    "account_created": {"locale", "market", "acquisition_channel", "campaign_code", "campaign_source"},
     "verification_started": {"vendor_type", "market"},
     "verification_completed": {"status", "duration_bucket"},
     "blueprint_answered": {"question_id", "input_mode", "latency_bucket"},
@@ -58,6 +58,12 @@ def track(db: Session, event: str, member_id: str | None = None, **properties: A
     illegal = set(properties) - allowed
     if illegal:
         raise AnalyticsPropertyError(f"properties not allowed for {event}: {sorted(illegal)}")
+    if event == "account_created" and {"campaign_code", "campaign_source"} & properties.keys():
+        from app.catalog.campaigns import resolve_campaign
+
+        campaign = resolve_campaign(properties.get("campaign_code"))
+        if campaign is None or properties.get("campaign_source") != campaign.source:
+            raise AnalyticsPropertyError("campaign attribution must come from the reviewed catalog")
     db.add(AnalyticsEvent(event=event, anon_member_key=anon_key(member_id), properties=properties))
 
 

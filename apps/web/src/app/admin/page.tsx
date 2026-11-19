@@ -22,6 +22,7 @@ type Marketplace = {
 };
 
 const WORKSPACES = [
+  { href: "/admin/acquisition", label: "Acquisition insights", body: "Approved campaign links and aggregate signup progress.", roles: ["admin"] as const },
   { href: "/admin/matching", label: "Concierge matching", body: "Runs, proposed pairs, approve / reject, publish.", roles: ["concierge", "admin"] as const },
   { href: "/admin/verification", label: "Verification review", body: "Failed or escalated checks: approve, recheck, reject.", roles: ["safety_reviewer", "admin"] as const },
   { href: "/admin/safety", label: "Safety cases", body: "Severity-ordered queue, evidence, protective actions.", roles: ["safety_reviewer", "admin"] as const },
