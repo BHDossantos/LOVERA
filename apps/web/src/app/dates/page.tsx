@@ -15,13 +15,14 @@ export default function DatesPage() {
   const items = q.data?.items ?? [];
   const now = Date.now();
   const awaiting = items.filter((p) => (p.status === "proposed" || p.status === "countered") && p.awaiting_your_confirmation);
-  const pending = items.filter((p) => (p.status === "proposed" || p.status === "countered" || p.status === "draft") && !p.awaiting_your_confirmation);
+  const drafts = items.filter((p) => p.status === "draft");
+  const pending = items.filter((p) => (p.status === "proposed" || p.status === "countered") && !p.awaiting_your_confirmation);
   const upcoming = items.filter((p) => p.status === "confirmed" && (!p.starts_at || new Date(p.starts_at).getTime() > now));
-  const past = items.filter((p) => !awaiting.includes(p) && !pending.includes(p) && !upcoming.includes(p));
+  const past = items.filter((p) => !awaiting.includes(p) && !drafts.includes(p) && !pending.includes(p) && !upcoming.includes(p));
 
   return (
     <AppShell>
-      <PageTitle eyebrow="Dates" title="Plans, check-ins and feedback" lede="Dates start from a conversation you both chose. Everything here stays between the two of you and, if you want, a trusted contact." />
+      <PageTitle eyebrow="Dates" title="Plans, check-ins and feedback" lede="Dates start from a conversation you both chose. Your post-date answers stay private; only mutual interest in another date is shared." />
       {q.isLoading && <Skeleton lines={5} label="Loading your dates" />}
       {q.error && <ErrorState error={q.error as ApiError} retry={() => q.refetch()} />}
       {q.data && items.length === 0 && (
@@ -29,6 +30,7 @@ export default function DatesPage() {
       )}
       <Section title="Needs your answer" items={awaiting} />
       <Section title="Upcoming" items={upcoming} />
+      <Section title="Still drafting" items={drafts} />
       <Section title="Waiting on the other person" items={pending} />
       <Section title="Past" items={past} />
       {items.length > 0 && (
