@@ -10,6 +10,7 @@ const DOCS = [
   { href: "/legal/terms", label: "Terms" },
   { href: "/legal/privacy", label: "Privacy" },
   { href: "/legal/community", label: "Community" },
+  { href: "/legal/delete-account", label: "Delete account" },
 ];
 
 /**
@@ -25,7 +26,7 @@ export default function LegalLayout({ children }: { children: React.ReactNode })
           <Link href="/welcome" className="font-bold text-ink">
             Lovera
           </Link>
-          <nav className="flex gap-4 text-sm">
+          <nav className="flex flex-wrap gap-4 text-sm">
             {DOCS.map((d) => (
               <Link key={d.href} href={d.href} className="text-action hover:underline">
                 {d.label}
