@@ -15,7 +15,7 @@ export default function DeleteAccountPage() {
       <H2>Request deletion</H2>
       <UL items={[
         <> <Link href="/welcome" className="text-action underline">Sign in to Lovera</Link> with your account email.</>,
-        <>Open <strong>You → Your data → Delete my account</strong> and confirm to start the deletion grace period.</>,
+        <>Open <strong>You → Privacy &amp; account → Delete my account</strong> and confirm to start the deletion grace period.</>,
       ]} />
       {privacyEmail && (
         <P>
