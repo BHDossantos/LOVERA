@@ -1,36 +1,37 @@
-# Ship Lovera: an update when nothing native changed, a build when something did.
-#
-# This runs on EAS, not on GitHub Actions. That is partly because the build already runs there and
-# orchestrating it from somewhere else only adds a hop — and partly because this repository's
-# Actions allowance is a shared monthly quota that it has already exhausted once, while EAS build
-# minutes are a separate budget.
-#
-# The shape is Expo's own deploy template, and the interesting part is `fingerprint`. A fingerprint
-# is a hash of everything that ends up in the native project: the native dependencies, the config
-# plugins, app.config.ts. If it has not changed since a build we already have, that binary can run
-# this JavaScript, so the change ships as an over-the-air update — live in seconds, no review
-# queue. If it has changed, no existing binary can run it and a real build is the only honest
-# answer.
-#
-# That is also exactly the rule `runtimeVersion: { policy: "fingerprint" }` in app.config.ts
-# enforces on the client, so the two cannot disagree about which binaries an update is for. Getting
-# this wrong in the other direction — shipping an update to a binary whose native layer does not
-# match — is a crash on launch that the member cannot get out of, which is why neither side is
-# allowed to guess.
-#
-# Submission goes to TestFlight and the Play internal track (see `submit.production` in eas.json).
-# Nothing here releases to the public: that stays a decision somebody makes in App Store Connect
-# and the Play Console.
-
-name: Deploy Lovera
+# Build preview binaries by default. Only an explicit production-release run may
+# publish an OTA update or submit to TestFlight / Play internal. Production OTA
+# still uses the native fingerprint to avoid publishing incompatible JavaScript.
+name: Build or release Lovera
 
 on:
-  push:
-    branches: ['main']
+  workflow_dispatch:
+    inputs:
+      action:
+        type: choice
+        options: [preview-build, production-release]
+        default: preview-build
+        description: Build previews, or explicitly publish production updates / submit new binaries
 
 jobs:
+  preview_android:
+    name: Build Android preview (no submission)
+    if: ${{ inputs.action == 'preview-build' }}
+    type: build
+    params:
+      platform: android
+      profile: preview
+
+  preview_ios:
+    name: Build iOS preview (no submission)
+    if: ${{ inputs.action == 'preview-build' }}
+    type: build
+    params:
+      platform: ios
+      profile: preview
+
   fingerprint:
     name: Fingerprint
+    if: ${{ inputs.action == 'production-release' }}
     type: fingerprint
 
   # Has this exact native layer already been built? If so we reuse it and send an update instead.
@@ -56,7 +57,7 @@ jobs:
   build_android:
     name: Build Android
     needs: [get_android_build]
-    if: ${{ !needs.get_android_build.outputs.build_id }}
+    if: ${{ inputs.action == 'production-release' && !needs.get_android_build.outputs.build_id }}
     type: build
     params:
       platform: android
@@ -65,7 +66,7 @@ jobs:
   build_ios:
     name: Build iOS
     needs: [get_ios_build]
-    if: ${{ !needs.get_ios_build.outputs.build_id }}
+    if: ${{ inputs.action == 'production-release' && !needs.get_ios_build.outputs.build_id }}
     type: build
     params:
       platform: ios
@@ -74,6 +75,7 @@ jobs:
   submit_android_build:
     name: Submit Android build
     needs: [build_android]
+    if: ${{ inputs.action == 'production-release' }}
     type: submit
     params:
       build_id: ${{ needs.build_android.outputs.build_id }}
@@ -81,6 +83,7 @@ jobs:
   submit_ios_build:
     name: Submit iOS build
     needs: [build_ios]
+    if: ${{ inputs.action == 'production-release' }}
     type: submit
     params:
       build_id: ${{ needs.build_ios.outputs.build_id }}
@@ -89,7 +92,7 @@ jobs:
   publish_android_update:
     name: Publish Android update
     needs: [get_android_build]
-    if: ${{ needs.get_android_build.outputs.build_id }}
+    if: ${{ inputs.action == 'production-release' && needs.get_android_build.outputs.build_id }}
     type: update
     params:
       branch: production
@@ -98,7 +101,7 @@ jobs:
   publish_ios_update:
     name: Publish iOS update
     needs: [get_ios_build]
-    if: ${{ needs.get_ios_build.outputs.build_id }}
+    if: ${{ inputs.action == 'production-release' && needs.get_ios_build.outputs.build_id }}
     type: update
     params:
       branch: production
