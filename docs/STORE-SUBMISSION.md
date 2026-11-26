@@ -34,6 +34,11 @@ policy for social and dating apps asks for the same set.
 
 ## 2. Before you can build
 
+For Google Play Data safety, use the public `/legal/delete-account` URL on the production
+web domain as the account deletion link. Before submitting, open it while signed out and
+verify both the web sign-in route and the monitored privacy inbox request path. Do not
+enter the link into Play Console until the route is deployed and the inbox is configured.
+
 Most of this is done. What exists, so nobody redoes it:
 
 | Thing | Value | State |
