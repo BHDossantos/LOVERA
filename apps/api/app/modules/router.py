@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.modules.account.router import router as account_router
 from app.modules.admin.router import router as admin_router
+from app.modules.admin.business_agent import router as business_agent_router
 from app.modules.ai.router import router as ai_router
 from app.modules.availability.router import router as availability_router
 from app.modules.billing.router import router as billing_router
@@ -35,5 +36,6 @@ for r in (
     privacy_router,
     today_router,
     admin_router,
+    business_agent_router,
 ):
     api_router.include_router(r)
