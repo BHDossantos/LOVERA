@@ -226,6 +226,8 @@ jobs:
           python -m app.seed
         env:
           MM_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/matchmaker
+          MM_EXPOSE_DEV_OTP: "true"
+          MM_STAFF_BOOTSTRAP_EMAILS: '["concierge@example.test", "safety@example.test", "admin@example.test"]'
       - run: cd apps/web && npx playwright test
         env:
           E2E_PSQL_ARGS: -h localhost -p 5432 -U postgres -d matchmaker
@@ -265,6 +267,7 @@ jobs:
         run: |
           docker run -d --name api --network host \
             -e MM_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/matchmaker \
+            -e MM_EXPOSE_DEV_OTP=true \
             -e MM_SECRET_KEY=ci-only-secret-0123456789abcdef matchmaker-api
           for i in $(seq 1 30); do curl -sf http://127.0.0.1:8000/healthz && break; sleep 2; done
           curl -sf http://127.0.0.1:8000/healthz

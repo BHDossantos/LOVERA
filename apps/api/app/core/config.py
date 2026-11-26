@@ -107,9 +107,12 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-opus-5"
     ai_prompt_version: str = "assistant-2026-09"
 
-    # Dev conveniences
-    expose_dev_otp: bool = True  # returns OTP in the auth response outside production
-    staff_bootstrap_emails: list[str] = ["concierge@example.test", "safety@example.test", "admin@example.test"]
+    # Dev conveniences. Both are off unless a deployment turns them on, because a deploy that
+    # forgets MM_ENV runs as "local": with these on by default, that deploy hands every sign-in
+    # code to whoever asks and makes admin@example.test an admin, which is full takeover.
+    # Local work turns them on in apps/api/.env, infra/docker-compose.yml and the test setup.
+    expose_dev_otp: bool = False  # returns OTP in the auth response outside production
+    staff_bootstrap_emails: list[str] = []
 
     @property
     def is_production(self) -> bool:
