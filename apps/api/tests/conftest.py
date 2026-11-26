@@ -9,6 +9,10 @@ from fastapi.testclient import TestClient
 
 os.environ.setdefault("MM_DATABASE_URL", "postgresql+psycopg://postgres@/matchmaker_test?host=/tmp&port=5433")
 os.environ.setdefault("MM_ENV", "test")
+# Both conveniences are off by default (see app/core/config.py); the suite signs in with the
+# code from the response and uses the bootstrap staff accounts, so it turns them on here.
+os.environ.setdefault("MM_EXPOSE_DEV_OTP", "true")
+os.environ.setdefault("MM_STAFF_BOOTSTRAP_EMAILS", '["concierge@example.test", "safety@example.test", "admin@example.test"]')
 
 from app.core.config import get_settings  # noqa: E402
 from app.core.db import get_engine, reset_engine  # noqa: E402

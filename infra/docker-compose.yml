@@ -28,6 +28,9 @@ services:
       MM_SECRET_KEY: ${MM_SECRET_KEY:-dev-only-secret-please-change-0123456789}
       MM_CORS_ORIGINS: '["http://localhost:3000"]'
       MM_ANTHROPIC_API_KEY: ${MM_ANTHROPIC_API_KEY:-}
+      # Local only: sign-in code in the response and the example.test staff accounts.
+      MM_EXPOSE_DEV_OTP: "true"
+      MM_STAFF_BOOTSTRAP_EMAILS: '["concierge@example.test", "safety@example.test", "admin@example.test"]'
     ports: ["8000:8000"]
     depends_on:
       db:
