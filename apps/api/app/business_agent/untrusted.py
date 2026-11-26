@@ -60,6 +60,8 @@ def sanitize_for_model(text: str) -> str:
         out = re.sub(r"<[^>]+>", " ", out)
         if out == prev:
             break
+    # A "<" left over (from an unclosed tag) can't start markup once escaped.
+    out = out.replace("<", "&lt;")
     out = re.sub("[\u200B-\u200F\u2060\uFEFF]", "", out)
     out = re.sub(r"\s+\n", "\n", out)
     return out.strip()
