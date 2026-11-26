@@ -50,13 +50,35 @@ def detect_injection(text: str) -> List[str]:
 
 def sanitize_for_model(text: str) -> str:
     """Remove markup that could hide instructions; keep visible text as evidence."""
-    out = re.sub(r"<script\b[^>]*>[\s\S]*?</script[^>]*>", "", text, flags=re.I)
-    out = re.sub(r"<style\b[^>]*>[\s\S]*?</style[^>]*>", "", out, flags=re.I)
-    out = re.sub(r"<[^>]+>", " ", out)
-    # Escape any "<" left over, so text that removing a tag joined back
-    # together (for example "<scr<b></b>ipt>") or an unclosed tag can't start markup.
-    out = out.replace("<", "&lt;")
-    out = re.sub("[\u200B-\u200F\u2060\uFEFF]", "", out)
+    # Walk the text instead of chaining regex replacements: script and style
+    # blocks are dropped, other tags become a space, and any "<" left over
+    # (an unclosed tag, or one that removing a tag joined back together) is
+    # escaped so it can't start markup.
+    parts: list[str] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        lt = text.find("<", i)
+        if lt == -1:
+            parts.append(text[i:])
+            break
+        parts.append(text[i:lt])
+        gt = text.find(">", lt + 1)
+        if gt == -1 or gt == lt + 1:
+            # "<" with no tag after it stays as text and is escaped below.
+            parts.append("<")
+            i = lt + 1
+            continue
+        block = re.match(r"(script|style)\b", text[lt + 1 : gt], flags=re.I | re.A)
+        if block:
+            end = re.compile(r"</" + block.group(1) + r"[^>]*>", flags=re.I | re.A).search(text, gt + 1)
+            if end:
+                i = end.end()
+                continue
+        parts.append(" ")
+        i = gt + 1
+    out = "".join(parts).replace("<", "&lt;")
+    out = re.sub("[​-‏⁠﻿]", "", out)
     out = re.sub(r"\s+\n", "\n", out)
     return out.strip()
 
