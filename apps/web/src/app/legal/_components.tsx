@@ -32,9 +32,9 @@ export function UL({ items }: { items: React.ReactNode[] }) {
 /**
  * One operator-specific fact, from `_facts.ts`.
  *
- * Supplied, it renders as ordinary prose. Unsupplied, it renders as a highlighted gap *with what
- * is missing spelled out*, because a legal document with a blank in it should look wrong to
- * everyone — a member, a reviewer and whoever is about to deploy it.
+ * Supplied, it renders as ordinary prose. Unsupplied, it renders as a highlighted gap (in
+ * development *with what is missing spelled out*, in production as a neutral "to be confirmed"),
+ * because a legal document with a blank in it should look wrong to everyone — a member, a reviewer and whoever is about to deploy it.
  *
  * This replaced 21 inline `<TODO>` markers. The entity name and the registered address each
  * appeared twice, in the terms and the privacy notice, so filling them in was a search-and-replace
@@ -45,9 +45,15 @@ export function UL({ items }: { items: React.ReactNode[] }) {
 export function Fact({ name }: { name: FactName }) {
   const spec = FACTS[name];
   if (spec?.value) return <>{spec.value}</>;
+  // In production the gap stays highlighted, but members see neutral wording instead of the
+  // internal note meant for whoever fills in `_facts.ts`.
+  const label =
+    process.env.NODE_ENV === "production"
+      ? "to be confirmed before launch"
+      : `not set: ${spec?.describe ?? name}`;
   return (
     <mark className="rounded bg-caution-soft px-1 font-semibold text-caution">
-      [not set: {spec?.describe ?? name}]
+      [{label}]
     </mark>
   );
 }
