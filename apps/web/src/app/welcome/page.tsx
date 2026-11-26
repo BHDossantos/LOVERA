@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ApiError, post } from "@/lib/api";
 import { campaignCodeFromSearch } from "@/lib/acquisition";
@@ -109,6 +110,12 @@ export default function Welcome() {
           )}
         </Card>
         <p className="mt-8 text-xs leading-relaxed text-ink-tertiary">We never claim to predict chemistry. We screen for feasibility, explain the evidence, and learn from real dates. Safety tools are free for everyone.</p>
+        <p className="mt-3 text-xs leading-relaxed text-ink-tertiary">
+          By continuing you agree to our{" "}
+          <Link href="/legal/terms" className="underline">Terms</Link> and{" "}
+          <Link href="/legal/community" className="underline">Community Agreement</Link>. See how we handle your data in our{" "}
+          <Link href="/legal/privacy" className="underline">Privacy notice</Link>.
+        </p>
       </main>
     </div>
   );
